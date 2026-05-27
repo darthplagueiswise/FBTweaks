@@ -6,6 +6,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FBTweaks
 
+# ── Source discovery (mirrors WATweaks / RyukGram-Fork pattern) ───────────────
 FBTWEAKS_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 
 $(TWEAK_NAME)_FILES = $(FBTWEAKS_SRC_FILES) modules/fishhook/fishhook.c
@@ -36,6 +37,13 @@ CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
+# ── Stage: copy MC catalog + docs into deb ─────────────────────────────────────
 after-stage::
 	@mkdir -p "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks"
-	@cp -f docs/*.md "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/" 2>/dev/null || true
+	@mkdir -p "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/runtime"
+	@for f in resources/runtime/*.json.gz; do \
+		[ -f "$$f" ] && gzip -dc "$$f" > "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/runtime/$$(basename "$$f" .gz)" 2>/dev/null || true; \
+	done
+	@cp -f resources/runtime/*.json "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/runtime/" 2>/dev/null || true
+	@mkdir -p "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/docs"
+	@cp -f docs/*.md "$(THEOS_STAGING_DIR)/Library/Application Support/FBTweaks/docs/" 2>/dev/null || true
