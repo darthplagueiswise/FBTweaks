@@ -2,12 +2,26 @@
 
 Base Theos tweak for Facebook iOS.
 
-This repository is intentionally clean and minimal. It was adapted from the buildable WATweaks/Theos base, but the runtime logic is Facebook-specific and starts empty.
+This repository was initialized from the buildable WATweaks/Theos base and trimmed to a clean Facebook-oriented skeleton:
+
+- Theos tweak layout
+- Facebook bundle filter: `com.facebook.Facebook`
+- vendored `fishhook` module path in `modules/fishhook`
+- GitHub Actions build workflow
+- `build.sh` / `build-fast.sh`
+- minimal diagnostic gesture: two-finger triple tap shows a basic FBTweaks alert
+
+Add future hook modules under `src/Hooks/` and keep `src/Tweak.x` as a light bootstrap/orchestrator.
 
 ## Build
 
 ```sh
-./build.sh
+export THEOS=/path/to/theos
+bash ./build.sh
 ```
 
-The GitHub Actions workflow builds a rootless package using Theos and a vendored fishhook copy.
+## Validate
+
+```sh
+python3 scripts/fbt_validate_sources.py
+```
