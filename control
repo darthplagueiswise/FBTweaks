@@ -1,0 +1,10 @@
+Package: com.darthplagueiswise.fbtweaks
+Name: FBTweaks
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: FBTweaks base Theos tweak for Facebook iOS research and runtime hooks.
+Homepage: https://github.com/darthplagueiswise/FBTweaks
+Maintainer: Radan
+Author: Radan
+Section: Tweaks
+Depends: mobilesubstrate
