@@ -8,7 +8,8 @@
 #import <substrate.h>
 #import "../FBGramPrefix.h"
 #import "../Runtime/FBGRGateStore.h"
-#import "../Runtime/FBGRLog.h"
+
+extern "C" void FBGRLogAppend(NSString *msg);
 
 // ── Special: slotId 0 = _METAIsLiquidGlassEnabled (C gate, handled by fishhook)
 // For slotId 0 we check the master pref directly.
