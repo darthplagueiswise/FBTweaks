@@ -20,6 +20,10 @@
 #import <substrate.h>
 #import "../FBGramPrefix.h"
 #import "../Runtime/FBGRLog.h"
+#import "../Runtime/FBGRGateStore.h"
+
+extern "C" void FBGRMCGateHooksEnsureInstalled(void);
+extern "C" void FBGRMCGateCacheRefresh(void);
 
 static NSString * const kFBGRDogFoodMaster = @"fbgr_dogfood_master";
 static NSString *gLastDogFoodSessionSource = nil;
@@ -38,12 +42,40 @@ static BOOL FBGRDogFoodKeyIsManaged(NSString *key) {
            [key isEqualToString:@"isDogfoodingView"] ||
            [key isEqualToString:@"FBDogFood-internal"] ||
            [key isEqualToString:@"FBInternalDogFood"] ||
-           [key isEqualToString:@"com.facebook.dogfood.internal"];
+           [key isEqualToString:@"com.facebook.dogfood.internal"] ||
+           [key isEqualToString:@"ig_fb_dogfooder"] ||
+           [key isEqualToString:@"is_dogfooding_enabled"] ||
+           [key isEqualToString:@"is_in_switcher_company_dogfooding"] ||
+           [key isEqualToString:@"is_dlp_native_dogfooding_component_enabled"] ||
+           [key isEqualToString:@"FBDLPDogfoodingIndicator"] ||
+           [key isEqualToString:@"zero-dogfood-device-id"];
 }
 
 static void FBGRDogFoodRuntimeReload(void) {
     gFBGRDogFoodRuntimeEnabled = [FBGRPrefs() boolForKey:kFBGRDogFoodMaster] ||
                                   [NSUserDefaults.standardUserDefaults boolForKey:@"FBDogFood-managedPhoneFlag"];
+}
+
+
+// MobileConfig slots derived from ReactMobileConfigMetadata.json and binary dogfood strings.
+// These are normal MC bool gates related to dogfooding/internal/employee surfaces.
+static const uint64_t kFBGRDogFoodMCSlots[] = {
+    161, 189, 286, 289, 292, 296, 298, 302, 305, 315, 317, 322,
+    326, 329, 335, 337, 381, 546, 623, 816, 874, 1154, 1247,
+    1263, 1271, 1498, 1618, 2028, 2742, 3092, 3103, 3110, 3142,
+    3205, 3441, 3656, 3857, 4006, 4120, 4198, 4199, 4358, 4444,
+    4452, 4536, 4620
+};
+
+static void FBGRDogFoodApplyMCOverrides(BOOL enabled) {
+    for (NSUInteger i = 0; i < sizeof(kFBGRDogFoodMCSlots) / sizeof(kFBGRDogFoodMCSlots[0]); i++) {
+        uint64_t slot = kFBGRDogFoodMCSlots[i];
+        if (enabled) FBGRGateSet(slot, YES);
+        else FBGRGateClear(slot);
+    }
+    FBGRGateStoreWarmup();
+    FBGRMCGateCacheRefresh();
+    if (enabled) FBGRMCGateHooksEnsureInstalled();
 }
 
 
@@ -57,6 +89,12 @@ static void FBGRDogFoodWriteStandardDefaults(BOOL enabled) {
     [std setBool:enabled forKey:@"enableDogfoodingView"];
     [std setBool:enabled forKey:@"_isDogfoodingView"];
     [std setBool:enabled forKey:@"isDogfoodingView"];
+    [std setBool:enabled forKey:@"FBDogFood-internal"];
+    [std setBool:enabled forKey:@"FBInternalDogFood"];
+    [std setBool:enabled forKey:@"is_dogfooding_enabled"];
+    [std setBool:enabled forKey:@"is_in_switcher_company_dogfooding"];
+    [std setBool:enabled forKey:@"is_dlp_native_dogfooding_component_enabled"];
+    [std setBool:enabled forKey:@"ig_fb_dogfooder"];
     if (enabled) {
         [std removeObjectForKey:@"FBDogFood-lastSnoozedOnSwitchDate"];
         [std removeObjectForKey:@"FBDogFood-lastSnoozedOnDismissDate"];
@@ -344,6 +382,7 @@ extern "C" void FBGRDogFoodApplyPersistentState(void) {
     FBGRDogFoodRuntimeReload();
     if (!gFBGRDogFoodRuntimeEnabled) return;
     FBGRDogFoodWriteStandardDefaults(YES);
+    FBGRDogFoodApplyMCOverrides(YES);
     FBGRDogFoodInstallBoolMethodHooks();
 }
 
@@ -355,6 +394,7 @@ extern "C" void FBGRDogFoodSetEnabled(BOOL enabled) {
     [FBGRPrefs() setBool:enabled forKey:kFBGRDogFoodMaster];
     [FBGRPrefs() synchronize];
     FBGRDogFoodWriteStandardDefaults(enabled);
+    FBGRDogFoodApplyMCOverrides(enabled);
     if (enabled) FBGRDogFoodInstallBoolMethodHooks();
 }
 
@@ -383,7 +423,7 @@ extern "C" NSString *FBGRDogFoodDiagnostic(void) {
     NSUserDefaults *std = NSUserDefaults.standardUserDefaults;
     UIViewController *top = FBGRDogFoodTopPresenter();
     return [NSString stringWithFormat:
-        @"DogFoodController=%@\ngetNagSheet=%@\nFBUserSession=%@\nsessionSource=%@\ntopPresenter=%@\nlastFailure=%@\nmaster=%@\nmanagedPhoneFlag=%@\nenableDogfoodingView=%@\nbundle=%@",
+        @"DogFoodController=%@\ngetNagSheet=%@\nFBUserSession=%@\nsessionSource=%@\ntopPresenter=%@\nlastFailure=%@\nmaster=%@\nmanagedPhoneFlag=%@\nenableDogfoodingView=%@\nruntimeEnabled=%@\nboolHooks=%lu\nbundle=%@",
         cls ? NSStringFromClass(cls) : @"NOT FOUND",
         (cls && [cls respondsToSelector:sel]) ? @"YES" : @"NO",
         session ? NSStringFromClass([session class]) : @"NOT FOUND",
