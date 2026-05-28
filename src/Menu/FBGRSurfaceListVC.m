@@ -14,7 +14,6 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern NSString *FBGRMCObserverDump(void);
-extern void      FBGRMCObserverSetEnabled(BOOL enabled);
 
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,
@@ -222,7 +221,8 @@ void FBGRPresentMenu(void) {
 }
 
 - (void)observerToggled:(UISwitch *)sw {
-    FBGRMCObserverSetEnabled(sw.isOn);
+    [FBGRPrefs() setBool:sw.isOn forKey:kFBGRMCObserverEnabled];
+    [FBGRPrefs() synchronize];
 }
 
 @end

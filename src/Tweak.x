@@ -1,163 +1,109 @@
-// Tweak.x — FBTweaks bootstrap + safe menu gestures.
+// Tweak.x — FBTweaks bootstrap + long-press on FBTabBar para abrir menu.
 //
-// Facebook does not use UIKit's UITabBar for the main navigation. The live
-// hierarchy shows FBTabBarViewController plus custom FBTabBar/FBTabBarItemDefaultView
-// views. Therefore the menu gesture must attach to Facebook's custom tabbar views,
-// not only to UITabBar.
+// DIAGNÓSTICO: o hook anterior usava %hook UITabBar mas o Facebook
+// usa FBTabBar (classe própria em FBSharedFramework.framework).
+// Confirmado via: strings FBSharedFramework | grep "_OBJC_CLASS_\$_FBTabBar"
+// e T@"FBTabBar",R,N,V_tabBar no mesmo framework.
+//
+// Ativação: long-press 1 dedo, 0.8s, na FBTabBar.
+// cancelsTouchesInView=NO → tap normal nos itens continua funcionando.
+//
+// Estratégia dupla:
+//   1. %hook FBTabBar didMoveToWindow  — hook direto na classe correta
+//   2. %hook FBTabBarViewController viewDidAppear: — backup via KVC tabBar
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import <string.h>
 #import "FBGramPrefix.h"
 #import "Menu/FBGRSurfaceListVC.h"
 
-extern void FBGRLiquidGlassEnsureInstalled(void);
+extern "C" void FBGRLiquidGlassEnsureInstalled(void);
+extern "C" void FBGRMCGateHooksEnsureInstalled(void);
 
-static const void *kFBGRMenuGestureAttached = &kFBGRMenuGestureAttached;
-static const void *kFBGRWindowGestureAttached = &kFBGRWindowGestureAttached;
+// ── Gesture target ────────────────────────────────────────────────────────────
+static const void *kFBGRGestureKey = &kFBGRGestureKey;
 
-@interface FBGRMenuGestureTarget : NSObject
+@interface FBGRLPTarget : NSObject
 + (instancetype)shared;
-- (void)openFromLongPress:(UILongPressGestureRecognizer *)g;
-- (void)openFromTap:(UITapGestureRecognizer *)g;
+- (void)handleLP:(UILongPressGestureRecognizer *)g;
 @end
 
-@implementation FBGRMenuGestureTarget
+@implementation FBGRLPTarget
 + (instancetype)shared {
-    static FBGRMenuGestureTarget *s; static dispatch_once_t once;
-    dispatch_once(&once, ^{ s = [self new]; });
+    static FBGRLPTarget *s; static dispatch_once_t o;
+    dispatch_once(&o, ^{ s = [self new]; });
     return s;
 }
-- (void)openFromLongPress:(UILongPressGestureRecognizer *)g {
+- (void)handleLP:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
-    FBGRLogHook("MenuGesture", "open from long press on %@", NSStringFromClass([g.view class]));
-    FBGRPresentMenu();
-}
-- (void)openFromTap:(UITapGestureRecognizer *)g {
-    if (g.state != UIGestureRecognizerStateRecognized) return;
-    FBGRLogHook("MenuGesture", "open from fallback tap on %@", NSStringFromClass([g.view class]));
+    FBGRLogHook("LP", "triggered on %@", NSStringFromClass([g.view class]));
     FBGRPresentMenu();
 }
 @end
 
-static BOOL FBGRClassNameLooksLikeFacebookTabBar(const char *name) {
-    if (!name) return NO;
-    // Confirmed by FLEX / binary strings:
-    // FBTabBarViewController, FBTabBarItemDefaultView, FBTabBar, FBTabBarContainerView,
-    // FBTabBarAndContentView, FBTabBarFloatableContainerView, plus private UIKit platter views.
-    return strstr(name, "FBTabBar") != NULL ||
-           strstr(name, "_UITabBar") != NULL ||
-           strstr(name, "TabBarItemDefaultView") != NULL ||
-           strstr(name, "TabBarSelection") != NULL;
-}
-
-static void FBGRAttachMenuLongPressToView(UIView *view) {
-    if (!view || [objc_getAssociatedObject(view, kFBGRMenuGestureAttached) boolValue]) return;
-
+// ── Attach helper — idempotente via associated object ─────────────────────────
+static void FBGRAttachLP(UIView *view) {
+    if (!view || [objc_getAssociatedObject(view, kFBGRGestureKey) boolValue]) return;
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
-        initWithTarget:[FBGRMenuGestureTarget shared]
-        action:@selector(openFromLongPress:)];
-
-    // One finger works on FBTabBarItemDefaultView; Facebook's tab bar is not a UIKit UITabBar.
-    // We keep cancelsTouchesInView=NO so native tab handling still receives touches.
-    lp.numberOfTouchesRequired = 1;
-    lp.minimumPressDuration = 0.85;
-    lp.cancelsTouchesInView = NO;
-    lp.delaysTouchesBegan = NO;
-    lp.delaysTouchesEnded = NO;
-
+        initWithTarget:[FBGRLPTarget shared]
+                action:@selector(handleLP:)];
+    lp.minimumPressDuration  = 0.8;
+    lp.numberOfTouchesRequired = 1;   // 1 dedo — igual ao Glow
+    lp.cancelsTouchesInView  = NO;    // tap normal continua funcionando
+    lp.delaysTouchesBegan    = NO;
     [view addGestureRecognizer:lp];
-    view.userInteractionEnabled = YES;
-    objc_setAssociatedObject(view, kFBGRMenuGestureAttached, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    FBGRLogHook("MenuGesture", "attached long press to %@", NSStringFromClass([view class]));
+    objc_setAssociatedObject(view, kFBGRGestureKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    FBGRLogHook("LP", "attached to %@ (%@)",
+        NSStringFromClass([view class]),
+        view.window ? @"has window" : @"no window yet");
 }
 
-static void FBGRAttachFallbackGesturesToWindow(UIWindow *window) {
-    if (!window || [objc_getAssociatedObject(window, kFBGRWindowGestureAttached) boolValue]) return;
-
-    // Reliable emergency fallback: double-tap with two fingers anywhere.
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
-        initWithTarget:[FBGRMenuGestureTarget shared]
-        action:@selector(openFromTap:)];
-    tap.numberOfTouchesRequired = 2;
-    tap.numberOfTapsRequired = 2;
-    tap.cancelsTouchesInView = NO;
-    tap.delaysTouchesBegan = NO;
-    tap.delaysTouchesEnded = NO;
-    [window addGestureRecognizer:tap];
-
-    // Secondary fallback: two-finger long press anywhere.
-    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
-        initWithTarget:[FBGRMenuGestureTarget shared]
-        action:@selector(openFromLongPress:)];
-    lp.numberOfTouchesRequired = 2;
-    lp.minimumPressDuration = 0.75;
-    lp.cancelsTouchesInView = NO;
-    lp.delaysTouchesBegan = NO;
-    lp.delaysTouchesEnded = NO;
-    [window addGestureRecognizer:lp];
-
-    objc_setAssociatedObject(window, kFBGRWindowGestureAttached, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    FBGRLogHook("MenuGesture", "attached fallback gestures to UIWindow");
-}
-
-static void FBGRScanTabBarSubviews(UIView *root, NSUInteger depth) {
-    if (!root || depth > 5) return;
-    const char *name = object_getClassName(root);
-    if (FBGRClassNameLooksLikeFacebookTabBar(name)) {
-        FBGRAttachMenuLongPressToView(root);
-    }
-    for (UIView *sub in root.subviews) {
-        FBGRScanTabBarSubviews(sub, depth + 1);
-    }
-}
-
-%hook UIWindow
+// ── Hook 1: FBTabBar didMoveToWindow — CLASSE CORRETA ────────────────────────
+// FBTabBar está em FBSharedFramework.framework.
+// Logos resolve via objc_getClass("FBTabBar") em runtime, sem header.
+%hook FBTabBar
 
 - (void)didMoveToWindow {
     %orig;
-    FBGRAttachFallbackGesturesToWindow((UIWindow *)self);
-}
-
-- (void)makeKeyAndVisible {
-    %orig;
-    FBGRAttachFallbackGesturesToWindow((UIWindow *)self);
+    if (self.window) FBGRAttachLP((UIView *)self);
 }
 
 %end
 
-%hook UIView
-
-- (void)didMoveToWindow {
-    %orig;
-    if (!self.window) return;
-    const char *name = object_getClassName(self);
-    if (FBGRClassNameLooksLikeFacebookTabBar(name)) {
-        FBGRAttachMenuLongPressToView(self);
-    }
-}
-
-%end
-
-%hook UIViewController
+// ── Hook 2: FBTabBarViewController viewDidAppear: — backup ───────────────────
+// FBTabBarViewController tem propriedade tabBar: (T@"FBTabBar",R,N,V_tabBar).
+// Usamos valueForKey: para evitar declarar o header completo.
+%hook FBTabBarViewController
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    const char *name = object_getClassName(self);
-    if (name && strstr(name, "FBTabBarViewController") != NULL) {
-        FBGRLogHook("MenuGesture", "FBTabBarViewController appeared; scanning tabbar views");
-        FBGRScanTabBarSubviews(self.view, 0);
-    }
+    @try {
+        UIView *tb = [self valueForKey:@"tabBar"];
+        if (tb) FBGRAttachLP(tb);
+    } @catch (...) {}
 }
 
 %end
 
+// ── Hook 3: UITabBarController — para o caso de existir também ───────────────
+%hook UITabBarController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (self.tabBar) FBGRAttachLP(self.tabBar);
+}
+
+%end
+
+// ── %ctor ─────────────────────────────────────────────────────────────────────
 %ctor {
     @autoreleasepool {
-        FBGRLogHook("Main", "FBTweaks loaded into %@", NSBundle.mainBundle.bundleIdentifier);
+        FBGRLogHook("Main", "FBTweaks loaded into %@",
+            NSBundle.mainBundle.bundleIdentifier);
         FBGRLiquidGlassEnsureInstalled();
-        FBGRLogHook("Main", "init complete");
+        FBGRMCGateHooksEnsureInstalled();
+        FBGRLogHook("Main", "hooks ready — activate: long-press 0.8s on tab bar");
     }
 }
