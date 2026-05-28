@@ -24,13 +24,46 @@
 static NSString * const kFBGRDogFoodMaster = @"fbgr_dogfood_master";
 static NSString *gLastDogFoodSessionSource = nil;
 static NSString *gLastDogFoodFailure = nil;
+static BOOL gFBGRDogFoodRuntimeEnabled = NO;
+static BOOL gFBGRDogFoodRuntimeHooksInstalled = NO;
+static BOOL gFBGRDogFoodBoolMethodHooksInstalled = NO;
+static NSUInteger gFBGRDogFoodBoolMethodHooked = 0;
+
+static BOOL FBGRDogFoodKeyIsManaged(NSString *key) {
+    if (![key isKindOfClass:NSString.class]) return NO;
+    return [key isEqualToString:@"FBDogFood-managedPhoneFlag"] ||
+           [key isEqualToString:@"FBDogFood-enableDogfoodingView"] ||
+           [key isEqualToString:@"enableDogfoodingView"] ||
+           [key isEqualToString:@"_isDogfoodingView"] ||
+           [key isEqualToString:@"isDogfoodingView"] ||
+           [key isEqualToString:@"FBDogFood-internal"] ||
+           [key isEqualToString:@"FBInternalDogFood"] ||
+           [key isEqualToString:@"com.facebook.dogfood.internal"];
+}
+
+static void FBGRDogFoodRuntimeReload(void) {
+    gFBGRDogFoodRuntimeEnabled = [FBGRPrefs() boolForKey:kFBGRDogFoodMaster] ||
+                                  [NSUserDefaults.standardUserDefaults boolForKey:@"FBDogFood-managedPhoneFlag"];
+}
+
+
+extern "C" void FBGRDogFoodSetEnabled(BOOL enabled);
+extern "C" void FBGRDogFoodApplyPersistentState(void);
 
 static void FBGRDogFoodWriteStandardDefaults(BOOL enabled) {
     NSUserDefaults *std = [NSUserDefaults standardUserDefaults];
     [std setBool:enabled forKey:@"FBDogFood-managedPhoneFlag"];
     [std setBool:enabled forKey:@"FBDogFood-enableDogfoodingView"];
     [std setBool:enabled forKey:@"enableDogfoodingView"];
+    [std setBool:enabled forKey:@"_isDogfoodingView"];
+    [std setBool:enabled forKey:@"isDogfoodingView"];
+    if (enabled) {
+        [std removeObjectForKey:@"FBDogFood-lastSnoozedOnSwitchDate"];
+        [std removeObjectForKey:@"FBDogFood-lastSnoozedOnDismissDate"];
+        [std setInteger:0 forKey:@"FBDogFood-dismissClickCount"];
+    }
     [std synchronize];
+    gFBGRDogFoodRuntimeEnabled = enabled;
 }
 
 static BOOL FBGRDogFoodLooksLikeSession(id obj) {
@@ -247,11 +280,10 @@ static UIViewController *FBGRDogFoodNagSheet(void) {
     NSString *snoozeTx = @"Depois";
     BOOL snoozeEnabled = YES;
 
-    id onSwitch = [^(BOOL on) {
-        [FBGRPrefs() setBool:on forKey:kFBGRDogFoodMaster];
-        [FBGRPrefs() synchronize];
-        FBGRDogFoodWriteStandardDefaults(on);
-        FBGRLogAppend([NSString stringWithFormat:@"DogFood native switch -> %@", on ? @"ON" : @"OFF"]);
+    id onSwitch = [^{
+        FBGRDogFoodSetEnabled(YES);
+        FBGRDogFoodApplyPersistentState();
+        FBGRLogAppend(@"DogFood native activate -> ON");
     } copy];
     id onSnooze = [^{ FBGRLogAppend(@"DogFood native snooze"); } copy];
 
@@ -272,6 +304,49 @@ static UIViewController *FBGRDogFoodNagSheet(void) {
     }
 }
 
+
+typedef BOOL (*FBGRDogFoodBoolGetterIMP)(id, SEL);
+static BOOL FBGRDogFoodBoolAlwaysYes(id self, SEL _cmd) {
+    if (gFBGRDogFoodRuntimeEnabled || [FBGRPrefs() boolForKey:kFBGRDogFoodMaster]) return YES;
+    return YES;
+}
+
+static void FBGRDogFoodHookBoolMethod(Class cls, SEL sel) {
+    if (!cls || !sel || !class_getInstanceMethod(cls, sel)) return;
+    IMP orig = NULL;
+    MSHookMessageEx(cls, sel, (IMP)FBGRDogFoodBoolAlwaysYes, &orig);
+    gFBGRDogFoodBoolMethodHooked++;
+}
+
+static void FBGRDogFoodInstallBoolMethodHooks(void) {
+    if (gFBGRDogFoodBoolMethodHooksInstalled) return;
+    gFBGRDogFoodBoolMethodHooksInstalled = YES;
+
+    SEL enableSel = sel_registerName("enableDogfoodingView");
+    SEL isSel = sel_registerName("_isDogfoodingView");
+    SEL managedSel = sel_registerName("isManagedPhone");
+    SEL dogfoodSel = sel_registerName("isDogfoodingEnabled");
+
+    unsigned int count = 0;
+    Class *classes = objc_copyClassList(&count);
+    for (unsigned int i = 0; i < count; i++) {
+        Class cls = classes[i];
+        FBGRDogFoodHookBoolMethod(cls, enableSel);
+        FBGRDogFoodHookBoolMethod(cls, isSel);
+        FBGRDogFoodHookBoolMethod(cls, managedSel);
+        FBGRDogFoodHookBoolMethod(cls, dogfoodSel);
+    }
+    free(classes);
+    FBGRLogAppend([NSString stringWithFormat:@"DogFood bool hooks installed=%lu", (unsigned long)gFBGRDogFoodBoolMethodHooked]);
+}
+
+extern "C" void FBGRDogFoodApplyPersistentState(void) {
+    FBGRDogFoodRuntimeReload();
+    if (!gFBGRDogFoodRuntimeEnabled) return;
+    FBGRDogFoodWriteStandardDefaults(YES);
+    FBGRDogFoodInstallBoolMethodHooks();
+}
+
 extern "C" BOOL FBGRDogFoodIsEnabled(void) {
     return [FBGRPrefs() boolForKey:kFBGRDogFoodMaster];
 }
@@ -280,6 +355,7 @@ extern "C" void FBGRDogFoodSetEnabled(BOOL enabled) {
     [FBGRPrefs() setBool:enabled forKey:kFBGRDogFoodMaster];
     [FBGRPrefs() synchronize];
     FBGRDogFoodWriteStandardDefaults(enabled);
+    if (enabled) FBGRDogFoodInstallBoolMethodHooks();
 }
 
 extern "C" BOOL FBGRDogFoodPresentNagSheet(void) {
@@ -317,5 +393,39 @@ extern "C" NSString *FBGRDogFoodDiagnostic(void) {
         FBGRDogFoodIsEnabled() ? @"ON" : @"OFF",
         [std boolForKey:@"FBDogFood-managedPhoneFlag"] ? @"YES" : @"NO",
         [std boolForKey:@"enableDogfoodingView"] ? @"YES" : @"NO",
+        gFBGRDogFoodRuntimeEnabled ? @"YES" : @"NO",
+        (unsigned long)gFBGRDogFoodBoolMethodHooked,
         NSBundle.mainBundle.bundleIdentifier ?: @"unknown"];
+}
+
+
+%hook NSUserDefaults
+
+- (BOOL)boolForKey:(NSString *)defaultName {
+    if (gFBGRDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(defaultName)) return YES;
+    return %orig;
+}
+
+- (id)objectForKey:(NSString *)defaultName {
+    if (gFBGRDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(defaultName)) return @YES;
+    return %orig;
+}
+
+- (id)valueForKey:(NSString *)key {
+    if (gFBGRDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(key)) return @YES;
+    return %orig;
+}
+
+%end
+
+%ctor {
+    @autoreleasepool {
+        FBGRDogFoodRuntimeReload();
+        if (gFBGRDogFoodRuntimeEnabled) {
+            FBGRDogFoodWriteStandardDefaults(YES);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                FBGRDogFoodInstallBoolMethodHooks();
+            });
+        }
+    }
 }
