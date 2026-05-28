@@ -73,7 +73,8 @@ void FBGRPresentMenu(void) {
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(doClose)];
     [[FBGRMCCatalog shared] loadIfNeeded];
-    FBGRMCGateHooksEnsureInstalled();
+    // Do not install MobileConfig hooks when opening the menu. The previous
+    // behavior caused recursive MobileConfig calls and stack overflow crashes.
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
