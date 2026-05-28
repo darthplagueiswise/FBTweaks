@@ -87,3 +87,26 @@ if errors:
     sys.exit(1)
 else:
     print("All checks passed.")
+
+# 10 — Headers imported from .xm need __cplusplus guard if they declare C functions
+import subprocess
+xm_imports = set()
+for fpath in (ROOT/"src").rglob("*.xm"):
+    for line in fpath.read_text().splitlines():
+        m = re.match(r'\s*#import\s+"(.*\.h)"', line)
+        if m:
+            rel = m.group(1)
+            # resolve relative to the .xm file location
+            resolved = (fpath.parent / rel).resolve()
+            if resolved.exists():
+                xm_imports.add(resolved)
+
+for hpath in xm_imports:
+    text = hpath.read_text()
+    # Check for non-static, non-inline C function declarations
+    has_c_funcs = bool(re.search(r'^(?!static\s)(?!#|/|@|\s)[\w].*\(.*\).*;', text, re.MULTILINE))
+    has_guard   = "__cplusplus" in text
+    if has_c_funcs and not has_guard:
+        err(f"{hpath.name}: imported from .xm but missing __cplusplus extern C guard")
+    elif has_c_funcs and has_guard:
+        ok(f"{hpath.name}: has __cplusplus guard")
