@@ -29,7 +29,6 @@ static NSString * const kFBGRDogFoodMaster = @"fbgr_dogfood_master";
 static NSString *gLastDogFoodSessionSource = nil;
 static NSString *gLastDogFoodFailure = nil;
 static BOOL gFBGRDogFoodRuntimeEnabled = NO;
-static BOOL gFBGRDogFoodRuntimeHooksInstalled = NO;
 static BOOL gFBGRDogFoodBoolMethodHooksInstalled = NO;
 static NSUInteger gFBGRDogFoodBoolMethodHooked = 0;
 
