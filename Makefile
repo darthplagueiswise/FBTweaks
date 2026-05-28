@@ -19,7 +19,7 @@ $(TWEAK_NAME)_FRAMEWORKS = \
 	Security
 
 $(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
-$(TWEAK_NAME)_LIBRARIES = substrate
+$(TWEAK_NAME)_LIBRARIES = substrate z
 
 $(TWEAK_NAME)_CFLAGS = \
 	-fobjc-arc \

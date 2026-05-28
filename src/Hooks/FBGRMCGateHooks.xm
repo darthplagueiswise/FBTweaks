@@ -1,136 +1,163 @@
-// FBGRMCGateHooks.xm — generic MobileConfig getBool: interceptor.
+// FBGRMCGateHooks.xm — safe MobileConfig BOOL overrides.
 //
-// Stability constraints:
-//   - no constructor install
-//   - no NSUserDefaults/NSString/logging from hook hot path
-//   - original IMPs are stored in C arrays by Class, not NSDictionary NSString keys
+// Built from the non-crashing a2e50 base. This file intentionally avoids:
+//   - constructor install
+//   - broad runtime class scans
+//   - NSString/NSUserDefaults/logging in getBool hot path
+// Hooks are installed only when the user toggles an override or asks for diag.
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
+#import <string.h>
 #import "../FBGramPrefix.h"
 #import "../Runtime/FBGRGateStore.h"
+#import "../Runtime/FBGRLog.h"
 
-extern "C" void FBGRLogAppend(NSString *msg);
+static __thread BOOL gFBGRMCHookGuard = NO;
+static BOOL gFBGRMCInstalled = NO;
+static BOOL gFBGRMCInstalling = NO;
+static NSUInteger gHookedCount = 0;
+
+#define FBGR_MAX_HOOKED_CLS 64
+typedef struct {
+    Class cls;
+    IMP getBoolOrig;
+    IMP getBoolWDOrig;
+    IMP scrollOrig;
+} FBGRHookedClass;
+static FBGRHookedClass gHookedClasses[FBGR_MAX_HOOKED_CLS];
+static int gHookedN = 0;
+
+#define FBGR_MAX_OVERRIDES 2048
+typedef struct { uint64_t slotId; BOOL value; } FBGROverride;
+static FBGROverride gOverrideCache[FBGR_MAX_OVERRIDES];
+static volatile int gOverrideCacheN = 0;
+
+static IMP FBGRGetOrig(Class cls, int kind) {
+    for (int i = 0; i < gHookedN; i++) {
+        if (gHookedClasses[i].cls == cls) {
+            if (kind == 0) return gHookedClasses[i].getBoolOrig;
+            if (kind == 1) return gHookedClasses[i].getBoolWDOrig;
+            return gHookedClasses[i].scrollOrig;
+        }
+    }
+    return NULL;
+}
+
+static BOOL FBGRClassAlreadyHooked(Class cls) {
+    for (int i = 0; i < gHookedN; i++) if (gHookedClasses[i].cls == cls) return YES;
+    return NO;
+}
+
+static BOOL FBGRCacheLookup(uint64_t slotId, BOOL *outValue) {
+    int n = gOverrideCacheN;
+    for (int i = 0; i < n; i++) {
+        if (gOverrideCache[i].slotId == slotId) {
+            *outValue = gOverrideCache[i].value;
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void FBGRCacheRebuild(void) {
+    @autoreleasepool {
+        FBGRGateStoreWarmup();
+        gOverrideCacheN = 0;
+        NSArray<NSNumber *> *ids = FBGRGateAllOverrideSlotIds();
+        for (NSNumber *n in ids) {
+            if (gOverrideCacheN >= FBGR_MAX_OVERRIDES) break;
+            uint64_t slot = [n unsignedLongLongValue];
+            if (slot == 0) continue;
+            gOverrideCache[gOverrideCacheN].slotId = slot;
+            gOverrideCache[gOverrideCacheN].value = FBGRGateGet(slot);
+            gOverrideCacheN++;
+        }
+    }
+}
 
 typedef BOOL (*GetBoolIMP)(id, SEL, mc_bool_param_t, id);
 typedef BOOL (*GetBoolWDIMP)(id, SEL, mc_bool_param_t, id, BOOL);
 typedef void (*SetScrollIMP)(id, SEL, BOOL);
 
-typedef struct {
-    Class cls;
-    GetBoolIMP origA;
-    GetBoolWDIMP origB;
-} FBGRMCHookEntry;
-
-#define FBGR_MC_HOOK_MAX 64
-
-static FBGRMCHookEntry gEntries[FBGR_MC_HOOK_MAX];
-static uint32_t gEntryCount = 0;
-static SetScrollIMP orig_setScrollable = NULL;
-static NSUInteger gHooked = 0;
-static BOOL gInstalled = NO;
-static BOOL gInstalling = NO;
-static dispatch_once_t gInitOnce;
-
-static void FBGRMCInit(void) {
-    dispatch_once(&gInitOnce, ^{
-        gEntryCount = 0;
-        gHooked = 0;
-    });
-}
-
-static FBGRMCHookEntry *FBGREntryForClass(Class cls) {
-    if (!cls) return NULL;
-    uint32_t n = gEntryCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gEntries[i].cls == cls) return &gEntries[i];
-    }
-    return NULL;
-}
-
-static FBGRMCHookEntry *FBGREntryEnsure(Class cls) {
-    FBGRMCHookEntry *e = FBGREntryForClass(cls);
-    if (e) return e;
-    if (gEntryCount >= FBGR_MC_HOOK_MAX) return NULL;
-    e = &gEntries[gEntryCount++];
-    e->cls = cls;
-    e->origA = NULL;
-    e->origB = NULL;
-    return e;
-}
-
-static inline BOOL FBGRShouldOverride(uint64_t slotId, BOOL *outValue) {
-    if (FBGRGateIsSet(slotId)) {
-        *outValue = FBGRGateGet(slotId);
-        return YES;
-    }
-    return NO;
-}
-
 static BOOL h_getBoolWithOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
-    BOOL forced = NO;
-    if (FBGRShouldOverride(p.value, &forced)) return forced;
+    IMP orig = FBGRGetOrig(object_getClass(self), 0);
+    if (gFBGRMCHookGuard) return orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
 
-    FBGRMCHookEntry *e = FBGREntryForClass(object_getClass(self));
-    GetBoolIMP orig = e ? e->origA : NULL;
-    return orig ? orig(self, _cmd, p, opts) : NO;
+    BOOL forced = NO;
+    if (FBGRCacheLookup(p.value, &forced)) return forced;
+
+    gFBGRMCHookGuard = YES;
+    BOOL result = orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
+    gFBGRMCHookGuard = NO;
+    return result;
 }
 
 static BOOL h_getBoolWithOptionsDefault(id self, SEL _cmd, mc_bool_param_t p, id opts, BOOL def) {
-    BOOL forced = NO;
-    if (FBGRShouldOverride(p.value, &forced)) return forced;
+    IMP orig = FBGRGetOrig(object_getClass(self), 1);
+    if (gFBGRMCHookGuard) return orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
 
-    FBGRMCHookEntry *e = FBGREntryForClass(object_getClass(self));
-    GetBoolWDIMP orig = e ? e->origB : NULL;
-    return orig ? orig(self, _cmd, p, opts, def) : def;
+    BOOL forced = NO;
+    if (FBGRCacheLookup(p.value, &forced)) return forced;
+
+    gFBGRMCHookGuard = YES;
+    BOOL result = orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
+    gFBGRMCHookGuard = NO;
+    return result;
 }
 
 static void h_setShouldEnableScrollableTabBar(id self, SEL _cmd, BOOL v) {
+    IMP orig = FBGRGetOrig(object_getClass(self), 2);
     BOOL forced = NO;
-    if (FBGRShouldOverride(1217, &forced) && forced) v = YES;
-    if (orig_setScrollable) orig_setScrollable(self, _cmd, v);
+    if (FBGRCacheLookup(1217, &forced) && forced) v = YES;
+    if (orig) ((SetScrollIMP)orig)(self, _cmd, v);
 }
 
 static void FBGRMCHookClass(Class cls) {
-    if (!cls) return;
-    FBGRMCHookEntry *e = FBGREntryEnsure(cls);
-    if (!e) return;
+    if (!cls || gHookedN >= FBGR_MAX_HOOKED_CLS || FBGRClassAlreadyHooked(cls)) return;
 
     SEL sA = sel_registerName("getBool:withOptions:");
     SEL sB = sel_registerName("getBool:withOptions:withDefault:");
     SEL sC = sel_registerName("setShouldEnableScrollableTabBar:");
 
-    if (!e->origA && class_getInstanceMethod(cls, sA)) {
+    Method mA = class_getInstanceMethod(cls, sA);
+    Method mB = class_getInstanceMethod(cls, sB);
+    Method mC = class_getInstanceMethod(cls, sC);
+    if (!mA && !mB && !mC) return;
+
+    FBGRHookedClass *slot = &gHookedClasses[gHookedN];
+    memset(slot, 0, sizeof(*slot));
+    slot->cls = cls;
+    BOOL hookedAny = NO;
+
+    if (mA) {
         IMP orig = NULL;
         MSHookMessageEx(cls, sA, (IMP)h_getBoolWithOptions, &orig);
-        if (orig) {
-            e->origA = (GetBoolIMP)orig;
-            gHooked++;
-        }
+        if (orig) { slot->getBoolOrig = orig; hookedAny = YES; }
     }
-
-    if (!e->origB && class_getInstanceMethod(cls, sB)) {
+    if (mB) {
         IMP orig = NULL;
         MSHookMessageEx(cls, sB, (IMP)h_getBoolWithOptionsDefault, &orig);
-        if (orig) e->origB = (GetBoolWDIMP)orig;
+        if (orig) { slot->getBoolWDOrig = orig; hookedAny = YES; }
     }
-
-    if (!orig_setScrollable && class_getInstanceMethod(cls, sC)) {
+    if (mC) {
         IMP orig = NULL;
         MSHookMessageEx(cls, sC, (IMP)h_setShouldEnableScrollableTabBar, &orig);
-        if (orig) orig_setScrollable = (SetScrollIMP)orig;
+        if (orig) { slot->scrollOrig = orig; hookedAny = YES; }
     }
+
+    if (hookedAny) { gHookedN++; gHookedCount++; }
 }
 
-static void FBGRMCInstall(void) {
-    if (gInstalled || gInstalling) return;
-    gInstalling = YES;
+static void FBGRMCInstallHooksInternal(void) {
+    if (gFBGRMCInstalled || gFBGRMCInstalling) { FBGRCacheRebuild(); return; }
+    gFBGRMCInstalling = YES;
 
-    FBGRMCInit();
-    FBGRGateStoreWarmup();
-
-    for (NSString *cn in @[
+    // Static owners only. No global class scan: class_getInstanceMethod on arbitrary
+    // Facebook classes triggered method resolution and crashed in prior builds.
+    NSArray<NSString *> *classes = @[
         @"FBMobileConfigContextManager",
         @"FBMobileConfigUserSessionContextManager",
         @"FBMobileConfigSessionlessContextManager",
@@ -138,32 +165,30 @@ static void FBGRMCInstall(void) {
         @"FBMobileConfigFBTContextManager",
         @"FBMobileConfigAPI",
         @"FBMobileConfigGlobalContext",
-    ]) {
-        Class cls = NSClassFromString(cn);
-        if (cls) FBGRMCHookClass(cls);
-    }
+        @"FBMobileConfigContextObjcImpl",
+        @"FBMobileConfigAdminIDContextManager",
+        @"RCTMobileConfigNative",
+    ];
+    for (NSString *cn in classes) FBGRMCHookClass(NSClassFromString(cn));
 
-    // No global class-list fallback here. It is too heavy for Facebook preload.
-    gInstalled = YES;
-    gInstalling = NO;
-
-    FBGRLogAppend([NSString stringWithFormat:@"MCGateHooks installed on %lu classes", (unsigned long)gHooked]);
+    FBGRCacheRebuild();
+    gFBGRMCInstalled = YES;
+    gFBGRMCInstalling = NO;
+    FBGRLogAppend([NSString stringWithFormat:@"MCGateHooks: installed on %lu known classes, cached=%d", (unsigned long)gHookedCount, gOverrideCacheN]);
 }
 
-extern "C" void FBGRMCGateHooksEnsureInstalled(void) { FBGRMCInstall(); }
+extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{ FBGRMCInstallHooksInternal(); });
+}
+
+extern "C" void FBGRMCGateCacheRefresh(void) {
+    if (gFBGRMCInstalled) FBGRCacheRebuild();
+    else if (FBGRGateAllOverrideSlotIds().count > 0) FBGRMCGateHooksEnsureInstalled();
+}
 
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
-    FBGRMCInit();
-    NSMutableArray *classes = [NSMutableArray array];
-    uint32_t n = gEntryCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gEntries[i].cls) [classes addObject:NSStringFromClass(gEntries[i].cls)];
-    }
-    return [NSString stringWithFormat:
-        @"installed=%@\nhookedClasses=%lu\nscrollable=%@\noverrides=%lu\nclasses=[%@]",
-        gInstalled ? @"YES" : @"NO",
-        (unsigned long)gHooked,
-        orig_setScrollable ? @"YES" : @"NO",
-        (unsigned long)FBGRGateAllOverrideSlotIds().count,
-        [classes componentsJoinedByString:@","]];
+    return [NSString stringWithFormat:@"installed=%@\nhookedKnownClasses=%lu\ncachedOverrides=%d\nscan=disabled",
+        gFBGRMCInstalled ? @"YES" : @"NO",
+        (unsigned long)gHookedCount,
+        gOverrideCacheN];
 }

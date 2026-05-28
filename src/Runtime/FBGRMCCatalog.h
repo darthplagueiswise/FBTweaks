@@ -13,6 +13,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) BOOL defaultBool;
 @property(nonatomic) NSInteger unitType;         // 4=iOS, 2=user-level, 1=device
 @property(nonatomic) uint64_t configKey;
+@property(nonatomic) uint64_t paramKey;
+@property(nonatomic) uint64_t paramId;
+@property(nonatomic) uint64_t configId;
 @end
 
 /// Loads and indexes ReactMobileConfigMetadata.json.gz
@@ -28,6 +31,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// All params, sorted by slotId
 - (NSArray<FBGRMCParam *> *)allParams;
 
+/// All boolValue params, regardless of unitType
+- (NSArray<FBGRMCParam *> *)boolParams;
+
 /// iOS-specific bool params only (unitType==4, type==boolValue)
 - (NSArray<FBGRMCParam *> *)iOSBoolParams;
 
@@ -35,6 +41,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray<FBGRMCParam *> *)searchParams:(NSString *)query;
 
 @property(nonatomic, readonly) NSUInteger totalCount;
+@property(nonatomic, readonly) NSUInteger boolCount;
+@property(nonatomic, readonly) NSUInteger iOSBoolCount;
+@property(nonatomic, readonly) NSString *catalogSource;
 @property(nonatomic, readonly) BOOL isLoaded;
 
 @end

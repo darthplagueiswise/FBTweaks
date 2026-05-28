@@ -14,7 +14,10 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern NSString *FBGRMCObserverDump(void);
-extern void      FBGRMCObserverSetEnabled(BOOL enabled);
+extern BOOL      FBGRDogFoodIsEnabled(void);
+extern void      FBGRDogFoodSetEnabled(BOOL);
+extern BOOL      FBGRDogFoodPresentNagSheet(void);
+extern NSString *FBGRDogFoodDiagnostic(void);
 
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,
@@ -73,8 +76,6 @@ void FBGRPresentMenu(void) {
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(doClose)];
     [[FBGRMCCatalog shared] loadIfNeeded];
-    // Do not install MobileConfig hooks when opening the menu. The previous
-    // behavior caused recursive MobileConfig calls and stack overflow crashes.
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
@@ -100,10 +101,14 @@ void FBGRPresentMenu(void) {
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
     if (s == FBGRRootSectionProviders) {
         NSUInteger tot = FBGRGateAllOverrideSlotIds().count;
-        NSUInteger cat = [FBGRMCCatalog shared].totalCount;
-        return [NSString stringWithFormat:@"%lu overrides ativos  |  %lu params no catálogo  |  LG hook=%@",
-                (unsigned long)tot, (unsigned long)cat,
-                FBGRLiquidGlassIsHooked() ? @"OK" : @"MISS"];
+        FBGRMCCatalog *mc = [FBGRMCCatalog shared];
+        return [NSString stringWithFormat:@"%lu overrides ativos | total=%lu | bool=%lu | iOS=%lu | LG=%@ | %@",
+                (unsigned long)tot,
+                (unsigned long)mc.totalCount,
+                (unsigned long)mc.boolCount,
+                (unsigned long)mc.iOSBoolCount,
+                FBGRLiquidGlassIsHooked() ? @"OK" : @"MISS",
+                mc.catalogSource ?: @"sem catálogo"];
     }
     if (s == FBGRRootSectionAllParams)
         return @"Todos os 5374 params do ReactMobileConfigMetadata. Toggle = override persistente.";
@@ -205,7 +210,7 @@ void FBGRPresentMenu(void) {
     }
     if (ip.section == FBGRRootSectionDiag) {
         if (ip.row == 0) {
-            NSString *diag = FBGRMCGateHooksDiagnostic();
+            NSString *diag = [NSString stringWithFormat:@"%@\n\n%@", FBGRMCGateHooksDiagnostic(), FBGRDogFoodDiagnostic() ?: @"DogFood diag unavailable"];
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Hooks Diag"
                 message:diag preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(id _){
@@ -223,7 +228,8 @@ void FBGRPresentMenu(void) {
 }
 
 - (void)observerToggled:(UISwitch *)sw {
-    FBGRMCObserverSetEnabled(sw.isOn);
+    [FBGRPrefs() setBool:sw.isOn forKey:kFBGRMCObserverEnabled];
+    [FBGRPrefs() synchronize];
 }
 
 @end

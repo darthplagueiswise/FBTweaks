@@ -3,12 +3,15 @@
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../Runtime/FBGRGateStore.h"
 
+extern void FBGRMCGateCacheRefresh(void);
+extern void FBGRMCGateHooksEnsureInstalled(void);
+
 @interface FBGRGateRuntimeBrowserVC ()
 @property(nonatomic, strong) FBGRGateProvider *provider;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *allParams;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *visible;
 @property(nonatomic, strong) UISearchController *search;
-@property(nonatomic, strong) UISegmentedControl *filterSeg; // All | iOS | Overrides
+@property(nonatomic, strong) UISegmentedControl *filterSeg; // All | Bool | iOS | Overrides
 @end
 
 @implementation FBGRGateRuntimeBrowserVC
@@ -27,7 +30,7 @@
     self.tableView.estimatedRowHeight = 60;
 
     // Filter segmented control
-    _filterSeg = [[UISegmentedControl alloc] initWithItems:@[@"Todos", @"iOS Bool", @"Overrides"]];
+    _filterSeg = [[UISegmentedControl alloc] initWithItems:@[@"Todos", @"Bool", @"iOS", @"Overrides"]];
     _filterSeg.selectedSegmentIndex = 0;
     _filterSeg.backgroundColor = FBGRCell();
     [_filterSeg addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
@@ -58,8 +61,9 @@
 
     NSArray<FBGRMCParam *> *base;
     NSInteger seg = _filterSeg ? _filterSeg.selectedSegmentIndex : 0;
-    if (seg == 1)      base = [cat iOSBoolParams];
-    else if (seg == 2) base = [self overriddenParams];
+    if (seg == 1)      base = [cat boolParams];
+    else if (seg == 2) base = [cat iOSBoolParams];
+    else if (seg == 3) base = [self overriddenParams];
     else               base = [cat allParams];
 
     if (q.length > 0) {
@@ -116,9 +120,14 @@
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
-    return [NSString stringWithFormat:@"%lu params  |  %lu com override",
+    FBGRMCCatalog *cat = [FBGRMCCatalog shared];
+    return [NSString stringWithFormat:@"%lu visíveis | total=%lu | bool=%lu | iOS=%lu | overrides=%lu | %@",
             (unsigned long)self.visible.count,
-            (unsigned long)FBGRGateAllOverrideSlotIds().count];
+            (unsigned long)cat.totalCount,
+            (unsigned long)cat.boolCount,
+            (unsigned long)cat.iOSBoolCount,
+            (unsigned long)FBGRGateAllOverrideSlotIds().count,
+            cat.catalogSource ?: @"sem fonte"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -170,8 +179,9 @@
 
 - (void)swToggled:(UISwitch *)sw {
     FBGRMCParam *p = self.visible[(NSUInteger)sw.tag];
-    if (sw.isOn) FBGRGateSet(p.slotId, YES);
-    else         FBGRGateClear(p.slotId);
+    FBGRGateSet(p.slotId, sw.isOn);
+    FBGRMCGateHooksEnsureInstalled();
+    FBGRMCGateCacheRefresh();
     NSIndexPath *ip = [NSIndexPath indexPathForRow:sw.tag inSection:0];
     [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
 }
