@@ -8,6 +8,16 @@
 typedef struct { uint64_t value; } FBObs_mc_bool_param_t;
 typedef BOOL (*ObsIMP)(id, SEL, FBObs_mc_bool_param_t, id);
 
+// C-level storage — same pattern as FBGRMCGateHooks (no ObjC in hot path)
+#define OBS_MAX_CLS 8
+static struct { Class cls; IMP orig; } gObsClasses[OBS_MAX_CLS];
+static int gObsN = 0;
+static IMP FBGROBSGetOrig(Class cls) {
+    for (int i = 0; i < gObsN; i++)
+        if (gObsClasses[i].cls == cls) return gObsClasses[i].orig;
+    return NULL;
+}
+
 static NSMutableDictionary<NSNumber*,NSNumber*> *gCounts = nil; // slotId→count
 static NSMutableDictionary<NSNumber*,NSNumber*> *gResults = nil;// slotId→lastResult
 static NSMutableDictionary<NSString*,NSValue*>  *gOrigs  = nil;
@@ -31,10 +41,8 @@ static void obsInit(void) {
 static __thread BOOL gFBGRObsGuard = NO;
 
 static BOOL obsTrample(id self, SEL _cmd, FBObs_mc_bool_param_t p, id opts) {
-    NSString *cls = NSStringFromClass([self class]);
-    ObsIMP orig = gOrigs[cls] ? (ObsIMP)[gOrigs[cls] pointerValue] : NULL;
-    // Reentrancy guard: same reason as FBGRMCGateHooks — unitTypeFromParameter
-    // calls getBool: internally, re-entering this hook.
+    // Pure C lookup — no NSStringFromClass, no ObjC before guard check
+    ObsIMP orig = (ObsIMP)FBGROBSGetOrig(object_getClass(self));
     if (gFBGRObsGuard) return orig ? orig(self, _cmd, p, opts) : NO;
     gFBGRObsGuard = YES;
     BOOL r = orig ? orig(self, _cmd, p, opts) : NO;
@@ -76,11 +84,15 @@ static void obsInstall(void) {
         @"FBMobileConfigAPI", @"FBMobileConfigGlobalContext",
     ]) {
         Class cls = NSClassFromString(cn);
-        if (!cls || gOrigs[cn]) continue;
+        if (!cls || gObsN >= OBS_MAX_CLS) continue;
         if (!class_getInstanceMethod(cls, sel)) continue;
+        // Check already hooked
+        BOOL already = NO;
+        for (int i = 0; i < gObsN; i++) if (gObsClasses[i].cls == cls) { already = YES; break; }
+        if (already) continue;
         IMP orig = NULL;
         MSHookMessageEx(cls, sel, (IMP)obsTrample, &orig);
-        if (orig) gOrigs[cn] = [NSValue valueWithPointer:(const void*)orig];
+        if (orig) { gObsClasses[gObsN].cls = cls; gObsClasses[gObsN].orig = orig; gObsN++; }
     }
 }
 

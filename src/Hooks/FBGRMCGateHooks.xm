@@ -101,25 +101,33 @@ typedef void (*SetScrollIMP)(id, SEL, BOOL);
 static SetScrollIMP orig_setScrollable = NULL;
 
 static BOOL h_getBoolWithOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
-    // object_getClass: pure C, reads isa, zero side effects — safe at any depth
-    IMP orig = FBGRGetBoolOrig(object_getClass(self));
+    IMP orig = FBGRGetBoolOrig(object_getClass(self)); // pure C, safe always
 
     if (gFBGRMCHookGuard) {
-        // PURE C PATH: no ObjC, no CF, no string, no TSD
+        // Recursive call from orig() — pure C bypass, no ObjC/CF
         return orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
     }
 
+    // SET GUARD IMMEDIATELY — before ANY call that could re-enter this hook.
+    // Bug in v0.2.5/v0.2.6: guard was only set around FBGRLogAppend, NOT
+    // around orig(). Cache-miss path called orig() with guard=NO → orig()
+    // called getBool: internally → our hook fired again with guard=NO →
+    // infinite recursion at depth 2053/1954 → stack overflow.
+    gFBGRMCHookGuard = YES;
+
+    BOOL result;
     BOOL forced = NO;
     if (FBGRCacheLookup(p.value, &forced)) {
-        // Cache hit: set guard only to protect the log call (ObjC)
-        gFBGRMCHookGuard = YES;
+        result = forced;
+        // Log is ObjC but guard is already set, so any re-entry hits bypass
         FBGRLogAppend([NSString stringWithFormat:@"MC getBool slotId=%llu → %@",
                        (unsigned long long)p.value, forced ? @"YES" : @"NO"]);
-        gFBGRMCHookGuard = NO;
-        return forced;
+    } else {
+        result = orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
     }
 
-    return orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
+    gFBGRMCHookGuard = NO;
+    return result;
 }
 
 static BOOL h_getBoolWithOptionsDefault(id self, SEL _cmd,
@@ -129,9 +137,13 @@ static BOOL h_getBoolWithOptionsDefault(id self, SEL _cmd,
     if (gFBGRMCHookGuard)
         return orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
 
+    gFBGRMCHookGuard = YES;
     BOOL forced = NO;
-    if (FBGRCacheLookup(p.value, &forced)) return forced;
-    return orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
+    BOOL result = FBGRCacheLookup(p.value, &forced)
+        ? forced
+        : (orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def);
+    gFBGRMCHookGuard = NO;
+    return result;
 }
 
 static void h_setShouldEnableScrollableTabBar(id self, SEL _cmd, BOOL v) {

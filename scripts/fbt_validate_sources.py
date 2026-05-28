@@ -72,14 +72,14 @@ if "json.gz" in (ROOT/"Makefile").read_text():
 else:
     err("Makefile: does not bundle .json.gz")
 
-# 9 — FBTabBar hook present (not UITabBar)
+# 9 — Overlay window approach (Glow-style, no FBTabBar hook)
 tweak = (ROOT/"src/Tweak.x").read_text()
-if "%hook FBTabBar" in tweak:
-    ok("Tweak.x: %hook FBTabBar (correct)")
+if "FBGROverlayWindow" in tweak or "ToastWindow" in tweak:
+    ok("Tweak.x: overlay window approach (Glow-style)")
+elif "%hook FBTabBar" in tweak:
+    ok("Tweak.x: %hook FBTabBar approach")
 else:
-    err("Tweak.x: missing %hook FBTabBar — check tab bar hook class")
-if "%hook UITabBar\n" in tweak and "%hook FBTabBar" not in tweak:
-    err("Tweak.x: only UITabBar hook present (wrong class for Facebook)")
+    err("Tweak.x: no long press activation mechanism found")
 
 print()
 if errors:
