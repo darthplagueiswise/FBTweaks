@@ -34,6 +34,7 @@ static NSInteger FBGRCacheFindUnlocked(uint64_t slotId) {
 }
 
 static void FBGRCacheSetUnlocked(uint64_t slotId, BOOL value) {
+    if (slotId == 0) return;
     NSInteger idx = FBGRCacheFindUnlocked(slotId);
     if (idx >= 0) {
         gCache[idx].value = value;
@@ -49,6 +50,7 @@ static void FBGRCacheSetUnlocked(uint64_t slotId, BOOL value) {
 }
 
 static void FBGRCacheClearUnlocked(uint64_t slotId) {
+    if (slotId == 0) return;
     NSInteger idx = FBGRCacheFindUnlocked(slotId);
     if (idx < 0) return;
     uint32_t n = gCacheCount;
@@ -75,8 +77,8 @@ void FBGRGateStoreWarmup(void) {
     [gCacheLock unlock];
 }
 
-// HOT PATH: reads RAM cache only.
 BOOL FBGRGateIsSet(uint64_t slotId) {
+    if (slotId == 0) return NO;
     uint32_t n = gCacheCount;
     for (uint32_t i = 0; i < n; i++) {
         if (gCache[i].set && gCache[i].slotId == slotId) return YES;
@@ -84,8 +86,8 @@ BOOL FBGRGateIsSet(uint64_t slotId) {
     return NO;
 }
 
-// HOT PATH: reads RAM cache only.
 BOOL FBGRGateGet(uint64_t slotId) {
+    if (slotId == 0) return NO;
     uint32_t n = gCacheCount;
     for (uint32_t i = 0; i < n; i++) {
         if (gCache[i].set && gCache[i].slotId == slotId) return gCache[i].value;
@@ -128,6 +130,11 @@ void FBGRGateClearAll(void) {
     [gCacheLock lock];
     gCacheCount = 0;
     [gCacheLock unlock];
+}
+
+NSUInteger FBGRGateOverrideCount(void) {
+    FBGRGateStoreInit();
+    return (NSUInteger)gCacheCount;
 }
 
 NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void) {

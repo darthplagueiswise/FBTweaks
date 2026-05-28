@@ -8,23 +8,24 @@
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../FBGramPrefix.h"
 
-extern BOOL      FBGRLiquidGlassIsHooked(void);
-extern void      FBGRMCGateHooksEnsureInstalled(void);
-extern void      FBGRMCGateHooksApplyPersistedOverrides(void);
-extern NSString *FBGRMCGateHooksDiagnostic(void);
-extern void      FBGRMCObserverFlush(void);
+extern BOOL       FBGRLiquidGlassIsHooked(void);
+extern void       FBGRMCGateHooksEnsureInstalled(void);
+extern void       FBGRMCGateHooksApplyPersistedOverrides(void);
+extern NSString  *FBGRMCGateHooksDiagnostic(void);
+extern void       FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
-extern NSString *FBGRMCObserverDump(void);
-extern BOOL      FBGRDogFoodIsEnabled(void);
-extern void      FBGRDogFoodSetEnabled(BOOL);
-extern BOOL      FBGRDogFoodPresentNagSheet(void);
-extern NSString *FBGRDogFoodDiagnostic(void);
+extern BOOL       FBGRDogFoodIsEnabled(void);
+extern void       FBGRDogFoodApplyPersistentState(void);
+extern NSString  *FBGRDogFoodDiagnostic(void);
+
+// Provided by Tweak.x / launcher hook
+void FBGRPresentMenu(void);
 
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,
     FBGRRootSectionAllParams = 1,
-    FBGRRootSectionObserver  = 2,
-    FBGRRootSectionDiag      = 3,
+    FBGRRootSectionDiag      = 2,
+    FBGRRootSectionObserver  = 3,
     FBGRRootSectionCount     = 4,
 };
 
@@ -83,40 +84,37 @@ void FBGRPresentMenu(void) {
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBGRGateStoreWarmup(); [self.tableView reloadData]; }
 - (void)doClose { [self dismissViewControllerAnimated:YES completion:nil]; }
 
-// ── TableView ─────────────────────────────────────────────────────────────────
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return FBGRRootSectionCount; }
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
     switch (s) {
         case FBGRRootSectionProviders: return (NSInteger)_providers.count;
         case FBGRRootSectionAllParams: return 1;
-        case FBGRRootSectionObserver:  return 2; // toggle + flush
-        case FBGRRootSectionDiag:      return 4; // apply hooks + hooks diag + log + reset all
+        case FBGRRootSectionDiag:      return 4; // apply + hooks diag + log + reset
+        case FBGRRootSectionObserver:  return 2; // capture toggle + flush
         default: return 0;
     }
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
-    return (@[@"Categorias", @"Catálogo Completo", @"MC Observer", @"Diagnóstico / Tools"])[(NSUInteger)s];
+    return (@[@"Categorias principais", @"Runtime Browser", @"Aplicação / Debug", @"Diagnóstico: MC Observer"])[(NSUInteger)s];
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
     if (s == FBGRRootSectionProviders) {
-        NSUInteger tot = FBGRGateAllOverrideSlotIds().count;
         FBGRMCCatalog *mc = [FBGRMCCatalog shared];
-        return [NSString stringWithFormat:@"%lu overrides ativos | total=%lu | bool=%lu | iOS=%lu | LG=%@ | %@",
-                (unsigned long)tot,
+        return [NSString stringWithFormat:@"%lu overrides ativos | total=%lu | bool seguros=%lu | iOS=%lu | LG=%@ | %@",
+                (unsigned long)FBGRGateAllOverrideSlotIds().count,
                 (unsigned long)mc.totalCount,
-                (unsigned long)mc.boolCount,
+                (unsigned long)mc.safeBoolCount,
                 (unsigned long)mc.iOSBoolCount,
                 FBGRLiquidGlassIsHooked() ? @"OK" : @"MISS",
                 mc.catalogSource ?: @"sem catálogo"];
     }
     if (s == FBGRRootSectionAllParams)
-        return @"Todos os 5374 params do ReactMobileConfigMetadata. Toggle = override persistente.";
+        return @"Switch só aparece para boolValue com slotId > 0. Params [0] e não-bool são somente leitura.";
     if (s == FBGRRootSectionObserver)
-        return @"Observer loga slotIds observados em runtime → mc_props_dump.json. "
-               @"Ativar por alguns minutos e fazer flush gera o catálogo ao vivo do app.";
+        return @"Diagnóstico somente: captura slotIds observados em runtime e salva mc_props_dump.json. Não aplica overrides.";
     return nil;
 }
 
@@ -147,16 +145,17 @@ void FBGRPresentMenu(void) {
     if (ip.section == FBGRRootSectionAllParams) {
         c.imageView.image = FBGRSymbol(@"list.bullet.rectangle", UIColor.systemTealColor);
         c.textLabel.text  = @"Todos os Params — Runtime Browser";
-        c.detailTextLabel.text = [NSString stringWithFormat:@"%lu params  |  busca + toggle",
-            (unsigned long)[FBGRMCCatalog shared].totalCount];
+        c.detailTextLabel.text = [NSString stringWithFormat:@"%lu params | %lu bool seguros | busca + toggle",
+            (unsigned long)[FBGRMCCatalog shared].totalCount,
+            (unsigned long)[FBGRMCCatalog shared].safeBoolCount];
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return c;
     }
 
     if (ip.section == FBGRRootSectionObserver) {
         if (ip.row == 0) {
-            c.textLabel.text = @"MC Observer";
-            c.detailTextLabel.text = [NSString stringWithFormat:@"%lu slotIds capturados",
+            c.textLabel.text = @"MC Observer (diagnóstico)";
+            c.detailTextLabel.text = [NSString stringWithFormat:@"%lu slotIds capturados; não aplica override",
                 (unsigned long)FBGRMCObserverSlotCount()];
             c.selectionStyle = UITableViewCellSelectionStyleNone;
             UISwitch *sw = [[UISwitch alloc] init];
@@ -166,17 +165,16 @@ void FBGRPresentMenu(void) {
             c.accessoryView = sw;
         } else {
             c.imageView.image = FBGRSymbol(@"arrow.down.doc", UIColor.systemOrangeColor);
-            c.textLabel.text  = @"Flush para disco agora";
+            c.textLabel.text  = @"Flush captura para disco";
             c.detailTextLabel.text = @"/var/mobile/Library/.../FBTweaks/mc_props_dump.json";
         }
         return c;
     }
 
-    // Diag
     if (ip.row == 0) {
         c.imageView.image = FBGRSymbol(@"bolt.fill", UIColor.systemYellowColor);
         c.textLabel.text  = @"Apply Hooks agora";
-        c.detailTextLabel.text = [NSString stringWithFormat:@"Aplica %lu override(s) salvos nesta sessão", (unsigned long)FBGRGateAllOverrideSlotIds().count];
+        c.detailTextLabel.text = [NSString stringWithFormat:@"Aplica %lu override(s) salvos + DogFood se ON", (unsigned long)FBGRGateAllOverrideSlotIds().count];
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.row == 1) {
         c.imageView.image = FBGRSymbol(@"wrench.and.screwdriver", UIColor.systemGreenColor);
@@ -186,6 +184,7 @@ void FBGRPresentMenu(void) {
     } else if (ip.row == 2) {
         c.imageView.image = FBGRSymbol(@"doc.text", UIColor.systemCyanColor);
         c.textLabel.text  = @"Log em tempo real";
+        c.detailTextLabel.text = @"Diagnóstico interno; não ativa feature";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
         c.textLabel.text = @"Resetar TODOS os overrides";
@@ -200,13 +199,11 @@ void FBGRPresentMenu(void) {
 
     if (ip.section == FBGRRootSectionProviders) {
         FBGRGateProvider *p = _providers[(NSUInteger)ip.row];
-        [self.navigationController pushViewController:
-            [[FBGRGateCategoryVC alloc] initWithProvider:p] animated:YES];
+        [self.navigationController pushViewController:[[FBGRGateCategoryVC alloc] initWithProvider:p] animated:YES];
         return;
     }
     if (ip.section == FBGRRootSectionAllParams) {
-        [self.navigationController pushViewController:
-            [[FBGRGateRuntimeBrowserVC alloc] initWithProvider:nil] animated:YES];
+        [self.navigationController pushViewController:[[FBGRGateRuntimeBrowserVC alloc] initWithProvider:nil] animated:YES];
         return;
     }
     if (ip.section == FBGRRootSectionObserver && ip.row == 1) {
@@ -220,18 +217,16 @@ void FBGRPresentMenu(void) {
             FBGRGateStoreWarmup();
             FBGRMCGateHooksApplyPersistedOverrides();
             FBGRMCGateHooksEnsureInstalled();
+            if (FBGRDogFoodIsEnabled()) FBGRDogFoodApplyPersistentState();
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Apply Hooks"
-                message:@"Hooks agendados. Os overrides salvos serão aplicados ao pipeline MobileConfig nesta sessão." preferredStyle:UIAlertControllerStyleAlert];
+                message:@"Hooks agendados. Overrides salvos e DogFood ON serão reaplicados nesta sessão." preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
             [tv reloadData];
         } else if (ip.row == 1) {
             NSString *diag = [NSString stringWithFormat:@"%@\n\n%@", FBGRMCGateHooksDiagnostic(), FBGRDogFoodDiagnostic() ?: @"DogFood diag unavailable"];
-            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Hooks Diag"
-                message:diag preferredStyle:UIAlertControllerStyleAlert];
-            [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(id _){
-                [UIPasteboard generalPasteboard].string = diag;
-            }]];
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Hooks Diag" message:diag preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(id _){ UIPasteboard.generalPasteboard.string = diag; }]];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
         } else if (ip.row == 2) {

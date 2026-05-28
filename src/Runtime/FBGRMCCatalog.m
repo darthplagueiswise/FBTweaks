@@ -15,6 +15,7 @@
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, FBGRMCParam *> *bySlotId;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *sorted;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *bools;
+@property(nonatomic, strong) NSArray<FBGRMCParam *> *safeBools;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *iOSBool;
 @property(nonatomic, copy) NSString *sourceDescription;
 @property(nonatomic) BOOL loaded;
@@ -129,6 +130,7 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         self.bySlotId = [NSMutableDictionary dictionary];
         self.sorted   = @[];
         self.bools    = @[];
+        self.safeBools = @[];
         self.iOSBool  = @[];
         self.sourceDescription = @"missing";
         return;
@@ -141,6 +143,7 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         self.bySlotId = [NSMutableDictionary dictionary];
         self.sorted   = @[];
         self.bools    = @[];
+        self.safeBools = @[];
         self.iOSBool  = @[];
         self.sourceDescription = source ?: @"parse-error";
         return;
@@ -152,6 +155,7 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         self.bySlotId = [NSMutableDictionary dictionary];
         self.sorted   = @[];
         self.bools    = @[];
+        self.safeBools = @[];
         self.iOSBool  = @[];
         self.sourceDescription = source ?: @"no-schema";
         return;
@@ -170,62 +174,62 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         p.paramKey    = (uint64_t)[v[@"paramKey"] unsignedLongLongValue];
         p.paramId     = (uint64_t)[v[@"paramId"] unsignedLongLongValue];
         p.configId    = (uint64_t)[v[@"configId"] unsignedLongLongValue];
-        p.fullKey     = fullKey;
+        p.fullKey     = fullKey ?: @"";
         p.type        = v[@"type"] ?: @"";
         p.unitType    = [v[@"unitType"] integerValue];
         id def        = v[@"defaultValue"];
         p.defaultBool = [def respondsToSelector:@selector(boolValue)] ? [def boolValue] : NO;
 
-        NSRange colon = [fullKey rangeOfString:@":"];
+        NSRange colon = [p.fullKey rangeOfString:@":"];
         if (colon.location != NSNotFound) {
-            p.group     = [fullKey substringToIndex:colon.location];
-            p.paramName = [fullKey substringFromIndex:colon.location + 1];
+            p.group     = [p.fullKey substringToIndex:colon.location];
+            p.paramName = [p.fullKey substringFromIndex:colon.location + 1];
         } else {
-            p.group     = fullKey;
-            p.paramName = fullKey;
+            p.group     = p.fullKey;
+            p.paramName = p.fullKey;
         }
 
-        if (p.slotId > 0) bySlot[@(p.slotId)] = p;
+        if (p.slotId > 0 && [p.type isEqualToString:@"boolValue"]) bySlot[@(p.slotId)] = p;
         [all addObject:p];
     }
 
     self.bySlotId = bySlot;
     self.sorted   = [all sortedArrayUsingComparator:^NSComparisonResult(FBGRMCParam *a, FBGRMCParam *b) {
-        return [@(a.slotId) compare:@(b.slotId)];
+        NSComparisonResult r = [@(a.slotId) compare:@(b.slotId)];
+        if (r != NSOrderedSame) return r;
+        return [a.fullKey compare:b.fullKey];
     }];
     self.bools = [self.sorted filteredArrayUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _) {
             return [p.type isEqualToString:@"boolValue"];
         }]];
-    self.iOSBool  = [self.sorted filteredArrayUsingPredicate:
+    self.safeBools = [self.bools filteredArrayUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _) {
-            return p.unitType == 4 && [p.type isEqualToString:@"boolValue"];
+            return p.slotId > 0;
+        }]];
+    self.iOSBool  = [self.bools filteredArrayUsingPredicate:
+        [NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _) {
+            return p.unitType == 4 && p.slotId > 0;
         }]];
     self.sourceDescription = source ?: @"unknown";
 
-    FBGRLog(@"MCCatalog: loaded %lu params (%lu bool, %lu iOS bool) source=%@",
+    FBGRLog(@"MCCatalog: loaded %lu params (%lu bool, %lu safe bool, %lu iOS bool) source=%@",
         (unsigned long)self.sorted.count,
         (unsigned long)self.bools.count,
+        (unsigned long)self.safeBools.count,
         (unsigned long)self.iOSBool.count,
         self.sourceDescription);
 }
 
 - (nullable FBGRMCParam *)paramForSlotId:(uint64_t)slotId {
     if (!self.loaded) [self loadIfNeeded];
+    if (slotId == 0) return nil;
     return self.bySlotId[@(slotId)];
 }
-- (NSArray<FBGRMCParam *> *)allParams {
-    if (!self.loaded) [self loadIfNeeded];
-    return self.sorted ?: @[];
-}
-- (NSArray<FBGRMCParam *> *)boolParams {
-    if (!self.loaded) [self loadIfNeeded];
-    return self.bools ?: @[];
-}
-- (NSArray<FBGRMCParam *> *)iOSBoolParams {
-    if (!self.loaded) [self loadIfNeeded];
-    return self.iOSBool ?: @[];
-}
+- (NSArray<FBGRMCParam *> *)allParams { if (!self.loaded) [self loadIfNeeded]; return self.sorted ?: @[]; }
+- (NSArray<FBGRMCParam *> *)boolParams { if (!self.loaded) [self loadIfNeeded]; return self.bools ?: @[]; }
+- (NSArray<FBGRMCParam *> *)safeBoolParams { if (!self.loaded) [self loadIfNeeded]; return self.safeBools ?: @[]; }
+- (NSArray<FBGRMCParam *> *)iOSBoolParams { if (!self.loaded) [self loadIfNeeded]; return self.iOSBool ?: @[]; }
 - (NSArray<FBGRMCParam *> *)searchParams:(NSString *)q {
     if (!self.loaded) [self loadIfNeeded];
     if (!q.length) return self.sorted ?: @[];
@@ -239,6 +243,7 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
 }
 - (NSUInteger)totalCount { if (!self.loaded) [self loadIfNeeded]; return self.sorted.count; }
 - (NSUInteger)boolCount { if (!self.loaded) [self loadIfNeeded]; return self.bools.count; }
+- (NSUInteger)safeBoolCount { if (!self.loaded) [self loadIfNeeded]; return self.safeBools.count; }
 - (NSUInteger)iOSBoolCount { if (!self.loaded) [self loadIfNeeded]; return self.iOSBool.count; }
 - (NSString *)catalogSource { if (!self.loaded) [self loadIfNeeded]; return self.sourceDescription ?: @"unknown"; }
 - (BOOL)isLoaded { return self.loaded; }

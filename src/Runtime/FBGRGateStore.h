@@ -14,6 +14,7 @@ extern "C" {
 //   - NSUserDefaults is used only when menu/toggles mutate state or during warmup.
 //   - hook hot paths call FBGRGateIsSet/FBGRGateGet and must hit RAM only.
 //   - no NSString/NSUserDefaults allocation in FBGRGateIsSet/FBGRGateGet.
+//   - slotId 0 is not a stable key and is intentionally ignored by setters.
 
 void FBGRGateStoreWarmup(void);
 
@@ -22,6 +23,7 @@ BOOL FBGRGateGet(uint64_t slotId);
 void FBGRGateSet(uint64_t slotId, BOOL value);
 void FBGRGateClear(uint64_t slotId);
 void FBGRGateClearAll(void);
+NSUInteger FBGRGateOverrideCount(void);
 
 NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void);
 

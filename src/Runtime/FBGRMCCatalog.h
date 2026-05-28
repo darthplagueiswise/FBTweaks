@@ -31,8 +31,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// All params, sorted by slotId
 - (NSArray<FBGRMCParam *> *)allParams;
 
-/// All boolValue params, regardless of unitType
+/// All boolValue params, including ambiguous slotId 0 entries
 - (NSArray<FBGRMCParam *> *)boolParams;
+
+/// Override-safe bool params only. These are the only rows that should get switches.
+- (NSArray<FBGRMCParam *> *)safeBoolParams;
 
 /// iOS-specific bool params only (unitType==4, type==boolValue)
 - (NSArray<FBGRMCParam *> *)iOSBoolParams;
@@ -42,6 +45,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property(nonatomic, readonly) NSUInteger totalCount;
 @property(nonatomic, readonly) NSUInteger boolCount;
+@property(nonatomic, readonly) NSUInteger safeBoolCount;
 @property(nonatomic, readonly) NSUInteger iOSBoolCount;
 @property(nonatomic, readonly) NSString *catalogSource;
 @property(nonatomic, readonly) BOOL isLoaded;
