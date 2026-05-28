@@ -34,7 +34,10 @@ for p in ['src/Hooks/FBGRLiquidGlassHooks.xm','src/Hooks/FBGRMCGateHooks.xm']:
 tw = (root / 'src/Tweak.x').read_text(errors='ignore')
 check('FBGRLiquidGlassEnsureInstalled' in tw, 'Tweak.x does not initialize LiquidGlass hook')
 check('FBGRMCGateHooksEnsureInstalled' not in tw, 'Tweak.x must not install MC gate hooks during launch')
-check('UILongPressGestureRecognizer' in tw and 'numberOfTouchesRequired = 2' in tw, 'Tweak.x must include two-finger long press menu gesture')
+check('%hook FBTabBarPressGestureRecognizer' in tw, 'Tweak.x must hook FBTabBarPressGestureRecognizer')
+check('initWithTarget:(id)target action:(SEL)action' in tw, 'Tweak.x must hijack native tab press initWithTarget:action:')
+check('numberOfTouchesRequired = 3' in tw and 'numberOfTapsRequired = 2' in tw, 'Tweak.x must include 3-finger double-tap fallback')
+check('numberOfTouchesRequired = 2' not in tw, 'Tweak.x must not require 2-finger gesture')
 
 mc = (root / 'src/Hooks/FBGRMCGateHooks.xm').read_text(errors='ignore')
 check('__attribute__((constructor))' not in mc, 'FBGRMCGateHooks.xm must not install from constructor')
