@@ -1,7 +1,9 @@
 // Tweak.x — FBTweaks bootstrap + long-press on UITabBar to open menu.
 //
 // Ativação: long-press 2 dedos por 0.65s na tab bar.
-// Keep launch light: do not install MobileConfig hooks in %ctor.
+// Mesmo padrão do WATweaks (long-press na UITableView de Settings).
+// Glow.dylib hookeia setTabBarViewOffsetFraction: na mesma tab bar —
+// não interfere porque usamos gesture recognizer, não hook de método.
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
@@ -28,7 +30,7 @@ static const void *kFBGRTabBarLP = &kFBGRTabBarLP;
 }
 - (void)lp:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
-    FBGRLogHook("TabBar", "long-press -> menu");
+    FBGRLogHook("TabBar", "long-press → menu");
     FBGRPresentMenu();
 }
 @end
@@ -37,7 +39,7 @@ static void FBGRAttachToTabBar(UITabBar *tb) {
     if (!tb || [objc_getAssociatedObject(tb, kFBGRTabBarLP) boolValue]) return;
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
         initWithTarget:[FBGRLPTarget shared] action:@selector(lp:)];
-    lp.numberOfTouchesRequired = 2;
+    lp.numberOfTouchesRequired = 2;      // 2-finger: avoids conflito com tap normal
     lp.minimumPressDuration    = 0.65;
     lp.cancelsTouchesInView    = NO;
     [tb addGestureRecognizer:lp];
@@ -45,6 +47,8 @@ static void FBGRAttachToTabBar(UITabBar *tb) {
     FBGRLogHook("TabBar", "long-press attached to %@", NSStringFromClass([tb class]));
 }
 
+// Hook UITabBar didMoveToWindow — fires whenever a tab bar is added to a window.
+// Same pattern WATweaks uses on UITableView.
 %hook UITabBar
 
 - (void)didMoveToWindow {
@@ -55,6 +59,7 @@ static void FBGRAttachToTabBar(UITabBar *tb) {
 
 %end
 
+// ── %ctor ─────────────────────────────────────────────────────────────────────
 %ctor {
     @autoreleasepool {
         FBGRLogHook("Main", "FBTweaks loaded into %@", NSBundle.mainBundle.bundleIdentifier);

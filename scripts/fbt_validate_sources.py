@@ -33,8 +33,24 @@ for p in ['src/Hooks/FBGRLiquidGlassHooks.xm','src/Hooks/FBGRMCGateHooks.xm']:
 
 tw = (root / 'src/Tweak.x').read_text(errors='ignore')
 check('FBGRLiquidGlassEnsureInstalled' in tw, 'Tweak.x does not initialize LiquidGlass hook')
-check('FBGRMCGateHooksEnsureInstalled' in tw, 'Tweak.x does not initialize MC gate hooks')
+check('FBGRMCGateHooksEnsureInstalled' not in tw, 'Tweak.x must not install MC gate hooks during launch')
 check('UILongPressGestureRecognizer' in tw and 'numberOfTouchesRequired = 2' in tw, 'Tweak.x must include two-finger long press menu gesture')
+
+mc = (root / 'src/Hooks/FBGRMCGateHooks.xm').read_text(errors='ignore')
+check('__attribute__((constructor))' not in mc, 'FBGRMCGateHooks.xm must not install from constructor')
+check('objc_copyClassList' not in mc, 'FBGRMCGateHooks.xm must not do global class scan')
+check('FBGRLogAppend(msg)' not in mc, 'FBGRMCGateHooks.xm must not log inside getBool hot path')
+check('NSStringFromClass([self class])' not in mc, 'FBGRMCGateHooks.xm must not allocate NSString in hook hot path')
+
+obs = (root / 'src/Hooks/FBGRMCPropsObserver.xm').read_text(errors='ignore')
+check('__attribute__((constructor))' not in obs, 'FBGRMCPropsObserver.xm must not install from constructor')
+check('FBGRPref(kFBGRMCObserverEnabled)' not in obs.split('static BOOL obsTrampoline')[1].split('return r;')[0], 'observer trampoline must use cached enabled flag')
+
+store = (root / 'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
+hot_is_set = store.split('BOOL FBGRGateIsSet')[1].split('BOOL FBGRGateGet')[0]
+hot_get = store.split('BOOL FBGRGateGet')[1].split('void FBGRGateSet')[0]
+check('FBGRPrefs' not in hot_is_set and 'NSString' not in hot_is_set, 'FBGRGateIsSet hot path must not use NSUserDefaults/NSString')
+check('FBGRPrefs' not in hot_get and 'NSString' not in hot_get, 'FBGRGateGet hot path must not use NSUserDefaults/NSString')
 
 meta = root / 'resources/runtime/ReactMobileConfigMetadata.json.gz'
 check(meta.exists(), 'ReactMobileConfigMetadata.json.gz missing')

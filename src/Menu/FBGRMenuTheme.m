@@ -28,8 +28,8 @@ void FBGRApplyTable(UITableView *tv, UIViewController *vc) {
 }
 void FBGRApplyCell(UITableViewCell *c, NSInteger idx, NSString *color) {
     c.backgroundColor = FBGRCell();
-    c.textLabel.textColor = FBGRText();
-    c.detailTextLabel.textColor = FBGRSub();
+    c.textLabel.color = FBGRText();
+    c.detailTextLabel.color = FBGRSub();
     c.textLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     c.detailTextLabel.font = [UIFont systemFontOfSize:12];
     c.tintColor = color ? FBGRAccentForProvider(color) : FBGRAccent(idx);

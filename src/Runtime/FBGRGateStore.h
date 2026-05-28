@@ -8,7 +8,15 @@ NS_ASSUME_NONNULL_BEGIN
 extern "C" {
 #endif
 
+// Persistent MobileConfig slot override store.
+//
+// Runtime rule:
+//   - NSUserDefaults is used only when menu/toggles mutate state or during warmup.
+//   - hook hot paths call FBGRGateIsSet/FBGRGateGet and must hit RAM only.
+//   - no NSString/NSUserDefaults allocation in FBGRGateIsSet/FBGRGateGet.
+
 void FBGRGateStoreWarmup(void);
+
 BOOL FBGRGateIsSet(uint64_t slotId);
 BOOL FBGRGateGet(uint64_t slotId);
 void FBGRGateSet(uint64_t slotId, BOOL value);

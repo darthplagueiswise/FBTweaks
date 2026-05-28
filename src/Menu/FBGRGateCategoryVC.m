@@ -3,7 +3,6 @@
 #import "FBGRGateRuntimeBrowserVC.h"
 #import "../Runtime/FBGRGateStore.h"
 #import "../Runtime/FBGRMCCatalog.h"
-#import "../FBGramPrefix.h"
 
 typedef NS_ENUM(NSInteger, FBGRCatSection) {
     FBGRCatSectionFeatured = 0,
