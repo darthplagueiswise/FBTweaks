@@ -8,18 +8,14 @@ NS_ASSUME_NONNULL_BEGIN
 extern "C" {
 #endif
 
-/// Persistent store for MobileConfig slot overrides.
-/// Maps slotId (uint64_t) to a forced BOOL value.
-/// Stored in NSUserDefaults suite com.darthplagueiswise.fbtweaks.
-/// Key format: "fbgr.slot.<slotId>"
-
+void FBGRGateStoreWarmup(void);
 BOOL FBGRGateIsSet(uint64_t slotId);
 BOOL FBGRGateGet(uint64_t slotId);
 void FBGRGateSet(uint64_t slotId, BOOL value);
 void FBGRGateClear(uint64_t slotId);
 void FBGRGateClearAll(void);
 
-NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void);  // returns uint64 as NSNumber
+NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void);
 
 #ifdef __cplusplus
 }
