@@ -116,6 +116,17 @@
                 F(816,  @"enable_employee_debug_tool",   @"debug tool"),
                 F(827,  @"enable_theme_override",        @"tema override"),
             ]],
+        // ── DogFood / Internal ──────────────────────────────────────────────────────
+        // Source: binary analysis v563 — FBDogFoodUI Swift module
+        // _TtC11FBDogFoodUI17DogFoodController confirmed in Facebook binary
+        // FBDogFood-managedPhoneFlag = YES → app trata como "Gold managed device"
+        [FBGRGateProvider id:@"dogfood" title:@"DogFood / Internal" icon:@"ladybug.fill" color:@"orange"
+            flags:@[
+                F(0xDDF0, @"managedPhoneFlag (FBDogFood)", @"NSUserDefaults standard key — ativa Gold managed device mode"),
+                F(874,    @"fb_ford:is_employee",          @"MC slotId — employee gate principal"),
+                F(816,    @"enable_employee_debug_tool",   @"fb_daily_games_mc — debug tool"),
+                F(3103,   @"is_internal_user_indicator",   @"oculus_mobile_core — internal indicator"),
+            ]],
     ];
     });
     return providers;

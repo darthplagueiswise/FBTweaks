@@ -14,6 +14,10 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern NSString *FBGRMCObserverDump(void);
+extern BOOL      FBGRDogFoodIsEnabled(void);
+extern void      FBGRDogFoodSetEnabled(BOOL);
+extern BOOL      FBGRDogFoodPresentNagSheet(void);
+extern NSString *FBGRDogFoodDiagnostic(void);
 
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,

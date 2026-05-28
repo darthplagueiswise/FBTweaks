@@ -16,6 +16,8 @@
 // extern (não extern "C") — arquivo .x compila como ObjC, não C++
 extern void FBGRLiquidGlassEnsureInstalled(void);
 extern void FBGRMCGateHooksEnsureInstalled(void);
+extern BOOL FBGRDogFoodIsEnabled(void);
+extern NSString *FBGRDogFoodDiagnostic(void);
 
 // ── Gesture target ────────────────────────────────────────────────────────────
 static const void *kFBGRGestureKey = &kFBGRGestureKey;

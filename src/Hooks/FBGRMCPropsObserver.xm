@@ -28,10 +28,17 @@ static void obsInit(void) {
     });
 }
 
+static __thread BOOL gFBGRObsGuard = NO;
+
 static BOOL obsTrample(id self, SEL _cmd, FBObs_mc_bool_param_t p, id opts) {
     NSString *cls = NSStringFromClass([self class]);
     ObsIMP orig = gOrigs[cls] ? (ObsIMP)[gOrigs[cls] pointerValue] : NULL;
+    // Reentrancy guard: same reason as FBGRMCGateHooks — unitTypeFromParameter
+    // calls getBool: internally, re-entering this hook.
+    if (gFBGRObsGuard) return orig ? orig(self, _cmd, p, opts) : NO;
+    gFBGRObsGuard = YES;
     BOOL r = orig ? orig(self, _cmd, p, opts) : NO;
+    gFBGRObsGuard = NO;
     if (FBGRPref(kFBGRMCObserverEnabled)) {
         uint64_t s = p.value;
         dispatch_async(gQ, ^{
