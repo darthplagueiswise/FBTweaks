@@ -45,6 +45,9 @@ check('__attribute__((constructor))' not in mc, 'FBGRMCGateHooks.xm must not ins
 check('objc_copyClassList' not in mc, 'FBGRMCGateHooks.xm must not do global class scan')
 check('FBGRLogAppend(msg)' not in mc, 'FBGRMCGateHooks.xm must not log inside getBool hot path')
 check('NSStringFromClass([self class])' not in mc, 'FBGRMCGateHooks.xm must not allocate NSString in hook hot path')
+check('if (gFBGRMCHookGuard) return orig ?' not in mc, 'FBGRMCGateHooks guard must not call orig during guarded re-entry')
+check('if (gFBGRMCHookGuard) return def;' in mc, 'FBGRMCGateHooks default path must return def during guarded re-entry')
+check('dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC))' in mc, 'FBGRMCGateHooks install must be deferred after switch event')
 
 obs = (root / 'src/Hooks/FBGRMCPropsObserver.xm').read_text(errors='ignore')
 check('__attribute__((constructor))' not in obs, 'FBGRMCPropsObserver.xm must not install from constructor')

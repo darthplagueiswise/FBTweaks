@@ -83,12 +83,18 @@ typedef BOOL (*GetBoolWDIMP)(id, SEL, mc_bool_param_t, id, BOOL);
 typedef void (*SetScrollIMP)(id, SEL, BOOL);
 
 static BOOL h_getBoolWithOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
-    IMP orig = FBGRGetOrig(object_getClass(self), 0);
-    if (gFBGRMCHookGuard) return orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
+    // Critical recursion guard:
+    // Some FBSharedFramework MC resolvers call back into another getBool while the
+    // original IMP is still resolving the current param. If we call orig again
+    // while guarded, the original re-enters the hooked selector forever:
+    //   FBTweaks -> FBSharedFramework -> FBTweaks -> ... -> stack guard crash.
+    // Therefore guarded re-entry must return a neutral fallback immediately.
+    if (gFBGRMCHookGuard) return NO;
 
     BOOL forced = NO;
     if (FBGRCacheLookup(p.value, &forced)) return forced;
 
+    IMP orig = FBGRGetOrig(object_getClass(self), 0);
     gFBGRMCHookGuard = YES;
     BOOL result = orig ? ((GetBoolIMP)orig)(self, _cmd, p, opts) : NO;
     gFBGRMCHookGuard = NO;
@@ -96,12 +102,14 @@ static BOOL h_getBoolWithOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) 
 }
 
 static BOOL h_getBoolWithOptionsDefault(id self, SEL _cmd, mc_bool_param_t p, id opts, BOOL def) {
-    IMP orig = FBGRGetOrig(object_getClass(self), 1);
-    if (gFBGRMCHookGuard) return orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
+    // Same recursion rule as getBool:withOptions:. When this path has a default,
+    // the safest guarded fallback is the callsite default.
+    if (gFBGRMCHookGuard) return def;
 
     BOOL forced = NO;
     if (FBGRCacheLookup(p.value, &forced)) return forced;
 
+    IMP orig = FBGRGetOrig(object_getClass(self), 1);
     gFBGRMCHookGuard = YES;
     BOOL result = orig ? ((GetBoolWDIMP)orig)(self, _cmd, p, opts, def) : def;
     gFBGRMCHookGuard = NO;
@@ -178,7 +186,10 @@ static void FBGRMCInstallHooksInternal(void) {
 }
 
 extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{ FBGRMCInstallHooksInternal(); });
+    // Do not install synchronously from UISwitch valueChanged. Let UIKit finish
+    // the toggle/menu update first, then hook MC on the next runloop slice.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ FBGRMCInstallHooksInternal(); });
 }
 
 extern "C" void FBGRMCGateCacheRefresh(void) {
