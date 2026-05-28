@@ -33,8 +33,11 @@ for p in ['src/Hooks/FBGRLiquidGlassHooks.xm','src/Hooks/FBGRMCGateHooks.xm']:
 
 tw = (root / 'src/Tweak.x').read_text(errors='ignore')
 check('FBGRLiquidGlassEnsureInstalled' in tw, 'Tweak.x does not initialize LiquidGlass hook')
-check('FBGRMCGateHooksEnsureInstalled' not in tw, 'Tweak.x must not install MC gate hooks during launch')
-check('FBGRMCGateHooksEnsureInstalled();' not in (root / 'src/Menu/FBGRSurfaceListVC.m').read_text(errors='ignore'), 'menu must not install MC gate hooks on open')
+check('FBGRMCGateHooksApplyPersistedOverrides' in tw, 'Tweak.x must warm persisted overrides on launch')
+check('FBGRMCGateHooksEnsureInstalled();' not in tw, 'Tweak.x must not directly install MC gate hooks during launch')
+surf = (root / 'src/Menu/FBGRSurfaceListVC.m').read_text(errors='ignore')
+check('Apply Hooks agora' in surf, 'Surface menu must expose Apply Hooks button')
+check('FBGRMCGateHooksApplyPersistedOverrides' in surf, 'Apply Hooks must use persisted override apply API')
 check('%hook FDSTouchStateAnnouncingControl' in tw, 'Tweak.x must hook exact FDSTouchStateAnnouncingControl tab button')
 check('FBGRIsExactTabButtonCandidate' in tw and 'FBGRSizeLooksLikeTabButton' in tw, 'Tweak.x must filter exact 44x52 tab button')
 check('numberOfTapsRequired = 3' in tw, 'Tweak.x must include one-finger triple tap fallback only on exact button')
@@ -48,6 +51,7 @@ check('NSStringFromClass([self class])' not in mc, 'FBGRMCGateHooks.xm must not 
 check('if (gFBGRMCHookGuard) return orig ?' not in mc, 'FBGRMCGateHooks guard must not call orig during guarded re-entry')
 check('if (gFBGRMCHookGuard) return def;' in mc, 'FBGRMCGateHooks default path must return def during guarded re-entry')
 check('dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC))' in mc, 'FBGRMCGateHooks install must be deferred after switch event')
+check('FBGRMCGateHooksApplyPersistedOverrides' in mc, 'FBGRMCGateHooks must export persisted apply API')
 
 obs = (root / 'src/Hooks/FBGRMCPropsObserver.xm').read_text(errors='ignore')
 check('__attribute__((constructor))' not in obs, 'FBGRMCPropsObserver.xm must not install from constructor')

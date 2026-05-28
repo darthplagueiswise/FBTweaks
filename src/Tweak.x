@@ -18,6 +18,8 @@
 #import "Menu/FBGRSurfaceListVC.h"
 
 extern void FBGRLiquidGlassEnsureInstalled(void);
+extern void FBGRGateStoreWarmup(void);
+extern void FBGRMCGateHooksApplyPersistedOverrides(void);
 
 static const void *kFBGRExactTabButtonAttached = &kFBGRExactTabButtonAttached;
 
@@ -203,6 +205,8 @@ static void FBGRScanAllWindowsForExactTabButton(void) {
     @autoreleasepool {
         FBGRLogHook("Main", "FBTweaks loaded into %@", NSBundle.mainBundle.bundleIdentifier);
         FBGRLiquidGlassEnsureInstalled();
+        FBGRGateStoreWarmup();
+        FBGRMCGateHooksApplyPersistedOverrides();
         FBGRScanAllWindowsForExactTabButton();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRScanAllWindowsForExactTabButton(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRScanAllWindowsForExactTabButton(); });

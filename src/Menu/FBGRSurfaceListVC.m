@@ -10,6 +10,7 @@
 
 extern BOOL      FBGRLiquidGlassIsHooked(void);
 extern void      FBGRMCGateHooksEnsureInstalled(void);
+extern void      FBGRMCGateHooksApplyPersistedOverrides(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
@@ -75,10 +76,11 @@ void FBGRPresentMenu(void) {
     FBGRApplyTable(self.tableView, self);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(doClose)];
+    FBGRGateStoreWarmup();
     [[FBGRMCCatalog shared] loadIfNeeded];
 }
 
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBGRGateStoreWarmup(); [self.tableView reloadData]; }
 - (void)doClose { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 // ── TableView ─────────────────────────────────────────────────────────────────
@@ -89,7 +91,7 @@ void FBGRPresentMenu(void) {
         case FBGRRootSectionProviders: return (NSInteger)_providers.count;
         case FBGRRootSectionAllParams: return 1;
         case FBGRRootSectionObserver:  return 2; // toggle + flush
-        case FBGRRootSectionDiag:      return 3; // hooks diag + log + reset all
+        case FBGRRootSectionDiag:      return 4; // apply hooks + hooks diag + log + reset all
         default: return 0;
     }
 }
@@ -172,11 +174,16 @@ void FBGRPresentMenu(void) {
 
     // Diag
     if (ip.row == 0) {
+        c.imageView.image = FBGRSymbol(@"bolt.fill", UIColor.systemYellowColor);
+        c.textLabel.text  = @"Apply Hooks agora";
+        c.detailTextLabel.text = [NSString stringWithFormat:@"Aplica %lu override(s) salvos nesta sessão", (unsigned long)FBGRGateAllOverrideSlotIds().count];
+        c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (ip.row == 1) {
         c.imageView.image = FBGRSymbol(@"wrench.and.screwdriver", UIColor.systemGreenColor);
         c.textLabel.text  = @"Hooks Diagnóstico";
         c.detailTextLabel.text = @"Ver estado dos hooks instalados";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if (ip.row == 1) {
+    } else if (ip.row == 2) {
         c.imageView.image = FBGRSymbol(@"doc.text", UIColor.systemCyanColor);
         c.textLabel.text  = @"Log em tempo real";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -210,6 +217,15 @@ void FBGRPresentMenu(void) {
     }
     if (ip.section == FBGRRootSectionDiag) {
         if (ip.row == 0) {
+            FBGRGateStoreWarmup();
+            FBGRMCGateHooksApplyPersistedOverrides();
+            FBGRMCGateHooksEnsureInstalled();
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Apply Hooks"
+                message:@"Hooks agendados. Os overrides salvos serão aplicados ao pipeline MobileConfig nesta sessão." preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+            [tv reloadData];
+        } else if (ip.row == 1) {
             NSString *diag = [NSString stringWithFormat:@"%@\n\n%@", FBGRMCGateHooksDiagnostic(), FBGRDogFoodDiagnostic() ?: @"DogFood diag unavailable"];
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Hooks Diag"
                 message:diag preferredStyle:UIAlertControllerStyleAlert];
@@ -218,7 +234,7 @@ void FBGRPresentMenu(void) {
             }]];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
-        } else if (ip.row == 1) {
+        } else if (ip.row == 2) {
             [self.navigationController pushViewController:[FBGRLogViewController new] animated:YES];
         } else {
             FBGRGateClearAll();

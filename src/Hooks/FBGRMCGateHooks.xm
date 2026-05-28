@@ -192,6 +192,18 @@ extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
                    dispatch_get_main_queue(), ^{ FBGRMCInstallHooksInternal(); });
 }
 
+
+extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) {
+    // Called from startup and Apply Hooks. It warms the RAM cache from persisted
+    // NSUserDefaults first, then installs MC hooks only if there is at least one
+    // saved override. This is how overrides persist across Facebook restarts
+    // without installing the MC hook when the tweak is unused.
+    FBGRCacheRebuild();
+    if (gOverrideCacheN <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ FBGRMCInstallHooksInternal(); });
+}
+
 extern "C" void FBGRMCGateCacheRefresh(void) {
     if (gFBGRMCInstalled) FBGRCacheRebuild();
     else if (FBGRGateAllOverrideSlotIds().count > 0) FBGRMCGateHooksEnsureInstalled();

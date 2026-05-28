@@ -45,12 +45,13 @@ extern void FBGRMCGateHooksEnsureInstalled(void);
     self.navigationItem.searchController = _search;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
+    FBGRGateStoreWarmup();
     [[FBGRMCCatalog shared] loadIfNeeded];
     [self rebuildParams];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated]; [self rebuildParams]; [self.tableView reloadData];
+    [super viewWillAppear:animated]; FBGRGateStoreWarmup(); [self rebuildParams]; [self.tableView reloadData];
 }
 
 - (void)filterChanged { [self rebuildParams]; [self.tableView reloadData]; }
@@ -174,6 +175,8 @@ extern void FBGRMCGateHooksEnsureInstalled(void);
     // For non-bool params: toggle override on/off
     if (FBGRGateIsSet(p.slotId)) FBGRGateClear(p.slotId);
     else FBGRGateSet(p.slotId, YES);
+    FBGRMCGateHooksEnsureInstalled();
+    FBGRMCGateCacheRefresh();
     [tv reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
 }
 

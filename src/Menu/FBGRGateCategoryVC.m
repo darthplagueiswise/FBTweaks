@@ -35,11 +35,12 @@ typedef NS_ENUM(NSInteger, FBGRCatSection) {
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithTitle:@"Limpar tudo" style:UIBarButtonItemStylePlain
         target:self action:@selector(clearAll)];
+    FBGRGateStoreWarmup();
     [[FBGRMCCatalog shared] loadIfNeeded];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated]; [self.tableView reloadData];
+    [super viewWillAppear:animated]; FBGRGateStoreWarmup(); [self.tableView reloadData];
 }
 
 - (void)clearAll {
