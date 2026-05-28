@@ -153,9 +153,7 @@ typedef NS_ENUM(NSInteger, FBGRCatSection) {
     } else if ([self.provider.providerID isEqualToString:@"dogfood"] && ip.row == 1) {
         if (!FBGRDogFoodPresentNagSheet()) {
             NSString *diag = FBGRDogFoodDiagnostic() ?: @"n/a";
-            NSString *msg = [@"Não consegui criar o nag sheet nativo. Diagnóstico:
-
-" stringByAppendingString:diag];
+            NSString *msg = [@"Não consegui criar o nag sheet nativo. Diagnóstico:\n\n" stringByAppendingString:diag];
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"DogFood" message:msg preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(__unused id x){ UIPasteboard.generalPasteboard.string = diag; }]];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
