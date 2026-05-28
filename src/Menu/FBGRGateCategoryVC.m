@@ -5,6 +5,8 @@
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../FBGramPrefix.h"
 
+extern void FBGRMCGateCacheRefresh(void); // refresh C cache after override change
+
 typedef NS_ENUM(NSInteger, FBGRCatSection) {
     FBGRCatSectionFeatured = 0,
     FBGRCatSectionActions  = 1,
@@ -38,6 +40,7 @@ typedef NS_ENUM(NSInteger, FBGRCatSection) {
 - (void)clearAll {
     for (FBGRFeaturedFlag *f in self.provider.featured)
         if (f.slotId > 0) FBGRGateClear(f.slotId);
+    FBGRMCGateCacheRefresh();
     [self.tableView reloadData];
 }
 
@@ -139,6 +142,7 @@ typedef NS_ENUM(NSInteger, FBGRCatSection) {
         if (sw.isOn) FBGRGateSet(flag.slotId, YES);
         else FBGRGateClear(flag.slotId);
     }
+    FBGRMCGateCacheRefresh();  // update C-level cache immediately
     NSIndexPath *ip = [NSIndexPath indexPathForRow:sw.tag inSection:FBGRCatSectionFeatured];
     [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:FBGRCatSectionFeatured]

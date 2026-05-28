@@ -3,6 +3,8 @@
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../Runtime/FBGRGateStore.h"
 
+extern void FBGRMCGateCacheRefresh(void);
+
 @interface FBGRGateRuntimeBrowserVC ()
 @property(nonatomic, strong) FBGRGateProvider *provider;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *allParams;
@@ -172,6 +174,7 @@
     FBGRMCParam *p = self.visible[(NSUInteger)sw.tag];
     if (sw.isOn) FBGRGateSet(p.slotId, YES);
     else         FBGRGateClear(p.slotId);
+    FBGRMCGateCacheRefresh();
     NSIndexPath *ip = [NSIndexPath indexPathForRow:sw.tag inSection:0];
     [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
 }

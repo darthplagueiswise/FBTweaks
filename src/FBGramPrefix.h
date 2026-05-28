@@ -30,3 +30,6 @@ static NSString * const kFBGRMCObserverEnabled   = @"fbgr_mc_observer_enabled";
 // ── Logging ───────────────────────────────────────────────────────────────────
 #define FBGRLog(fmt,...)         NSLog(@"[FBTweaks] "     fmt, ##__VA_ARGS__)
 #define FBGRLogHook(tag,fmt,...) NSLog(@"[FBTweaks][" tag "] " fmt, ##__VA_ARGS__)
+
+// ── MCGate cache refresh (call after toggling overrides in menu) ──────────────
+// Declared here so menu .m files can call it without a separate header
