@@ -101,12 +101,17 @@ static NSArray *FBGRDogFoodSeedObjects(void) {
     return seeds;
 }
 
-static void FBGRDogFoodEnqueue(id obj, NSMutableArray *queue, NSHashTable *seen) {
+static void FBGRDogFoodEnqueue(id obj, NSMutableArray *queue, NSHashTable *seen, NSUInteger depth, NSString *src) {
     if (!obj) return;
-    if (![obj isKindOfClass:NSObject.class]) return;
+    @try {
+        if (![obj isKindOfClass:NSObject.class]) return;
+    } @catch (__unused NSException *e) {
+        return;
+    }
     if ([seen containsObject:obj]) return;
     [seen addObject:obj];
-    [queue addObject:obj];
+    NSString *safeSrc = src.length ? src : NSStringFromClass([obj class]);
+    [queue addObject:@{ @"obj": obj, @"depth": @(depth), @"src": safeSrc ?: @"object" }];
 }
 
 static id FBGRDogFoodSearchObjectForSession(id root, NSString *sourcePrefix, NSUInteger maxDepth) {
@@ -125,11 +130,20 @@ static id FBGRDogFoodSearchObjectForSession(id root, NSString *sourcePrefix, NSU
     ];
 
     while (queue.count) {
-        NSDictionary *entry = queue.firstObject;
+        id entry = queue.firstObject;
         [queue removeObjectAtIndex:0];
-        id obj = entry[@"obj"];
-        NSUInteger depth = [entry[@"depth"] unsignedIntegerValue];
-        NSString *src = entry[@"src"];
+        id obj = nil;
+        NSUInteger depth = 0;
+        NSString *src = @"entry";
+        if ([entry isKindOfClass:NSDictionary.class]) {
+            NSDictionary *dict = (NSDictionary *)entry;
+            obj = dict[@"obj"];
+            depth = [dict[@"depth"] unsignedIntegerValue];
+            src = dict[@"src"] ?: @"entry";
+        } else {
+            obj = entry;
+            src = NSStringFromClass([obj class]) ?: @"rawEntry";
+        }
 
         if (FBGRDogFoodLooksLikeSession(obj)) {
             gLastDogFoodSessionSource = src;
@@ -154,21 +168,21 @@ static id FBGRDogFoodSearchObjectForSession(id root, NSString *sourcePrefix, NSU
 
         if ([obj isKindOfClass:UIViewController.class]) {
             UIViewController *vc = obj;
-            FBGRDogFoodEnqueue(vc.view, queue, seen);
-            if (vc.navigationController) FBGRDogFoodEnqueue(vc.navigationController, queue, seen);
-            if (vc.tabBarController) FBGRDogFoodEnqueue(vc.tabBarController, queue, seen);
-            if (vc.parentViewController) FBGRDogFoodEnqueue(vc.parentViewController, queue, seen);
-            if (vc.presentingViewController) FBGRDogFoodEnqueue(vc.presentingViewController, queue, seen);
-            if (vc.presentedViewController) FBGRDogFoodEnqueue(vc.presentedViewController, queue, seen);
-            for (UIViewController *child in vc.childViewControllers) FBGRDogFoodEnqueue(child, queue, seen);
+            FBGRDogFoodEnqueue(vc.view, queue, seen, depth + 1, [src stringByAppendingString:@".view"]);
+            if (vc.navigationController) FBGRDogFoodEnqueue(vc.navigationController, queue, seen, depth + 1, [src stringByAppendingString:@".navigationController"]);
+            if (vc.tabBarController) FBGRDogFoodEnqueue(vc.tabBarController, queue, seen, depth + 1, [src stringByAppendingString:@".tabBarController"]);
+            if (vc.parentViewController) FBGRDogFoodEnqueue(vc.parentViewController, queue, seen, depth + 1, [src stringByAppendingString:@".parentViewController"]);
+            if (vc.presentingViewController) FBGRDogFoodEnqueue(vc.presentingViewController, queue, seen, depth + 1, [src stringByAppendingString:@".presentingViewController"]);
+            if (vc.presentedViewController) FBGRDogFoodEnqueue(vc.presentedViewController, queue, seen, depth + 1, [src stringByAppendingString:@".presentedViewController"]);
+            for (UIViewController *child in vc.childViewControllers) FBGRDogFoodEnqueue(child, queue, seen, depth + 1, [src stringByAppendingFormat:@".child(%@)", NSStringFromClass([child class])]);
         } else if ([obj isKindOfClass:UIView.class]) {
             UIView *v = obj;
-            if (v.nextResponder) FBGRDogFoodEnqueue(v.nextResponder, queue, seen);
-            if (v.superview) FBGRDogFoodEnqueue(v.superview, queue, seen);
-            for (UIView *sub in v.subviews) FBGRDogFoodEnqueue(sub, queue, seen);
+            if (v.nextResponder) FBGRDogFoodEnqueue(v.nextResponder, queue, seen, depth + 1, [src stringByAppendingString:@".nextResponder"]);
+            if (v.superview) FBGRDogFoodEnqueue(v.superview, queue, seen, depth + 1, [src stringByAppendingString:@".superview"]);
+            for (UIView *sub in v.subviews) FBGRDogFoodEnqueue(sub, queue, seen, depth + 1, [src stringByAppendingFormat:@".subview(%@)", NSStringFromClass([sub class])]);
         } else if ([obj isKindOfClass:UIWindow.class]) {
             UIWindow *w = obj;
-            if (w.rootViewController) FBGRDogFoodEnqueue(w.rootViewController, queue, seen);
+            if (w.rootViewController) FBGRDogFoodEnqueue(w.rootViewController, queue, seen, depth + 1, [src stringByAppendingString:@".rootViewController"]);
         }
 
         // Keep only cheap object graph sources. Do not enumerate every ivar of every object;
