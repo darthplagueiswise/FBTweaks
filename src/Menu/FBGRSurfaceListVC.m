@@ -10,6 +10,7 @@
 
 extern BOOL      FBGRLiquidGlassIsHooked(void);
 extern void      FBGRMCGateHooksEnsureInstalled(void);
+extern void      FBGRMCGateCacheRefresh(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern NSString *FBGRMCNativeHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);

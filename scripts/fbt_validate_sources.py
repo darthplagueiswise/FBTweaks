@@ -82,6 +82,15 @@ else:
     err("Tweak.x: no long press activation mechanism found")
 
 print()
+# Compile guard: SurfaceList calls FBGRMCGateCacheRefresh from a .m file, so it must declare it.
+surf_path = ROOT / 'src/Menu/FBGRSurfaceListVC.m'
+if surf_path.exists():
+    surf = surf_path.read_text(errors='ignore')
+    if 'FBGRMCGateCacheRefresh();' in surf and 'extern void      FBGRMCGateCacheRefresh(void);' not in surf and 'extern void FBGRMCGateCacheRefresh(void);' not in surf:
+        err('FBGRSurfaceListVC.m calls FBGRMCGateCacheRefresh but does not declare extern')
+    else:
+        ok('SurfaceList declares FBGRMCGateCacheRefresh')
+
 if errors:
     for e in errors: print(f"  ERR  {e}")
     sys.exit(1)
