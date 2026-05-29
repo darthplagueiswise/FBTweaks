@@ -10,10 +10,11 @@
 
 extern BOOL      FBGRLiquidGlassIsHooked(void);
 extern void      FBGRMCGateHooksEnsureInstalled(void);
-extern void      FBGRMCGateCacheRefresh(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern NSString *FBGRMCNativeHooksDiagnostic(void);
+extern void      FBGRMCNativeHooksEnsureInstalled(void);
 extern void      FBGRMCObserverFlush(void);
+extern void      FBGRMCObserverEnsureInstalled(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern NSString *FBGRMCObserverDump(void);
 extern BOOL      FBGRDogFoodIsEnabled(void);
@@ -79,7 +80,6 @@ void FBGRPresentMenu(void) {
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(doClose)];
     [[FBGRMCCatalog shared] loadIfNeeded];
-    FBGRMCGateHooksEnsureInstalled();
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
@@ -289,6 +289,10 @@ void FBGRPresentMenu(void) {
 - (void)observerToggled:(UISwitch *)sw {
     [FBGRPrefs() setBool:sw.isOn forKey:kFBGRMCObserverEnabled];
     [FBGRPrefs() synchronize];
+    if (sw.isOn) {
+        FBGRMCObserverEnsureInstalled();
+        FBGRMCNativeHooksEnsureInstalled();
+    }
 }
 
 @end

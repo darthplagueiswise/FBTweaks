@@ -144,7 +144,6 @@ static void FBGRSetupOverlayWindow(void) {
         FBGRLogHook("Main", "FBTweaks loaded into %@",
             NSBundle.mainBundle.bundleIdentifier);
         FBGRLiquidGlassEnsureInstalled();
-        FBGRMCGateHooksEnsureInstalled();
         FBGRLogHook("Main", "init done");
     }
 }

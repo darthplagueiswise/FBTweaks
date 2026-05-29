@@ -60,10 +60,11 @@ extern "C" NSString *FBGRMCNativeHooksDiagnostic(void) {
         (unsigned long long)gMCDNativeCallCount];
 }
 
-__attribute__((constructor))
-static void FBGRMCNativeHooksCtor(void) {
-    // Delayed 2.5s like the other hooks so framework symbols are bound.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+extern "C" void FBGRMCNativeHooksEnsureInstalled(void) {
+    static BOOL scheduled = NO;
+    if (orig_MCDGetBool || scheduled) return;
+    scheduled = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         struct rebinding r = {
             "MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
@@ -73,5 +74,8 @@ static void FBGRMCNativeHooksCtor(void) {
         int rc = rebind_symbols((struct rebinding[1]){ r }, 1);
         FBGRLogAppend([NSString stringWithFormat:
             @"MCNativeHooks: rebind rc=%d orig=%p", rc, orig_MCDGetBool]);
+        scheduled = NO;
     });
 }
+
+// No constructor: installed lazily from Observer/diagnostics only.

@@ -82,14 +82,26 @@ else:
     err("Tweak.x: no long press activation mechanism found")
 
 print()
-# Compile guard: SurfaceList calls FBGRMCGateCacheRefresh from a .m file, so it must declare it.
-surf_path = ROOT / 'src/Menu/FBGRSurfaceListVC.m'
-if surf_path.exists():
-    surf = surf_path.read_text(errors='ignore')
-    if 'FBGRMCGateCacheRefresh();' in surf and 'extern void      FBGRMCGateCacheRefresh(void);' not in surf and 'extern void FBGRMCGateCacheRefresh(void);' not in surf:
-        err('FBGRSurfaceListVC.m calls FBGRMCGateCacheRefresh but does not declare extern')
-    else:
-        ok('SurfaceList declares FBGRMCGateCacheRefresh')
+
+# Beta startup safety: high-risk MC hooks must be lazy, not constructors.
+for rel in [
+    "src/Hooks/FBGRMCGateHooks.xm",
+    "src/Hooks/FBGRMCPropsObserver.xm",
+    "src/Hooks/FBGRMCNativeHooks.xm",
+]:
+    p = ROOT / rel
+    if p.exists():
+        txt = p.read_text(errors="ignore")
+        if "__attribute__((constructor))" in txt or "%ctor" in txt:
+            fail(f"{rel} must not install from constructor/startup")
+        if "objc_copyClassList" in txt or "objc_copyImageNames" in txt or "objc_copyClassNamesForImage" in txt:
+            fail(f"{rel} must not do broad runtime class/image scan")
+
+tweak = ROOT / "src/Tweak.x"
+if tweak.exists():
+    txt = tweak.read_text(errors="ignore")
+    if "FBGRMCGateHooksEnsureInstalled();" in txt.split("%ctor", 1)[-1]:
+        fail("Tweak.x must not install MC hooks from %ctor")
 
 if errors:
     for e in errors: print(f"  ERR  {e}")

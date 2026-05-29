@@ -154,11 +154,13 @@ extern "C" NSString *FBGRDogFoodDiagnostic(void) {
 // ── Constructor: delayed, targeted, NO global scan ────────────────────────────
 __attribute__((constructor))
 static void FBGRDogFoodCtor(void) {
+    // Keep startup inert unless the user already enabled DogFood before.
+    if (!FBGRDogFoodIsEnabled()) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            FBGRDogFoodApplyManagedFlag();   // honest: marks managed only
-            FBGRInstallDLPHook();            // targeted single-class hook
+            FBGRDogFoodApplyManagedFlag();
+            FBGRInstallDLPHook();
         }
     });
 }

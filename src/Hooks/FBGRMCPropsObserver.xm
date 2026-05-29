@@ -96,7 +96,8 @@ static void obsInstall(void) {
     }
 }
 
-extern "C" void    FBGRMCObserverFlush(void)           { obsFlush(); }
+extern "C" void FBGRMCObserverEnsureInstalled(void) { obsInstall(); }
+extern "C" void    FBGRMCObserverFlush(void)           { obsInit(); obsFlush(); }
 extern "C" NSUInteger FBGRMCObserverSlotCount(void) {
     __block NSUInteger n = 0;
     if (gQ) dispatch_sync(gQ, ^{ n = gCounts.count; });
@@ -111,13 +112,4 @@ extern "C" NSString *FBGRMCObserverDump(void) {
             (unsigned long)FBGRMCObserverSlotCount()];
 }
 
-__attribute__((constructor))
-static void obsCtor(void) {
-    @autoreleasepool {
-        obsInit();
-        obsInstall();
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSTimer scheduledTimerWithTimeInterval:30 repeats:YES block:^(NSTimer *t){ obsFlush(); }];
-        });
-    }
-}
+// No constructor: observer hooks install only when the MC Observer toggle is enabled.

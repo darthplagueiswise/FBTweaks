@@ -204,18 +204,10 @@ static void FBGRMCInstallHooks(void) {
         Class cls = NSClassFromString(cn);
         if (cls) FBGRMCHookClass(cls);
     }
-    if (!orig_setScrollable) {
-        SEL sC = sel_registerName("setShouldEnableScrollableTabBar:");
-        unsigned int n = 0; Class *all = objc_copyClassList(&n);
-        for (unsigned i = 0; i < n && !orig_setScrollable; i++) {
-            if (class_getInstanceMethod(all[i], sC)) {
-                IMP orig = NULL;
-                MSHookMessageEx(all[i], sC, (IMP)h_setScrollable, &orig);
-                if (orig) orig_setScrollable = (SetScrollIMP)orig;
-            }
-        }
-        free(all);
-    }
+    // Startup-safe beta: no broad objc runtime scan here. The previous build used
+    // runtime-class-list-enumeration to find setShouldEnableScrollableTabBar:, and that can
+    // crash during Facebook's launch/preload window. MC bool hooks stay limited
+    // to known MobileConfig classes only.
     FBGRCacheRebuild();
     FBGRLogAppend([NSString stringWithFormat:
         @"MCGateHooks: %lu classes, %lu selectors, scrollable=%@",
@@ -224,7 +216,19 @@ static void FBGRMCInstallHooks(void) {
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
-extern "C" void FBGRMCGateHooksEnsureInstalled(void) { /* delayed in ctor */ }
+static BOOL gFBGRMCInstallScheduled = NO;
+static BOOL gFBGRMCInstallDone = NO;
+
+extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
+    if (gFBGRMCInstallDone || gFBGRMCInstallScheduled) { FBGRCacheRebuild(); return; }
+    gFBGRMCInstallScheduled = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        FBGRMCInstallHooks();
+        gFBGRMCInstallDone = YES;
+        gFBGRMCInstallScheduled = NO;
+    });
+}
 extern "C" void FBGRMCGateCacheRefresh(void) { FBGRCacheRebuild(); }
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
     return [NSString stringWithFormat:
@@ -234,8 +238,4 @@ extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
         gOverrideCacheN, gHaveSlotZero ? @" (+slot0)" : @""];
 }
 
-__attribute__((constructor))
-static void FBGRMCGateHooksCtor(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ FBGRMCInstallHooks(); });
-}
+// No constructor: installed lazily from menu/actions only.
