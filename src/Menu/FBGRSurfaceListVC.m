@@ -230,26 +230,6 @@ void FBGRPresentMenu(void) {
     }
     if (ip.section == FBGRRootSectionDogFood) {
         if (ip.row == 0) {
-            c.imageView.image = FBGRSymbol(@"person.badge.key.fill", UIColor.systemOrangeColor);
-            c.textLabel.text  = @"Apply Employee/Internal/DLP agora";
-            c.detailTextLabel.text = FBGRDogFoodIsEnabled() ? @"DogFood ON — reaplicar gates e hook DLP" : @"Liga DogFood master + employee/internal MC gates";
-            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (ip.row == 1) {
-            c.imageView.image = FBGRSymbol(@"ladybug.fill", UIColor.systemOrangeColor);
-            c.textLabel.text  = @"Abrir nag nativo DogFood / Gold";
-            c.detailTextLabel.text = @"Sheet nativo: managed phone / Gold pre-production";
-            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else {
-            c.imageView.image = FBGRSymbol(@"wrench.and.screwdriver", UIColor.systemGreenColor);
-            c.textLabel.text  = @"DogFood / DLP diagnóstico";
-            c.detailTextLabel.text = @"Mostra sessão, defaults, DLP provider e directed hook";
-            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        }
-        return c;
-    }
-
-    if (ip.section == FBGRRootSectionDogFood) {
-        if (ip.row == 0) {
             FBGRDogFoodSetEnabled(YES);
             FBGRDogFoodApplyPersistentState();
             FBGRMCGateHooksEnsureInstalled();
