@@ -236,23 +236,21 @@ static UIViewController *FBGRDogFoodNagSheet(void) {
     if (![cls respondsToSelector:sel]) { gLastDogFoodFailure = @"getNagSheet selector not found"; return nil; }
     id session = FBGRDogFoodActiveSession();
     if (!session) { gLastDogFoodFailure = @"FBUserSession not found"; return nil; }
-    id onSwitch = [^(BOOL managed, id eventName) {
-        BOOL enable = managed;
-        NSString *event = [eventName isKindOfClass:NSString.class] ? eventName : (enable ? @"tapped_managed_phone" : @"tapped_unmanaged_phone");
+    id onSwitch = [^{
+        FBGRLogAppend(@"DogFood native zero-arg onSwitch tapped -> scheduling apply");
 
-        FBGRDogFoodSetEnabled(enable);
-        if (enable) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            FBGRDogFoodSetEnabled(YES);
             FBGRDogFoodApplyPersistentState();
             FBGRDogFoodInstallDirectedHooks();
             FBGRMCGateHooksEnsureInstalled();
             FBGRMCGateCacheRefresh();
-        }
 
-        [[NSNotificationCenter defaultCenter] postNotificationName:NSUserDefaultsDidChangeNotification object:NSUserDefaults.standardUserDefaults];
+            [[NSNotificationCenter defaultCenter] postNotificationName:NSUserDefaultsDidChangeNotification
+                                                                object:NSUserDefaults.standardUserDefaults];
 
-        FBGRLogAppend([NSString stringWithFormat:@"DogFood native onSwitch managed=%@ event=%@ -> applied defaults+MC+DLP",
-                       enable ? @"YES" : @"NO",
-                       event ?: @"n/a"]);
+            FBGRLogAppend(@"DogFood native zero-arg onSwitch -> applied defaults+MC+DLP");
+        });
     } copy];
     id onSnooze = [^{ FBGRLogAppend(@"DogFood native snooze"); } copy];
     typedef id (*NagIMP)(id, SEL, id, id, id, id, id, BOOL, id, id);
