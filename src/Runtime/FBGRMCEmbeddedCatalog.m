@@ -1,4 +1,5 @@
 #import "FBGRMCEmbeddedCatalog.h"
+#import "../FBGramPrefix.h"
 #import <zlib.h>
 
 static const unsigned char kFBGRMCEmbeddedCatalogGZ[] = {
