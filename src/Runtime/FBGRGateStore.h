@@ -14,7 +14,7 @@ extern "C" {
 //   - NSUserDefaults is used only when menu/toggles mutate state or during warmup.
 //   - hook hot paths call FBGRGateIsSet/FBGRGateGet and must hit RAM only.
 //   - no NSString/NSUserDefaults allocation in FBGRGateIsSet/FBGRGateGet.
-//   - slotId 0 is not a stable key and is intentionally ignored by setters.
+//   - slotId 0 is valid for one bool param in current metadata. Non-bool slot 0 rows are filtered by MCCatalog/UI, not by this store.
 
 void FBGRGateStoreWarmup(void);
 

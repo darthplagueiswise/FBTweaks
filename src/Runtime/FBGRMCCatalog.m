@@ -83,6 +83,20 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         [paths addObject:[base stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]];
     }
 
+    NSString *home = NSHomeDirectory();
+    if (home.length) {
+        for (NSString *rel in @[
+            @"Documents/FBTweaks/runtime/ReactMobileConfigMetadata.json",
+            @"Documents/FBTweaks/runtime/ReactMobileConfigMetadata.json.gz",
+            @"Documents/ReactMobileConfigMetadata.json",
+            @"Documents/ReactMobileConfigMetadata.json.gz",
+            @"Library/Caches/FBTweaks/runtime/ReactMobileConfigMetadata.json",
+            @"Library/Caches/FBTweaks/runtime/ReactMobileConfigMetadata.json.gz",
+            @"tmp/FBTweaks/runtime/ReactMobileConfigMetadata.json",
+            @"tmp/FBTweaks/runtime/ReactMobileConfigMetadata.json.gz",
+        ]) [paths addObject:[home stringByAppendingPathComponent:rel]];
+    }
+
     NSString *dylibDir = FBGRDylibDirectory();
     if (dylibDir.length) {
         for (NSString *rel in @[
@@ -189,7 +203,7 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
             p.paramName = p.fullKey;
         }
 
-        if (p.slotId > 0 && [p.type isEqualToString:@"boolValue"]) bySlot[@(p.slotId)] = p;
+        if ([p.type isEqualToString:@"boolValue"]) bySlot[@(p.slotId)] = p;
         [all addObject:p];
     }
 
@@ -205,11 +219,11 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
         }]];
     self.safeBools = [self.bools filteredArrayUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _) {
-            return p.slotId > 0;
+            return YES;
         }]];
     self.iOSBool  = [self.bools filteredArrayUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _) {
-            return p.unitType == 4 && p.slotId > 0;
+            return p.unitType == 4;
         }]];
     self.sourceDescription = source ?: @"unknown";
 
@@ -223,7 +237,6 @@ static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
 
 - (nullable FBGRMCParam *)paramForSlotId:(uint64_t)slotId {
     if (!self.loaded) [self loadIfNeeded];
-    if (slotId == 0) return nil;
     return self.bySlotId[@(slotId)];
 }
 - (NSArray<FBGRMCParam *> *)allParams { if (!self.loaded) [self loadIfNeeded]; return self.sorted ?: @[]; }

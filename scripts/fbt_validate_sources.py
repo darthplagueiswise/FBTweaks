@@ -77,6 +77,19 @@ if meta.exists():
     except Exception as e:
         errors.append(f'ReactMobileConfigMetadata.json.gz invalid: {e}')
 
+# v0.3.13: slotId 0 bool is valid; non-bool filtering must happen in catalog/browser, not in GateStore.
+store = (root / 'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
+check('if (slotId == 0) return' not in store, 'GateStore must not drop legitimate bool slotId 0')
+check('slotId > 0' not in store, 'GateStoreAllOverrideSlotIds must include legitimate slotId 0')
+cat_m = (root / 'src/Runtime/FBGRMCCatalog.m').read_text(errors='ignore')
+check('p.slotId > 0 && [p.type isEqualToString:@"boolValue"]' not in cat_m, 'MCCatalog must index bool slotId 0')
+rt = (root / 'src/Menu/FBGRGateRuntimeBrowserVC.m').read_text(errors='ignore')
+check('&& p.slotId > 0' not in rt.split('- (BOOL)canOverrideParam')[1].split('}')[0], 'Runtime Browser must allow bool slotId 0')
+reg = (root / 'src/Runtime/FBGRGateRegistry.m').read_text(errors='ignore')
+check('0xDDF0' not in reg, 'GateRegistry must not expose fake DogFood slot')
+surf = (root / 'src/Menu/FBGRSurfaceListVC.m').read_text(errors='ignore')
+check('FBGRRootSectionDogFood' in surf and 'Apply Employee/Internal/DLP agora' in surf, 'SurfaceList must expose real DogFood/Internal action section')
+
 if errors:
     print('FBTweaks validation failed:', file=sys.stderr)
     for e in errors:

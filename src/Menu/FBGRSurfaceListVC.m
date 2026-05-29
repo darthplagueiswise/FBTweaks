@@ -15,6 +15,8 @@ extern NSString  *FBGRMCGateHooksDiagnostic(void);
 extern void       FBGRMCObserverFlush(void);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern BOOL       FBGRDogFoodIsEnabled(void);
+extern void       FBGRDogFoodSetEnabled(BOOL enabled);
+extern BOOL       FBGRDogFoodPresentNagSheet(void);
 extern void       FBGRDogFoodApplyPersistentState(void);
 extern NSString  *FBGRDogFoodDiagnostic(void);
 
@@ -23,10 +25,11 @@ void FBGRPresentMenu(void);
 
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,
-    FBGRRootSectionAllParams = 1,
-    FBGRRootSectionDiag      = 2,
-    FBGRRootSectionObserver  = 3,
-    FBGRRootSectionCount     = 4,
+    FBGRRootSectionDogFood   = 1,
+    FBGRRootSectionAllParams = 2,
+    FBGRRootSectionDiag      = 3,
+    FBGRRootSectionObserver  = 4,
+    FBGRRootSectionCount     = 5,
 };
 
 static UIViewController *FBGRTopVC(void) {
@@ -89,6 +92,7 @@ void FBGRPresentMenu(void) {
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
     switch (s) {
         case FBGRRootSectionProviders: return (NSInteger)_providers.count;
+        case FBGRRootSectionDogFood:   return 3; // apply internal/dlp + native nag + diag
         case FBGRRootSectionAllParams: return 1;
         case FBGRRootSectionDiag:      return 4; // apply + hooks diag + log + reset
         case FBGRRootSectionObserver:  return 2; // capture toggle + flush
@@ -97,7 +101,7 @@ void FBGRPresentMenu(void) {
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
-    return (@[@"Categorias principais", @"Runtime Browser", @"Aplicação / Debug", @"Diagnóstico: MC Observer"])[(NSUInteger)s];
+    return (@[@"Categorias principais", @"DogFood / Internal", @"Runtime Browser", @"Aplicação / Debug", @"Diagnóstico: MC Observer"])[(NSUInteger)s];
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
@@ -111,8 +115,10 @@ void FBGRPresentMenu(void) {
                 FBGRLiquidGlassIsHooked() ? @"OK" : @"MISS",
                 mc.catalogSource ?: @"sem catálogo"];
     }
+    if (s == FBGRRootSectionDogFood)
+        return @"DogFood nativo é nag/Gold app. O botão Apply Internal/DLP aplica defaults, employee/internal MC gates e hook direcionado do DLP.";
     if (s == FBGRRootSectionAllParams)
-        return @"Switch só aparece para boolValue com slotId > 0. Params [0] e não-bool são somente leitura.";
+        return @"Switch só aparece para boolValue. Non-bool é somente leitura; slotId 0 é permitido apenas quando type=boolValue.";
     if (s == FBGRRootSectionObserver)
         return @"Diagnóstico somente: captura slotIds observados em runtime e salva mc_props_dump.json. Não aplica overrides.";
     return nil;
@@ -139,6 +145,26 @@ void FBGRPresentMenu(void) {
             ? [NSString stringWithFormat:@"%lu override(s) ativo(s)", (unsigned long)set]
             : [NSString stringWithFormat:@"%lu featured flags", (unsigned long)p.featured.count];
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return c;
+    }
+
+    if (ip.section == FBGRRootSectionDogFood) {
+        if (ip.row == 0) {
+            c.imageView.image = FBGRSymbol(@"person.badge.key.fill", UIColor.systemOrangeColor);
+            c.textLabel.text  = @"Apply Employee/Internal/DLP agora";
+            c.detailTextLabel.text = FBGRDogFoodIsEnabled() ? @"DogFood ON — reaplicar gates e hook DLP" : @"Liga DogFood master + employee/internal MC gates";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (ip.row == 1) {
+            c.imageView.image = FBGRSymbol(@"ladybug.fill", UIColor.systemOrangeColor);
+            c.textLabel.text  = @"Abrir nag nativo DogFood / Gold";
+            c.detailTextLabel.text = @"Sheet nativo: managed phone / Gold pre-production";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            c.imageView.image = FBGRSymbol(@"wrench.and.screwdriver", UIColor.systemGreenColor);
+            c.textLabel.text  = @"DogFood / DLP diagnóstico";
+            c.detailTextLabel.text = @"Mostra sessão, defaults, DLP provider e directed hook";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
         return c;
     }
 
@@ -202,6 +228,54 @@ void FBGRPresentMenu(void) {
         [self.navigationController pushViewController:[[FBGRGateCategoryVC alloc] initWithProvider:p] animated:YES];
         return;
     }
+    if (ip.section == FBGRRootSectionDogFood) {
+        if (ip.row == 0) {
+            c.imageView.image = FBGRSymbol(@"person.badge.key.fill", UIColor.systemOrangeColor);
+            c.textLabel.text  = @"Apply Employee/Internal/DLP agora";
+            c.detailTextLabel.text = FBGRDogFoodIsEnabled() ? @"DogFood ON — reaplicar gates e hook DLP" : @"Liga DogFood master + employee/internal MC gates";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (ip.row == 1) {
+            c.imageView.image = FBGRSymbol(@"ladybug.fill", UIColor.systemOrangeColor);
+            c.textLabel.text  = @"Abrir nag nativo DogFood / Gold";
+            c.detailTextLabel.text = @"Sheet nativo: managed phone / Gold pre-production";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            c.imageView.image = FBGRSymbol(@"wrench.and.screwdriver", UIColor.systemGreenColor);
+            c.textLabel.text  = @"DogFood / DLP diagnóstico";
+            c.detailTextLabel.text = @"Mostra sessão, defaults, DLP provider e directed hook";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
+        return c;
+    }
+
+    if (ip.section == FBGRRootSectionDogFood) {
+        if (ip.row == 0) {
+            FBGRDogFoodSetEnabled(YES);
+            FBGRDogFoodApplyPersistentState();
+            FBGRMCGateHooksEnsureInstalled();
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"DogFood / Internal"
+                message:@"Employee/Internal/DLP aplicado: defaults + MC gates + hook direcionado DLP. Feche e reabra o Facebook se a superfície já estava cacheada." preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+            [tv reloadData];
+        } else if (ip.row == 1) {
+            if (!FBGRDogFoodPresentNagSheet()) {
+                NSString *diag = FBGRDogFoodDiagnostic() ?: @"n/a";
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"DogFood nativo" message:diag preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(__unused id x){ UIPasteboard.generalPasteboard.string = diag; }]];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [self presentViewController:a animated:YES completion:nil];
+            }
+        } else {
+            NSString *diag = FBGRDogFoodDiagnostic() ?: @"n/a";
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"DogFood / DLP Diag" message:diag preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(__unused id x){ UIPasteboard.generalPasteboard.string = diag; }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+        }
+        return;
+    }
+
     if (ip.section == FBGRRootSectionAllParams) {
         [self.navigationController pushViewController:[[FBGRGateRuntimeBrowserVC alloc] initWithProvider:nil] animated:YES];
         return;

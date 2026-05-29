@@ -34,7 +34,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// All boolValue params, including ambiguous slotId 0 entries
 - (NSArray<FBGRMCParam *> *)boolParams;
 
-/// Override-safe bool params only. These are the only rows that should get switches.
+/// Override-safe bool params only. These are the only rows that should get switches. slotId 0 is allowed only when type==boolValue.
 - (NSArray<FBGRMCParam *> *)safeBoolParams;
 
 /// iOS-specific bool params only (unitType==4, type==boolValue)

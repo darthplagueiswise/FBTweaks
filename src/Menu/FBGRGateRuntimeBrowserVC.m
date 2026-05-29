@@ -58,7 +58,7 @@ extern void FBGRMCGateHooksEnsureInstalled(void);
 - (void)filterChanged { [self rebuildParams]; [self.tableView reloadData]; }
 
 - (BOOL)canOverrideParam:(FBGRMCParam *)p {
-    return [p.type isEqualToString:@"boolValue"] && p.slotId > 0;
+    return [p.type isEqualToString:@"boolValue"];
 }
 
 - (void)rebuildParams {
@@ -128,7 +128,7 @@ extern void FBGRMCGateHooksEnsureInstalled(void);
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
     FBGRMCCatalog *cat = [FBGRMCCatalog shared];
-    return [NSString stringWithFormat:@"%lu visíveis | total=%lu | bool seguros=%lu | iOS=%lu | overrides=%lu | slot0/não-bool=read-only | %@",
+    return [NSString stringWithFormat:@"%lu visíveis | total=%lu | bool=%lu | iOS=%lu | overrides=%lu | non-bool=read-only | %@",
             (unsigned long)self.visible.count,
             (unsigned long)cat.totalCount,
             (unsigned long)cat.safeBoolCount,
@@ -153,7 +153,7 @@ extern void FBGRMCGateHooksEnsureInstalled(void);
     NSString *overrideMark = isOverridden
         ? [NSString stringWithFormat:@" → FORÇADO=%@", FBGRGateGet(p.slotId) ? @"YES" : @"NO"]
         : @"";
-    NSString *ro = canOverride ? @"" : (p.slotId == 0 ? @" · read-only: slotId 0 ambíguo" : @" · read-only: não bool");
+    NSString *ro = canOverride ? @"" : @" · read-only: não bool";
     c.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@ · def=%@%@%@",
         p.group ?: @"?", type, p.defaultBool ? @"Y" : @"N", overrideMark, ro];
     c.detailTextLabel.textColor = isOverridden ? FBGRAccent(2) : (canOverride ? FBGRSub() : UIColor.secondaryLabelColor);

@@ -34,7 +34,6 @@ static NSInteger FBGRCacheFindUnlocked(uint64_t slotId) {
 }
 
 static void FBGRCacheSetUnlocked(uint64_t slotId, BOOL value) {
-    if (slotId == 0) return;
     NSInteger idx = FBGRCacheFindUnlocked(slotId);
     if (idx >= 0) {
         gCache[idx].value = value;
@@ -50,7 +49,6 @@ static void FBGRCacheSetUnlocked(uint64_t slotId, BOOL value) {
 }
 
 static void FBGRCacheClearUnlocked(uint64_t slotId) {
-    if (slotId == 0) return;
     NSInteger idx = FBGRCacheFindUnlocked(slotId);
     if (idx < 0) return;
     uint32_t n = gCacheCount;
@@ -69,8 +67,9 @@ void FBGRGateStoreWarmup(void) {
         if (![k isKindOfClass:NSString.class]) continue;
         if (![k hasPrefix:@"fbgr.slot."]) continue;
         NSString *suffix = [k substringFromIndex:10];
+        if (suffix.length == 0) continue;
         uint64_t slotId = (uint64_t)[suffix longLongValue];
-        if (slotId == 0) continue;
+        if (slotId == 0 && ![suffix isEqualToString:@"0"]) continue;
         BOOL value = [FBGRPrefs() boolForKey:k];
         FBGRCacheSetUnlocked(slotId, value);
     }
@@ -78,7 +77,6 @@ void FBGRGateStoreWarmup(void) {
 }
 
 BOOL FBGRGateIsSet(uint64_t slotId) {
-    if (slotId == 0) return NO;
     uint32_t n = gCacheCount;
     for (uint32_t i = 0; i < n; i++) {
         if (gCache[i].set && gCache[i].slotId == slotId) return YES;
@@ -87,7 +85,6 @@ BOOL FBGRGateIsSet(uint64_t slotId) {
 }
 
 BOOL FBGRGateGet(uint64_t slotId) {
-    if (slotId == 0) return NO;
     uint32_t n = gCacheCount;
     for (uint32_t i = 0; i < n; i++) {
         if (gCache[i].set && gCache[i].slotId == slotId) return gCache[i].value;
@@ -96,7 +93,6 @@ BOOL FBGRGateGet(uint64_t slotId) {
 }
 
 void FBGRGateSet(uint64_t slotId, BOOL value) {
-    if (slotId == 0) return;
     FBGRGateStoreInit();
     [FBGRPrefs() setBool:value forKey:FBGRSlotKey(slotId)];
     [FBGRPrefs() synchronize];
@@ -107,7 +103,6 @@ void FBGRGateSet(uint64_t slotId, BOOL value) {
 }
 
 void FBGRGateClear(uint64_t slotId) {
-    if (slotId == 0) return;
     FBGRGateStoreInit();
     [FBGRPrefs() removeObjectForKey:FBGRSlotKey(slotId)];
     [FBGRPrefs() synchronize];
@@ -144,7 +139,7 @@ NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void) {
     [gCacheLock lock];
     uint32_t n = gCacheCount;
     for (uint32_t i = 0; i < n; i++) {
-        if (gCache[i].set && gCache[i].slotId > 0) [result addObject:@(gCache[i].slotId)];
+        if (gCache[i].set) [result addObject:@(gCache[i].slotId)];
     }
     [gCacheLock unlock];
 

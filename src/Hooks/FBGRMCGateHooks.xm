@@ -37,7 +37,6 @@ static FBGRMCHookRecord gHooks[FBGR_MAX_HOOKS];
 static int gHookN = 0;
 
 static BOOL FBGRCacheLookup(uint64_t slotId, BOOL *outValue) {
-    if (slotId == 0) return NO;
     int n = gOverrideCacheN;
     for (int i = 0; i < n; i++) {
         if (gOverrideCache[i].slotId == slotId) {
@@ -56,7 +55,6 @@ static void FBGRCacheRebuild(void) {
         for (NSNumber *n in ids) {
             if (gOverrideCacheN >= FBGR_MAX_OVERRIDES) break;
             uint64_t slot = [n unsignedLongLongValue];
-            if (slot == 0) continue;
             gOverrideCache[gOverrideCacheN].slotId = slot;
             gOverrideCache[gOverrideCacheN].value = FBGRGateGet(slot);
             gOverrideCacheN++;
