@@ -1,0 +1,10 @@
+Package: com.darthplagueiswise.fbtweaks
+Name: FBTweaks
+Version: 3.1.0
+Architecture: iphoneos-arm
+Description: FBTweaks 3.1 — Facebook iOS internal feature exposure. LiquidGlass, Floating TabBar, MobileConfig bool override engine (6 getter selectors, slot-0 safe, crash-safe reentrancy guard), employee/internal MC slots, targeted DLP Dogfooding Indicator hook, honest native DogFood nag flow, full 5374-param runtime catalog browser with group categories and keyword tags.
+Homepage: https://github.com/darthplagueiswise/FBTweaks
+Maintainer: Radan
+Author: Radan
+Section: Tweaks
+Depends: mobilesubstrate
