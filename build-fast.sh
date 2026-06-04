@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# build-fast.sh — quick local build without final package compression
 set -euo pipefail
 cd "$(dirname "$0")"
-echo "[FBTweaks] Fast build..."
-make package "$@"
+export THEOS="${THEOS:-$HOME/theos}"
+echo "[FBTweaks] Fast rootless build..."
+make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless "$@"

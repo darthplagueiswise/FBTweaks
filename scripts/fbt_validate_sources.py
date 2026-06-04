@@ -1,112 +1,110 @@
 #!/usr/bin/env python3
-"""fbt_validate_sources.py — pre-build sanity check for FBTweaks."""
-import os, re, sys, gzip, json, pathlib
+from pathlib import Path
+import gzip, json, sys, re
 
-ROOT = pathlib.Path(__file__).parent.parent
+root = Path(__file__).resolve().parents[1]
 errors = []
 
-def ok(msg):  print(f"  OK   {msg}")
-def err(msg): errors.append(msg); print(f"  ERR  {msg}")
+def check(cond, msg):
+    if not cond:
+        errors.append(msg)
 
-# 1 — ReactMobileConfigMetadata.json.gz
-p = ROOT / "resources/runtime/ReactMobileConfigMetadata.json.gz"
-if not p.exists():
-    err(f"MISSING: {p}")
-else:
+mf = (root / 'Makefile').read_text(errors='ignore')
+check('TARGET := iphone:clang:26.0:16.3' in mf, 'Makefile target must use iOS26 SDK baseline')
+check('iPhoneOS26.0.sdk' in mf, 'Makefile must reference iPhoneOS26.0.sdk')
+check('modules/fishhook/fishhook.c' in mf, 'Makefile must build vendored fishhook.c')
+check('resources/runtime/*.json.gz' in mf, 'Makefile must stage gz runtime JSON metadata')
+check('INSTALL_TARGET_PROCESSES = Facebook' in mf, 'Makefile must target Facebook process')
+check('-include src/FBGramPrefix.h' in mf, 'Makefile must force-include FBGramPrefix.h like Ryuk-style base')
+
+plist = (root / 'FBTweaks.plist').read_text(errors='ignore')
+check('com.facebook.Facebook' in plist, 'FBTweaks.plist must filter com.facebook.Facebook')
+
+for f in ['modules/fishhook/fishhook.c','modules/fishhook/fishhook.h','build.sh','build-fast.sh','.github/workflows/buildtweak.yml','scripts/validate-sdk26-fbtweaks.sh']:
+    check((root / f).exists(), f'{f} missing')
+
+for p in root.glob('src/**/*.m'):
+    txt = p.read_text(errors='ignore')
+    check('extern "C"' not in txt, f'{p.relative_to(root)} contains extern "C" but is compiled as .m')
+    check('@property(nonatomic, strong) dispatch_once_t' not in txt, f'{p.relative_to(root)} has invalid strong dispatch_once_t property')
+
+for p in ['src/Hooks/FBGRLiquidGlassHooks.xm','src/Hooks/FBGRMCGateHooks.xm','src/Hooks/FBGRDogFoodHooks.xm']:
+    check((root / p).exists(), f'{p} missing')
+
+tw = (root / 'src/Tweak.x').read_text(errors='ignore')
+check('FBGRLiquidGlassEnsureInstalled' in tw, 'Tweak.x does not initialize LiquidGlass hook')
+check('FBGRMCGateHooksApplyPersistedOverrides' in tw, 'Tweak.x must warm persisted overrides on launch')
+check('FBGRMCGateHooksEnsureInstalled();' not in tw, 'Tweak.x must not directly install MC gate hooks during launch')
+check('%hook FDSTouchStateAnnouncingControl' in tw, 'Tweak.x must preserve exact working tab-button longpress hook')
+check('FBGRIsExactTabButtonCandidate' in tw and 'FBGRSizeLooksLikeTabButton' in tw, 'Tweak.x must preserve exact tab button filtering')
+check('numberOfTapsRequired = 3' in tw, 'Tweak.x must preserve one-finger triple tap fallback on exact button')
+check('numberOfTouchesRequired = 2' not in tw and 'numberOfTouchesRequired = 3' not in tw, 'Tweak.x must not use global 2/3-finger gesture')
+
+mc = (root / 'src/Hooks/FBGRMCGateHooks.xm').read_text(errors='ignore')
+check('__attribute__((constructor))' not in mc, 'FBGRMCGateHooks.xm must not install from constructor')
+check('objc_copyClassList' not in mc, 'FBGRMCGateHooks.xm must not do global class scan')
+check('FBGRLogAppend(msg)' not in mc, 'FBGRMCGateHooks.xm must not log inside getBool hot path')
+check('NSStringFromClass([self class])' not in mc, 'FBGRMCGateHooks.xm must not allocate NSString in hook hot path')
+check('FBMobileConfigContextManager' in mc and 'FBMobileConfigUserSessionContextManager' in mc and 'FBMobileConfigSessionlessContextManager' in mc, 'MC hooks must include validated MobileConfig owner classes')
+check('RCTMobileConfigNative' in mc, 'MC hooks must include RN MobileConfig surface')
+check('if (gFBGRMCHookGuard) return def;' in mc, 'FBGRMCGateHooks default path must return def during guarded re-entry')
+check('FBGRMCGateHooksApplyPersistedOverrides' in mc, 'FBGRMCGateHooks must export persisted apply API')
+
+obs = (root / 'src/Hooks/FBGRMCPropsObserver.xm').read_text(errors='ignore')
+check('__attribute__((constructor))' not in obs, 'FBGRMCPropsObserver.xm must not install from constructor')
+if 'static BOOL obsTrampoline' in obs:
+    section = obs.split('static BOOL obsTrampoline',1)[1].split('return r;',1)[0]
+    check('FBGRPref(kFBGRMCObserverEnabled)' not in section, 'observer trampoline must use cached enabled flag')
+
+store = (root / 'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
+hot_is_set = store.split('BOOL FBGRGateIsSet')[1].split('BOOL FBGRGateGet')[0]
+hot_get = store.split('BOOL FBGRGateGet')[1].split('void FBGRGateSet')[0]
+check('FBGRPrefs' not in hot_is_set and 'NSString' not in hot_is_set, 'FBGRGateIsSet hot path must not use NSUserDefaults/NSString')
+check('FBGRPrefs' not in hot_get and 'NSString' not in hot_get, 'FBGRGateGet hot path must not use NSUserDefaults/NSString')
+check('if (slotId == 0) return' not in store, 'GateStore must not drop legitimate bool slotId 0')
+check('slotId > 0' not in store, 'GateStoreAllOverrideSlotIds must include legitimate slotId 0')
+
+lg = (root / 'src/Hooks/FBGRLiquidGlassHooks.xm').read_text(errors='ignore')
+check('IGLiquidGlassExperimentHelper' in lg, 'LiquidGlass hook must target SDK26 IGLiquidGlassExperimentHelper classes')
+check('MSHookMessageEx' in lg, 'LiquidGlass SDK26 path must use MSHookMessageEx')
+check('METAIsLiquidGlassEnabled' in lg, 'LiquidGlass must keep fishhook fallback')
+check('__attribute__((constructor))' not in lg, 'LiquidGlass must not install from constructor; Tweak.x owns startup')
+
+cat = (root / 'src/Runtime/FBGRMCCatalog.m').read_text(errors='ignore')
+check('FBGRCollectMetadataFiles' in cat, 'MCCatalog must scan app/container directories for live metadata files')
+check('Library/Application Support/FBTweaks' in cat and 'Documents/FBTweaks' in cat, 'MCCatalog must load from app data-container paths')
+check('NSBundle.mainBundle.bundlePath' in cat and 'Facebook.app/ReactMobileConfigMetadata.json' in cat, 'MCCatalog must prefer the live ReactMobileConfigMetadata.json inside Facebook.app')
+check('p.slotId > 0 && [p.type isEqualToString:@"boolValue"]' not in cat, 'MCCatalog must index bool slotId 0')
+
+rt = (root / 'src/Menu/FBGRGateRuntimeBrowserVC.m').read_text(errors='ignore')
+check('&& p.slotId > 0' not in rt.split('- (BOOL)canOverrideParam')[1].split('}')[0], 'Runtime Browser must allow bool slotId 0')
+
+reg = (root / 'src/Runtime/FBGRGateRegistry.m').read_text(errors='ignore')
+for slot, name in [(876,'fb_ford:is_employee'),(4623,'xplat_lwi:is_employee'),(1264,'gaming_tab_rn'),(2142,'mp_ai_assistant_bot'),(3953,'should_show_explore_tab')]:
+    check(str(slot) in reg and name in reg, f'GateRegistry missing metadata(7) slot {slot} {name}')
+check('874,' not in reg and '4620,' not in reg and '1247,' not in reg, 'GateRegistry still contains stale metadata slots')
+check('0xDDF0' not in reg, 'GateRegistry must not expose fake DogFood slot')
+
+surf = (root / 'src/Menu/FBGRSurfaceListVC.m').read_text(errors='ignore')
+check('FBGRRootSectionDogFood' in surf and 'Apply Employee/Internal/DLP agora' in surf, 'SurfaceList must expose real DogFood/Internal action section')
+
+meta = root / 'resources/runtime/ReactMobileConfigMetadata.json.gz'
+check(meta.exists(), 'ReactMobileConfigMetadata.json.gz missing')
+if meta.exists():
     try:
-        with gzip.open(p) as f:
-            d = json.load(f)
-        ok(f"ReactMobileConfigMetadata.json.gz ({len(d.get('schema',{}))} entries)")
+        with gzip.open(meta, 'rt', encoding='utf-8') as f:
+            j = json.load(f)
+        schema = j.get('schema', {})
+        bool_count = sum(1 for v in schema.values() if isinstance(v, dict) and v.get('type') == 'boolValue')
+        check(len(schema) == 5377, f'ReactMobileConfigMetadata schema must be 5377 for current build, got {len(schema)}')
+        check(bool_count == 4679, f'ReactMobileConfigMetadata bool count must be 4679, got {bool_count}')
+        print(f'ReactMobileConfigMetadata.json.gz: OK, {len(schema)} entries, {bool_count} bool params')
     except Exception as e:
-        err(f"CORRUPT: {p}: {e}")
+        errors.append(f'ReactMobileConfigMetadata.json.gz invalid: {e}')
 
-# 2 — mc_bool_param_t typedef
-prefix = (ROOT / "src/FBGramPrefix.h").read_text()
-if "mc_bool_param_t" not in prefix:
-    err("FBGramPrefix.h: missing mc_bool_param_t typedef")
-else:
-    ok("mc_bool_param_t typedef")
-
-# 3 — FBGramPrefix usage without import in .m files
-# Only flag files that use MACROS from FBGramPrefix (FBGRPref, FBGRPrefs, kFBGR*, FBGRLog macro, FBGRLogHook)
-# NOT functions defined in FBGRLog.h (FBGRLogSnapshot, FBGRLogClear, FBGRLogAppend, FBGRLogInit)
-macro_pattern = re.compile(r'\bFBGRPref\b|\bFBGRPrefs\b|\bkFBGR\w+|\bFBGRLog\(|\bFBGRLogHook\(')
-src_dir = ROOT / "src"
-for fpath in src_dir.rglob("*.m"):
-    text = fpath.read_text()
-    if macro_pattern.search(text) and "FBGramPrefix" not in text:
-        count = len(macro_pattern.findall(text))
-        err(f"MISSING FBGramPrefix: {fpath.relative_to(ROOT)} ({count} macro usages)")
-ok("FBGramPrefix imports")
-
-# 4 — .color instead of .textColor on UILabel
-for fpath in (ROOT/"src").rglob("*.m"):
-    text = fpath.read_text()
-    for i, line in enumerate(text.splitlines(), 1):
-        if re.search(r'\.(textLabel|detailTextLabel)\.color\s*=', line):
-            err(f"{fpath.relative_to(ROOT)}:{i} — use .textColor not .color: {line.strip()}")
-ok(".textColor check")
-
-# 5 — extern "C" in .m files
-for fpath in (ROOT/"src").rglob("*.m"):
-    text = fpath.read_text()
-    if 'extern "C"' in text:
-        err(f'{fpath.relative_to(ROOT)}: extern "C" in .m file')
-ok('extern "C" check')
-
-# 6 — dispatch_once_t as @property
-for fpath in list((ROOT/"src").rglob("*.m")) + list((ROOT/"src").rglob("*.h")):
-    if re.search(r'@property.*dispatch_once', fpath.read_text()):
-        err(f"{fpath.relative_to(ROOT)}: dispatch_once_t as @property")
-ok("dispatch_once_t check")
-
-# 7 — fishhook present
-for f in ["fishhook.c", "fishhook.h"]:
-    p = ROOT / "modules/fishhook" / f
-    if p.exists(): ok(f)
-    else: err(f"MISSING: {p}")
-
-# 8 — Makefile bundles gz
-if "json.gz" in (ROOT/"Makefile").read_text():
-    ok("Makefile bundles .json.gz")
-else:
-    err("Makefile: does not bundle .json.gz")
-
-# 9 — Overlay window approach (Glow-style, no FBTabBar hook)
-tweak = (ROOT/"src/Tweak.x").read_text()
-if "FBGROverlayWindow" in tweak or "ToastWindow" in tweak:
-    ok("Tweak.x: overlay window approach (Glow-style)")
-elif "%hook FBTabBar" in tweak:
-    ok("Tweak.x: %hook FBTabBar approach")
-else:
-    err("Tweak.x: no long press activation mechanism found")
-
-print()
 if errors:
-    for e in errors: print(f"  ERR  {e}")
+    print('FBTweaks validation failed:', file=sys.stderr)
+    for e in errors:
+        print(' - ' + e, file=sys.stderr)
     sys.exit(1)
-else:
-    print("All checks passed.")
-
-# 10 — Headers imported from .xm need __cplusplus guard if they declare C functions
-import subprocess
-xm_imports = set()
-for fpath in (ROOT/"src").rglob("*.xm"):
-    for line in fpath.read_text().splitlines():
-        m = re.match(r'\s*#import\s+"(.*\.h)"', line)
-        if m:
-            rel = m.group(1)
-            # resolve relative to the .xm file location
-            resolved = (fpath.parent / rel).resolve()
-            if resolved.exists():
-                xm_imports.add(resolved)
-
-for hpath in xm_imports:
-    text = hpath.read_text()
-    # Check for non-static, non-inline C function declarations
-    has_c_funcs = bool(re.search(r'^(?!static\s)(?!#|/|@|\s)[\w].*\(.*\).*;', text, re.MULTILINE))
-    has_guard   = "__cplusplus" in text
-    if has_c_funcs and not has_guard:
-        err(f"{hpath.name}: imported from .xm but missing __cplusplus extern C guard")
-    elif has_c_funcs and has_guard:
-        ok(f"{hpath.name}: has __cplusplus guard")
+print('OK: FBTweaks SDK26 runtime base validation passed')

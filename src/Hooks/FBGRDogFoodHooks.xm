@@ -1,181 +1,282 @@
-// FBGRDogFoodHooks.xm — Facebook DogFood internal menu hooks.
-//
-// O que o FBDogFoodUI contém (binary analysis v563.0.0):
-//   _TtC11FBDogFoodUI17DogFoodController  ← Swift class, mangled ObjC name
-//   Método de classe: getNagSheetWithSession:title:message:switchButtonText:
-//                     snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:
-//   UserDefaults keys:
-//     FBDogFood-managedPhoneFlag       ← chave que ativa "managed phone" mode
-//     FBDogFood-dismissClickCount
-//     FBDogFood-lastSnoozedOnDismissDate
-//     FBDogFood-lastSnoozedOnSwitchDate
-//   App jobs:
-//     FBAppJobDogFoodCold / FBAppJobDogFoodWarm
-//   Outros:
-//     TB,R,N,V_enableDogfoodingView  ← BOOL property "enableDogfoodingView"
-//     _isDogfoodingView              ← C global ou selector
-//     DogfoodNagSheetComponent       ← componente Bloks/RN
-//     com.facebook.dogfood.internal  ← bundle identifier interno
-//     autofill.action.UpdateMcDogfooding
-//
-// Hook strategy:
-//   1. FBGRDogFoodEnabled() — lê pref e define estado "managed phone"
-//   2. Inject "FBDogFood-managedPhoneFlag" = YES no NSUserDefaults standard
-//      (isto é lido pelo app no FBAppJobDogFoodWarm startup job)
-//   3. Expõe FBGRDogFoodPresentNagSheet() para o menu chamar o VC nativo
+// FBGRDogFoodHooks.xm — DogFood/Gold sheet + directed DLP/internal gates.
+// No broad runtime enumeration. No arbitrary class_getInstanceMethod sweep.
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 #import "../FBGramPrefix.h"
 #import "../Runtime/FBGRLog.h"
+#import "../Runtime/FBGRGateStore.h"
 
-// ── Pref key ──────────────────────────────────────────────────────────────────
+extern "C" void FBGRMCGateHooksEnsureInstalled(void);
+extern "C" void FBGRMCGateCacheRefresh(void);
+
 static NSString * const kFBGRDogFoodMaster = @"fbgr_dogfood_master";
+static NSString *gLastDogFoodSessionSource = nil;
+static NSString *gLastDogFoodFailure = nil;
+static BOOL gDogFoodRuntimeEnabled = NO;
+static BOOL gDirectedHooksInstalled = NO;
+static NSUInteger gDirectedHookCount = 0;
+static IMP gOrigDLPComponent = NULL;
 
-// ── FBDogFood-managedPhoneFlag — ativa o dogfood mode da app ─────────────────
-// Chave lida pelo FBAppJobDogFoodWarm/Cold no startup da app.
-// Com YES, a app pensa que está num "Gold managed device" (employee phone).
-static void FBGRDogFoodApplyManagedPhoneFlag(void) {
-    BOOL enabled = [FBGRPrefs() boolForKey:kFBGRDogFoodMaster];
-    // Esta chave vai no NSUserDefaults padrão do app (não na nossa suite)
-    [[NSUserDefaults standardUserDefaults] setBool:enabled
-                                            forKey:@"FBDogFood-managedPhoneFlag"];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    FBGRLogAppend([NSString stringWithFormat:
-        @"DogFood: managedPhoneFlag = %@", enabled ? @"YES" : @"NO"]);
+static BOOL FBGRDogFoodKeyIsManaged(NSString *key) {
+    if (![key isKindOfClass:NSString.class]) return NO;
+    return [key isEqualToString:@"FBDogFood-managedPhoneFlag"] ||
+           [key isEqualToString:@"FBDogFood-enableDogfoodingView"] ||
+           [key isEqualToString:@"enableDogfoodingView"] ||
+           [key isEqualToString:@"_isDogfoodingView"] ||
+           [key isEqualToString:@"isDogfoodingView"] ||
+           [key isEqualToString:@"FBDogFood-internal"] ||
+           [key isEqualToString:@"FBInternalDogFood"] ||
+           [key isEqualToString:@"com.facebook.dogfood.internal"] ||
+           [key isEqualToString:@"ig_fb_dogfooder"] ||
+           [key isEqualToString:@"is_dogfooding_enabled"] ||
+           [key isEqualToString:@"is_in_switcher_company_dogfooding"] ||
+           [key isEqualToString:@"is_dlp_native_dogfooding_component_enabled"] ||
+           [key isEqualToString:@"FBDLPDogfoodingIndicator"] ||
+           [key isEqualToString:@"zero-dogfood-device-id"];
 }
 
-// ── FBDogFoodUI.DogFoodController ────────────────────────────────────────────
-// Classe Swift — o nome ObjC mangled é _TtC11FBDogFoodUI17DogFoodController
-// Logos resolve em runtime via objc_getClass.
-// O método getNagSheetWithSession: retorna um UIViewController.
-// A sessão (FBUserSession) é obtida via performSelector para evitar header.
+static void FBGRDogFoodReloadRuntimeFlag(void) {
+    gDogFoodRuntimeEnabled = [FBGRPrefs() boolForKey:kFBGRDogFoodMaster] ||
+                              [NSUserDefaults.standardUserDefaults boolForKey:@"FBDogFood-managedPhoneFlag"];
+}
 
-static UIViewController *FBGRDogFoodNagSheet(void) {
-    Class cls = NSClassFromString(@"_TtC11FBDogFoodUI17DogFoodController");
-    if (!cls) {
-        FBGRLogAppend(@"DogFood: DogFoodController class not found");
-        return nil;
+static const uint64_t kDogFoodMCSlots[] = {
+    // ReactMobileConfigMetadata(7) validated dogfood/internal/employee/debug slots.
+    162, 192, 292, 551, 818, 876, 1248, 1264, 1708, 2028, 4124, 4623
+};
+
+static void FBGRDogFoodApplyMCOverrides(BOOL enabled) {
+    for (NSUInteger i = 0; i < sizeof(kDogFoodMCSlots) / sizeof(kDogFoodMCSlots[0]); i++) {
+        if (enabled) FBGRGateSet(kDogFoodMCSlots[i], YES);
+        else FBGRGateClear(kDogFoodMCSlots[i]);
     }
+    FBGRGateStoreWarmup();
+    FBGRMCGateCacheRefresh();
+    if (enabled) FBGRMCGateHooksEnsureInstalled();
+}
 
-    // getNagSheetWithSession:title:message:switchButtonText:snoozeButtonText:
-    //                        snoozeEnabled:onSwitch:onSnooze:
-    // Precisa de FBUserSession — obter via [FBUserSession activeSession]
-    id session = nil;
-    Class sessionCls = NSClassFromString(@"FBUserSession");
-    if (sessionCls) {
-        SEL activeSessionSel = NSSelectorFromString(@"activeSession");
-        if ([sessionCls respondsToSelector:activeSessionSel]) {
-            session = ((id(*)(id, SEL))objc_msgSend)(sessionCls, activeSessionSel);
-        }
-        if (!session) {
-            // Fallback: activeUserSession
-            SEL altSel = NSSelectorFromString(@"activeUserSession");
-            if ([sessionCls respondsToSelector:altSel]) {
-                session = ((id(*)(id, SEL))objc_msgSend)(sessionCls, altSel);
+static void FBGRDogFoodWriteDefaults(BOOL enabled) {
+    NSUserDefaults *std = NSUserDefaults.standardUserDefaults;
+    for (NSString *k in @[@"FBDogFood-managedPhoneFlag", @"FBDogFood-enableDogfoodingView", @"enableDogfoodingView", @"_isDogfoodingView", @"isDogfoodingView", @"FBDogFood-internal", @"FBInternalDogFood", @"is_dogfooding_enabled", @"is_in_switcher_company_dogfooding", @"is_dlp_native_dogfooding_component_enabled", @"ig_fb_dogfooder"]) {
+        [std setBool:enabled forKey:k];
+    }
+    if (enabled) {
+        [std removeObjectForKey:@"FBDogFood-lastSnoozedOnSwitchDate"];
+        [std removeObjectForKey:@"FBDogFood-lastSnoozedOnDismissDate"];
+        [std setInteger:0 forKey:@"FBDogFood-dismissClickCount"];
+    }
+    [std synchronize];
+    gDogFoodRuntimeEnabled = enabled;
+}
+
+static UIViewController *FBGRDogFoodTopPresenter(void) {
+    UIViewController *top = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+            if (![sc isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+                if (w.isKeyWindow && w.rootViewController) { top = w.rootViewController; break; }
             }
+            if (top) break;
         }
     }
-
-    if (!session) {
-        FBGRLogAppend(@"DogFood: FBUserSession not available — cannot create nag sheet");
-        return nil;
-    }
-
-    SEL sel = NSSelectorFromString(
-        @"getNagSheetWithSession:title:message:switchButtonText:"
-        @"snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:");
-
-    if (![cls respondsToSelector:sel]) {
-        FBGRLogAppend(@"DogFood: getNagSheetWithSession: not found");
-        return nil;
-    }
-
-    // Parâmetros do nag sheet
-    NSString *title    = @"FBTweaks DogFood";
-    NSString *message  = @"Ativar modo dogfood (managed phone)?";
-    NSString *switchTx = @"Ativar";
-    NSString *snoozeTx = @"Mais tarde";
-    BOOL snoozeEnabled = YES;
-
-    id __block nagSheet = nil;
-    id onSwitch = [^(BOOL on) {
-        [FBGRPrefs() setBool:on forKey:kFBGRDogFoodMaster];
-        FBGRDogFoodApplyManagedPhoneFlag();
-        FBGRLogAppend([NSString stringWithFormat:@"DogFood: switch → %@", on ? @"ON" : @"OFF"]);
-    } copy];
-    id onSnooze = [^{
-        FBGRLogAppend(@"DogFood: snoozed");
-    } copy];
-
-    typedef id (*NagIMP)(id, SEL, id, id, id, id, id, BOOL, id, id);
-    NagIMP imp = (NagIMP)[cls methodForSelector:sel];
-    @try {
-        nagSheet = imp(cls, sel,
-                       session, title, message,
-                       switchTx, snoozeTx, snoozeEnabled,
-                       onSwitch, onSnooze);
-    } @catch (NSException *e) {
-        FBGRLogAppend([NSString stringWithFormat:@"DogFood: exception %@", e]);
-        return nil;
-    }
-
-    FBGRLogAppend([NSString stringWithFormat:
-        @"DogFood: nagSheet created → %@", NSStringFromClass([nagSheet class])]);
-    return (UIViewController *)nagSheet;
+    if (!top) top = UIApplication.sharedApplication.keyWindow.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    if ([top isKindOfClass:UINavigationController.class]) top = ((UINavigationController *)top).visibleViewController ?: top;
+    if ([top isKindOfClass:UITabBarController.class]) top = ((UITabBarController *)top).selectedViewController ?: top;
+    return top;
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-extern "C" BOOL FBGRDogFoodIsEnabled(void) {
-    return [FBGRPrefs() boolForKey:kFBGRDogFoodMaster];
+static BOOL FBGRLooksLikeSession(id obj) {
+    if (!obj) return NO;
+    Class c = NSClassFromString(@"FBUserSession");
+    if (c && [obj isKindOfClass:c]) return YES;
+    return [NSStringFromClass([obj class]) containsString:@"FBUserSession"];
 }
+
+static id FBGRSafeGetter(id obj, NSString *name) {
+    if (!obj || !name.length) return nil;
+    SEL sel = NSSelectorFromString(name);
+    if (![obj respondsToSelector:sel]) return nil;
+    @try { return ((id (*)(id, SEL))objc_msgSend)(obj, sel); }
+    @catch (__unused NSException *e) { return nil; }
+}
+
+static id FBGRSafeIvar(id obj, NSString *name) {
+    if (!obj || !name.length) return nil;
+    Ivar iv = class_getInstanceVariable([obj class], name.UTF8String);
+    if (!iv) return nil;
+    @try { return object_getIvar(obj, iv); }
+    @catch (__unused NSException *e) { return nil; }
+}
+
+static void FBGRDogFoodEnqueue(id obj, NSMutableArray *q, NSHashTable *seen, NSUInteger depth, NSString *src) {
+    if (!obj || [seen containsObject:obj]) return;
+    [seen addObject:obj];
+    [q addObject:@{ @"obj": obj, @"depth": @(depth), @"src": src ?: NSStringFromClass([obj class]) ?: @"object" }];
+}
+
+static id FBGRSearchSession(id root, NSString *source, NSUInteger maxDepth) {
+    if (!root) return nil;
+    NSMutableArray *q = [NSMutableArray array];
+    NSHashTable *seen = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+    FBGRDogFoodEnqueue(root, q, seen, 0, source ?: NSStringFromClass([root class]));
+    NSArray *getters = @[@"userSession", @"fbUserSession", @"session", @"currentSession", @"currentUserSession", @"activeSession", @"loggedInUserSession", @"userSessionIfAvailable", @"sessionIfAlreadyExists"];
+    NSArray *ivars = @[@"_userSession", @"_fbUserSession", @"_session", @"userSession", @"fbUserSession", @"session"];
+    while (q.count) {
+        NSDictionary *e = q.firstObject; [q removeObjectAtIndex:0];
+        id obj = e[@"obj"]; NSUInteger depth = [e[@"depth"] unsignedIntegerValue]; NSString *src = e[@"src"];
+        if (FBGRLooksLikeSession(obj)) { gLastDogFoodSessionSource = src; return obj; }
+        if (depth >= maxDepth) continue;
+        for (NSString *n in getters) { id c = FBGRSafeGetter(obj, n); if (FBGRLooksLikeSession(c)) { gLastDogFoodSessionSource = [src stringByAppendingFormat:@".%@", n]; return c; } }
+        for (NSString *n in ivars) { id c = FBGRSafeIvar(obj, n); if (FBGRLooksLikeSession(c)) { gLastDogFoodSessionSource = [src stringByAppendingFormat:@"->%@", n]; return c; } }
+        if ([obj isKindOfClass:UIViewController.class]) {
+            UIViewController *vc = obj;
+            FBGRDogFoodEnqueue(vc.view, q, seen, depth + 1, [src stringByAppendingString:@".view"]);
+            if (vc.navigationController) FBGRDogFoodEnqueue(vc.navigationController, q, seen, depth + 1, [src stringByAppendingString:@".navigationController"]);
+            if (vc.tabBarController) FBGRDogFoodEnqueue(vc.tabBarController, q, seen, depth + 1, [src stringByAppendingString:@".tabBarController"]);
+            if (vc.parentViewController) FBGRDogFoodEnqueue(vc.parentViewController, q, seen, depth + 1, [src stringByAppendingString:@".parent"]);
+            if (vc.presentingViewController) FBGRDogFoodEnqueue(vc.presentingViewController, q, seen, depth + 1, [src stringByAppendingString:@".presenting"]);
+            if (vc.presentedViewController) FBGRDogFoodEnqueue(vc.presentedViewController, q, seen, depth + 1, [src stringByAppendingString:@".presented"]);
+            for (UIViewController *ch in vc.childViewControllers) FBGRDogFoodEnqueue(ch, q, seen, depth + 1, [src stringByAppendingFormat:@".child(%@)", NSStringFromClass([ch class])]);
+        } else if ([obj isKindOfClass:UIWindow.class]) {
+            UIWindow *w = obj; if (w.rootViewController) FBGRDogFoodEnqueue(w.rootViewController, q, seen, depth + 1, [src stringByAppendingString:@".root"]);
+        } else if ([obj isKindOfClass:UIView.class]) {
+            UIView *v = obj;
+            if (v.nextResponder) FBGRDogFoodEnqueue(v.nextResponder, q, seen, depth + 1, [src stringByAppendingString:@".nextResponder"]);
+            if (v.superview) FBGRDogFoodEnqueue(v.superview, q, seen, depth + 1, [src stringByAppendingString:@".superview"]);
+        }
+    }
+    return nil;
+}
+
+static id FBGRDogFoodActiveSession(void) {
+    gLastDogFoodSessionSource = nil;
+    Class c = NSClassFromString(@"FBUserSession");
+    for (NSString *n in @[@"activeSession", @"activeUserSession", @"currentSession", @"currentUserSession", @"sharedSession", @"defaultSession"]) {
+        if (c && [c respondsToSelector:NSSelectorFromString(n)]) {
+            id s = FBGRSafeGetter(c, n); if (FBGRLooksLikeSession(s)) { gLastDogFoodSessionSource = [@"FBUserSession +" stringByAppendingString:n]; return s; }
+        }
+    }
+    UIViewController *top = FBGRDogFoodTopPresenter();
+    id s = FBGRSearchSession(top, NSStringFromClass([top class]), 5);
+    if (s) return s;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) if ([sc isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)sc).windows) { s = FBGRSearchSession(w, NSStringFromClass([w class]), 5); if (s) return s; }
+    }
+    return nil;
+}
+
+static Class FBGRDogFoodControllerClass(void) {
+    Class cls = NSClassFromString(@"_TtC11FBDogFoodUI17DogFoodController");
+    if (!cls) cls = NSClassFromString(@"FBDogFoodUI.DogFoodController");
+    if (!cls) cls = objc_getClass("_TtC11FBDogFoodUI17DogFoodController");
+    return cls;
+}
+
+static Class FBGRDLPProviderClass(void) {
+    Class cls = NSClassFromString(@"FBDLPDogfoodingIndicator.FBDLPDogfoodingIndicatorProvider");
+    if (!cls) cls = NSClassFromString(@"_TtC24FBDLPDogfoodingIndicator32FBDLPDogfoodingIndicatorProvider");
+    if (!cls) cls = objc_getClass("_TtC24FBDLPDogfoodingIndicator32FBDLPDogfoodingIndicatorProvider");
+    return cls;
+}
+
+typedef id (*DLPComponentIMP)(id, SEL, id, id);
+static id FBGRDLPComponentHook(id self, SEL _cmd, id label, id session) {
+    DLPComponentIMP orig = (DLPComponentIMP)gOrigDLPComponent;
+    if (!orig) return nil;
+    if (!(gDogFoodRuntimeEnabled || [FBGRPrefs() boolForKey:kFBGRDogFoodMaster])) return orig(self, _cmd, label, session);
+    id result = orig(self, _cmd, label ?: @"DOGFOOD", session);
+    if (!result) result = orig(self, _cmd, @"DogFood", session);
+    return result;
+}
+
+extern "C" void FBGRDogFoodInstallDirectedHooks(void) {
+    if (gDirectedHooksInstalled) return;
+    gDirectedHooksInstalled = YES;
+    Class dlp = FBGRDLPProviderClass();
+    SEL sel = NSSelectorFromString(@"componentWithLabel:session:");
+    if (dlp && [dlp respondsToSelector:sel]) {
+        MSHookMessageEx(object_getClass(dlp), sel, (IMP)FBGRDLPComponentHook, (IMP *)&gOrigDLPComponent);
+        if (gOrigDLPComponent) gDirectedHookCount++;
+    }
+    FBGRLogAppend([NSString stringWithFormat:@"DogFood directed hooks=%lu dlp=%@", (unsigned long)gDirectedHookCount, dlp ? NSStringFromClass(dlp) : @"NOT FOUND"]);
+}
+
+extern "C" void FBGRDogFoodApplyPersistentState(void) {
+    FBGRDogFoodReloadRuntimeFlag();
+    if (!gDogFoodRuntimeEnabled) return;
+    FBGRDogFoodWriteDefaults(YES);
+    FBGRDogFoodApplyMCOverrides(YES);
+    FBGRDogFoodInstallDirectedHooks();
+}
+
+extern "C" BOOL FBGRDogFoodIsEnabled(void) { return [FBGRPrefs() boolForKey:kFBGRDogFoodMaster]; }
 
 extern "C" void FBGRDogFoodSetEnabled(BOOL enabled) {
     [FBGRPrefs() setBool:enabled forKey:kFBGRDogFoodMaster];
     [FBGRPrefs() synchronize];
-    FBGRDogFoodApplyManagedPhoneFlag();
+    FBGRDogFoodWriteDefaults(enabled);
+    FBGRDogFoodApplyMCOverrides(enabled);
+    if (enabled) FBGRDogFoodInstallDirectedHooks();
+}
+
+static UIViewController *FBGRDogFoodNagSheet(void) {
+    gLastDogFoodFailure = nil;
+    Class cls = FBGRDogFoodControllerClass();
+    SEL sel = NSSelectorFromString(@"getNagSheetWithSession:title:message:switchButtonText:snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:");
+    if (!cls) { gLastDogFoodFailure = @"DogFoodController class not found"; return nil; }
+    if (![cls respondsToSelector:sel]) { gLastDogFoodFailure = @"getNagSheet selector not found"; return nil; }
+    id session = FBGRDogFoodActiveSession();
+    if (!session) { gLastDogFoodFailure = @"FBUserSession not found"; return nil; }
+    id onSwitch = [^{ FBGRDogFoodSetEnabled(YES); FBGRDogFoodApplyPersistentState(); } copy];
+    id onSnooze = [^{ FBGRLogAppend(@"DogFood native snooze"); } copy];
+    typedef id (*NagIMP)(id, SEL, id, id, id, id, id, BOOL, id, id);
+    NagIMP imp = (NagIMP)[cls methodForSelector:sel];
+    @try {
+        id result = imp(cls, sel, session, @"Facebook DogFood", @"Ativa managedPhoneFlag, MC gates Employee/Internal e hook direcionado DLP.", @"Ativar", @"Depois", YES, onSwitch, onSnooze);
+        if ([result isKindOfClass:UIViewController.class]) return result;
+        gLastDogFoodFailure = result ? [NSString stringWithFormat:@"native result %@ is not VC", NSStringFromClass([result class])] : @"native result nil";
+        return nil;
+    } @catch (NSException *e) { gLastDogFoodFailure = e.reason ?: e.name; return nil; }
 }
 
 extern "C" BOOL FBGRDogFoodPresentNagSheet(void) {
-    UIViewController *vc = FBGRDogFoodNagSheet();
+    __block UIViewController *vc = nil;
+    if ([NSThread isMainThread]) vc = FBGRDogFoodNagSheet();
+    else dispatch_sync(dispatch_get_main_queue(), ^{ vc = FBGRDogFoodNagSheet(); });
     if (!vc) return NO;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Find the top presenter
-        UIViewController *top = nil;
-        for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
-            if (![sc isKindOfClass:UIWindowScene.class]) continue;
-            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
-                if (w.isKeyWindow) { top = w.rootViewController; break; }
-            }
-        }
-        while (top.presentedViewController) top = top.presentedViewController;
-        if (top) [top presentViewController:vc animated:YES completion:nil];
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ UIViewController *top = FBGRDogFoodTopPresenter(); if (top) [top presentViewController:vc animated:YES completion:nil]; });
     return YES;
 }
 
 extern "C" NSString *FBGRDogFoodDiagnostic(void) {
-    Class cls = NSClassFromString(@"_TtC11FBDogFoodUI17DogFoodController");
-    BOOL managedFlag = [[NSUserDefaults standardUserDefaults]
-                         boolForKey:@"FBDogFood-managedPhoneFlag"];
-    return [NSString stringWithFormat:
-        @"DogFoodController=%@\nmaster=%@\nmanagedPhoneFlag=%@\nenableView=%@",
-        cls ? NSStringFromClass(cls) : @"NOT FOUND",
-        FBGRDogFoodIsEnabled() ? @"ON" : @"OFF",
-        managedFlag ? @"YES" : @"NO",
-        [[NSUserDefaults standardUserDefaults] boolForKey:@"FBDogFood-enableDogfoodingView"]
-            ? @"YES" : @"NO"];
+    Class cls = FBGRDogFoodControllerClass();
+    SEL nagSel = NSSelectorFromString(@"getNagSheetWithSession:title:message:switchButtonText:snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:");
+    Class dlp = FBGRDLPProviderClass();
+    SEL compSel = NSSelectorFromString(@"componentWithLabel:session:");
+    id session = FBGRDogFoodActiveSession();
+    NSUserDefaults *std = NSUserDefaults.standardUserDefaults;
+    return [NSString stringWithFormat:@"DogFoodController=%@\ngetNagSheet=%@\nFBUserSession=%@\nsessionSource=%@\nlastFailure=%@\nmaster=%@\nmanagedPhoneFlag=%@\nenableDogfoodingView=%@\nruntimeEnabled=%@\ndirectedHooks=%lu\ndlpClass=%@\ndlpComponent=%@\nbundle=%@",
+        cls ? NSStringFromClass(cls) : @"NOT FOUND", (cls && [cls respondsToSelector:nagSel]) ? @"YES" : @"NO", session ? NSStringFromClass([session class]) : @"NOT FOUND", gLastDogFoodSessionSource ?: @"n/a", gLastDogFoodFailure ?: @"n/a", FBGRDogFoodIsEnabled() ? @"ON" : @"OFF", [std boolForKey:@"FBDogFood-managedPhoneFlag"] ? @"YES" : @"NO", [std boolForKey:@"enableDogfoodingView"] ? @"YES" : @"NO", gDogFoodRuntimeEnabled ? @"YES" : @"NO", (unsigned long)gDirectedHookCount, dlp ? NSStringFromClass(dlp) : @"NOT FOUND", (dlp && [dlp respondsToSelector:compSel]) ? @"YES" : @"NO", NSBundle.mainBundle.bundleIdentifier ?: @"unknown"];
 }
 
-// ── Constructor ───────────────────────────────────────────────────────────────
-__attribute__((constructor))
-static void FBGRDogFoodCtor(void) {
+%hook NSUserDefaults
+- (BOOL)boolForKey:(NSString *)defaultName { if (gDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(defaultName)) return YES; return %orig; }
+- (id)objectForKey:(NSString *)defaultName { if (gDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(defaultName)) return @YES; return %orig; }
+- (id)valueForKey:(NSString *)key { if (gDogFoodRuntimeEnabled && FBGRDogFoodKeyIsManaged(key)) return @YES; return %orig; }
+%end
+
+%ctor {
     @autoreleasepool {
-        // Apply managedPhoneFlag on every launch so the job picks it up
-        FBGRDogFoodApplyManagedPhoneFlag();
-        FBGRLogAppend(@"DogFood: ctor done");
+        FBGRDogFoodReloadRuntimeFlag();
+        if (gDogFoodRuntimeEnabled) {
+            FBGRDogFoodWriteDefaults(YES);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRDogFoodInstallDirectedHooks(); });
+        }
     }
 }

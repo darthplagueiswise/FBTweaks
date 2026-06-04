@@ -1,8 +1,8 @@
 Package: com.darthplagueiswise.fbtweaks
 Name: FBTweaks
-Version: 0.1.0
+Version: 0.2.0
 Architecture: iphoneos-arm
-Description: FBTweaks — Facebook iOS internal feature exposure: LiquidGlass, Floating TabBar, MobileConfig override hooks, MC catalog observer.
+Description: FBTweaks SDK26 runtime browser for Facebook MobileConfig, LiquidGlass, DogFood/Internal and tabbar diagnostics.
 Homepage: https://github.com/darthplagueiswise/FBTweaks
 Maintainer: Radan
 Author: Radan
