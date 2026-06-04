@@ -25,8 +25,7 @@ $(TWEAK_NAME)_CFLAGS = \
 	-Wno-nullability-completeness \
 	-Wno-unused-function \
 	-Wno-incompatible-pointer-types \
-	-Imodules/fishhook \
-	-include src/FBGramPrefix.h
+	-Imodules/fishhook
 
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -fuse-ld=lld -lcompression

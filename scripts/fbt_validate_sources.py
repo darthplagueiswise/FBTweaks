@@ -15,7 +15,7 @@ check('iPhoneOS26.0.sdk' in mf, 'Makefile must reference iPhoneOS26.0.sdk')
 check('modules/fishhook/fishhook.c' in mf, 'Makefile must build vendored fishhook.c')
 check('resources/runtime/*.json.gz' in mf, 'Makefile must stage gz runtime JSON metadata')
 check('INSTALL_TARGET_PROCESSES = Facebook' in mf, 'Makefile must target Facebook process')
-check('-include src/FBGramPrefix.h' in mf, 'Makefile must force-include FBGramPrefix.h like Ryuk-style base')
+check('-include src/FBGramPrefix.h' not in mf, 'Makefile must not force-include ObjC prefix into fishhook.c')
 
 plist = (root / 'FBTweaks.plist').read_text(errors='ignore')
 check('com.facebook.Facebook' in plist, 'FBTweaks.plist must filter com.facebook.Facebook')
