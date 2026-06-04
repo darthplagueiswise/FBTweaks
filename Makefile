@@ -28,7 +28,7 @@ $(TWEAK_NAME)_CFLAGS = \
 	-Imodules/fishhook
 
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
-$(TWEAK_NAME)_LDFLAGS += -fuse-ld=lld -lcompression
+$(TWEAK_NAME)_LDFLAGS += -lcompression
 
 CCFLAGS += -std=c++11
 

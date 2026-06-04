@@ -16,6 +16,8 @@ check('modules/fishhook/fishhook.c' in mf, 'Makefile must build vendored fishhoo
 check('resources/runtime/*.json.gz' in mf, 'Makefile must stage gz runtime JSON metadata')
 check('INSTALL_TARGET_PROCESSES = Facebook' in mf, 'Makefile must target Facebook process')
 check('-include src/FBGramPrefix.h' not in mf, 'Makefile must not force-include ObjC prefix into fishhook.c')
+check('-fuse-ld=lld' not in mf, 'Makefile must not force lld on macOS/Theos SDK26 workflow')
+check('-fuse-ld=lld' not in mf, 'Makefile must not pass -fuse-ld=lld on GitHub macOS clang for iOS')
 
 plist = (root / 'FBTweaks.plist').read_text(errors='ignore')
 check('com.facebook.Facebook' in plist, 'FBTweaks.plist must filter com.facebook.Facebook')
