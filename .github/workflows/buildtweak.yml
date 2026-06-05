@@ -47,13 +47,21 @@ jobs:
           THEOS: ${{ github.workspace }}/theos
           SDK_VERSION: "26.2"
       - run: python3 scripts/fbt_validate_sources.py
-      - run: |
+      - name: Build and normalize deb name
+        run: |
           export THEOS="${{ github.workspace }}/theos"
           ./build.sh rootless
           test -n "$(ls packages/*.deb 2>/dev/null)" || { echo "ERROR: no deb generated"; exit 1; }
+
+          RUN_PAD=$(printf "%03d" "$GITHUB_RUN_NUMBER")
+          DEB_NAME="FBTweaks-0.1.${RUN_PAD}.deb"
+          SRC_DEB="$(ls -t packages/*.deb | head -n1)"
+          mv "$SRC_DEB" "packages/$DEB_NAME"
+          echo "DEB_NAME=$DEB_NAME" >> "$GITHUB_ENV"
+          echo "Deb renamed to packages/$DEB_NAME"
           ls -la packages
       - uses: actions/upload-artifact@v4
         with:
-          name: FBTweaks-rootless
-          path: packages/*.deb
+          name: ${{ env.DEB_NAME }}
+          path: packages/${{ env.DEB_NAME }}
           if-no-files-found: error
