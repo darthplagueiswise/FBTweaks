@@ -13,6 +13,7 @@ extern BOOL      FBGRLiquidGlassIsHooked(void);
 extern void      FBGRMCGateHooksEnsureInstalled(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void      FBGRMCObserverFlush(void);
+extern void      FBGRMCObserverSetEnabled(BOOL enabled);
 extern NSUInteger FBGRMCObserverSlotCount(void);
 extern NSString *FBGRMCObserverDump(void);
 
@@ -239,8 +240,8 @@ void FBGRPresentMenu(void) {
 }
 
 - (void)observerToggled:(UISwitch *)sw {
-    [FBGRPrefs() setBool:sw.isOn forKey:kFBGRMCObserverEnabled];
-    [FBGRPrefs() synchronize];
+    FBGRMCObserverSetEnabled(sw.isOn);
+    [self.tableView reloadData];
 }
 
 @end
