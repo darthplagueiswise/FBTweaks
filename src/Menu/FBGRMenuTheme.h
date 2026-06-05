@@ -6,6 +6,8 @@ UIColor *FBGRText(void);
 UIColor *FBGRSub(void);
 UIColor *FBGRAccent(NSInteger idx);
 UIColor *FBGRAccentForProvider(NSString *color);
+BOOL     FBGRRealLiquidGlassAvailable(void);
+void     FBGRInstallLiquidGlassBackground(UIView *view);
 void     FBGRApplyTable(UITableView *_Nullable tv, UIViewController *_Nullable vc);
 void     FBGRApplyCell(UITableViewCell *c, NSInteger idx, NSString *_Nullable color);
 UIImage *_Nullable FBGRSymbol(NSString *name, UIColor *tint);
