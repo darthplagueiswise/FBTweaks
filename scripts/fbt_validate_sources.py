@@ -17,6 +17,18 @@ if wf.exists():
     wt=wf.read_text(errors='ignore'); check('iPhoneOS26.2.sdk' in wt and 'experiments' in wt, 'workflow must build experiments with SDK26.2')
 for f in ['build.sh','build-fast.sh','scripts/validate-sdk26-liquidglass.sh','modules/fishhook/fishhook.c','modules/fishhook/fishhook.h']:
     check((root/f).exists(), f'{f} missing')
+
+tw=(root/'src/Tweak.x').read_text(errors='ignore')
+check('extern "C"' not in tw, 'Tweak.x is Objective-C; it must not contain extern "C"')
+check('%hook UITabBar' not in tw, 'Tweak.x must not use old/wrong UITabBar longpress hook')
+check('numberOfTouchesRequired = 2' not in tw and 'numberOfTouchesRequired    = 2' not in tw, 'Tweak.x must not use the broken 2-finger tabbar longpress')
+check('FDSTouchStateAnnouncingControl' in tw, 'Tweak.x must preserve working FDSTouchStateAnnouncingControl hook')
+check('FBGRIsExactTabButtonCandidate' in tw and 'FBGRSizeLooksLikeTabButton' in tw, 'Tweak.x must preserve exact tab-button filtering')
+check('FBGRDisableNativeLongPressesInSubviewTree' in tw, 'Tweak.x must disable native longpress only inside exact tab-button subtree')
+check('numberOfTapsRequired = 3' in tw, 'Tweak.x must preserve one-finger triple tap fallback on exact tab button')
+check('FBGRMCGateHooksEnsureInstalled();' not in tw, 'Tweak.x must not install MC hooks during startup')
+check('FBGRGateWarmCacheFromPrefs();' in tw, 'Tweak.x must warm gate cache with current GateStore API')
+
 cat=(root/'src/Runtime/FBGRMCCatalog.m').read_text(errors='ignore')
 check('NSBundle.mainBundle.bundlePath' in cat and 'Facebook.app/ReactMobileConfigMetadata.json' in cat, 'catalog must prefer live Facebook.app metadata')
 check('FBGRGunzip' in cat, 'catalog must read json.gz')
