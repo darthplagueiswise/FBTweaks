@@ -19,15 +19,12 @@ for f in ['build.sh','build-fast.sh','scripts/validate-sdk26-liquidglass.sh','mo
     check((root/f).exists(), f'{f} missing')
 
 tw=(root/'src/Tweak.x').read_text(errors='ignore')
-check('extern "C"' not in tw, 'Tweak.x is Objective-C; it must not contain extern "C"')
-check('%hook UITabBar' not in tw, 'Tweak.x must not use old/wrong UITabBar longpress hook')
-check('numberOfTouchesRequired = 2' not in tw and 'numberOfTouchesRequired    = 2' not in tw, 'Tweak.x must not use the broken 2-finger tabbar longpress')
-check('FDSTouchStateAnnouncingControl' in tw, 'Tweak.x must preserve working FDSTouchStateAnnouncingControl hook')
-check('FBGRIsExactTabButtonCandidate' in tw and 'FBGRSizeLooksLikeTabButton' in tw, 'Tweak.x must preserve exact tab-button filtering')
-check('FBGRDisableNativeLongPressesInSubviewTree' in tw, 'Tweak.x must disable native longpress only inside exact tab-button subtree')
-check('numberOfTapsRequired = 3' in tw, 'Tweak.x must preserve one-finger triple tap fallback on exact tab button')
-check('FBGRMCGateHooksEnsureInstalled();' not in tw, 'Tweak.x must not install MC hooks during startup')
-check('FBGRGateWarmCacheFromPrefs();' in tw, 'Tweak.x must warm gate cache with current GateStore API')
+check('%hook FDSTouchStateAnnouncingControl' in tw and '%hook FBTabBarItemDefaultView' in tw, 'Tweak.x must keep exact working tab button hooks')
+check('%hook UIWindow' not in tw and '%hook UIViewController' not in tw, 'Tweak.x must not install broad global UIKit hooks')
+check('%ctor' not in tw and '__attribute__((constructor))' not in tw, 'Tweak.x must not run constructor/startup work')
+check('FBGRLiquidGlassEnsureInstalled' not in tw, 'Tweak.x must not install LiquidGlass at startup')
+check('FBGRMCGateHooksEnsureInstalled' not in tw and 'FBGRGateWarmCacheFromPrefs' not in tw, 'Tweak.x must not install or warm MobileConfig at startup')
+check('numberOfTouchesRequired = 2' not in tw and 'numberOfTouchesRequired = 3' not in tw, 'Tweak.x must not use global multi-finger gesture')
 
 cat=(root/'src/Runtime/FBGRMCCatalog.m').read_text(errors='ignore')
 check('NSBundle.mainBundle.bundlePath' in cat and 'Facebook.app/ReactMobileConfigMetadata.json' in cat, 'catalog must prefer live Facebook.app metadata')
@@ -47,9 +44,10 @@ check('NSStringFromClass([self class])' not in mc, 'MC hot path must not allocat
 check('FBGRLogAppend(msg)' not in mc, 'MC hot path must not log')
 store=(root/'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
 check('FBGRGateEntry gEntries' in store, 'GateStore must use RAM cache for hot path')
+hot=''.join(store.split('BOOL FBGRGateIsSet',1)[1:]).split('void FBGRGateSet',1)[0]
+check('NSUserDefaults' not in hot and 'FBGRPrefs' not in hot and 'NSString' not in hot and 'FBGRGateWarmCacheFromPrefs' not in hot, 'GateStore get/isSet hot path must be RAM-only')
 theme=(root/'src/Menu/FBGRMenuTheme.m').read_text(errors='ignore')
 check('UIBlurEffect' not in theme and 'FBGRCreateRealGlassEffect' in theme, 'menu theme must use real UIKit glass only, not blur simulation')
-
 boolh=(root/'src/Runtime/FBGRBoolRuntimeInventory.h').read_text(errors='ignore') if (root/'src/Runtime/FBGRBoolRuntimeInventory.h').exists() else ''
 boolm=(root/'src/Runtime/FBGRBoolRuntimeInventory.m').read_text(errors='ignore') if (root/'src/Runtime/FBGRBoolRuntimeInventory.m').exists() else ''
 boolvc=(root/'src/Menu/FBGRBoolRuntimeBrowserVC.m').read_text(errors='ignore') if (root/'src/Menu/FBGRBoolRuntimeBrowserVC.m').exists() else ''
@@ -61,7 +59,6 @@ check('/FBSharedFramework.framework/FBSharedFramework' in boolm and '/Facebook.a
 check('Force YES' in boolvc and 'Force NO' in boolvc, 'Bool Runtime browser must expose YES/NO patch actions')
 check('FBGRRootSectionBoolRT' in surf and 'Executable Bool Runtime' in surf and 'FBSharedFramework Bool Runtime' in surf, 'SurfaceList must expose both real Bool Runtime browsers')
 check((root/'docs/RUNTIME_BOOL_BROWSER.md').exists(), 'Bool Runtime docs missing')
-
 meta=root/'resources/runtime/ReactMobileConfigMetadata.json.gz'
 if meta.exists():
     try:
@@ -74,4 +71,4 @@ if errors:
     print('FBTweaks validation failed:', file=sys.stderr)
     for e in errors: print(' - '+e, file=sys.stderr)
     sys.exit(1)
-print('OK: FBTweaks SDK26.2 real runtime/LiquidGlass validation passed')
+print('OK: FBTweaks SDK26.2 startup-safe runtime validation passed')
