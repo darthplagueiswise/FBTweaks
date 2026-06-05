@@ -1,26 +1,88 @@
-// FBGRLiquidGlassHooks.xm — fishhook _METAIsLiquidGlassEnabled
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #import <substrate.h>
+#import "../Runtime/FBGRGateStore.h"
+#import "../Runtime/FBGRLog.h"
 #import "../FBGramPrefix.h"
-#import "../../modules/fishhook/fishhook.h"
 
-typedef BOOL (*LGFn)(void);
-static LGFn orig_METAIsLG = NULL;
+typedef BOOL (*BoolIMP)(id, SEL);
+typedef struct { Class cls; SEL sel; IMP orig; } FBGRLGHook;
+static FBGRLGHook gHooks[96];
+static NSUInteger gHookN = 0;
 static BOOL gInstalled = NO;
+static NSString * const kFBGRLiquidGlassForcedKey = @"fbgr.liquidglass.force";
 
-static BOOL h_METAIsLiquidGlassEnabled(void) {
-    if (FBGRPref(kFBGRLiquidGlassMaster)) return YES;
-    return orig_METAIsLG ? orig_METAIsLG() : NO;
+static IMP FBGRLGOrig(Class cls, SEL sel) {
+    for (NSUInteger i = 0; i < gHookN; i++) if (gHooks[i].cls == cls && gHooks[i].sel == sel) return gHooks[i].orig;
+    return NULL;
+}
+
+static BOOL FBGRLGForced(void) { return [FBGRPrefs() boolForKey:kFBGRLiquidGlassForcedKey]; }
+
+static BOOL FBGRSelectorIsNegative(SEL sel) {
+    NSString *s = NSStringFromSelector(sel).lowercaseString ?: @"";
+    return [s containsString:@"disabled"] || [s containsString:@"disable"] || [s containsString:@"blur"];
+}
+
+static BOOL h_bool(id self, SEL _cmd) {
+    if (FBGRLGForced()) return FBGRSelectorIsNegative(_cmd) ? NO : YES;
+    IMP orig = FBGRLGOrig(object_getClass(self), _cmd);
+    if (!orig) orig = FBGRLGOrig([self class], _cmd);
+    return orig ? ((BoolIMP)orig)(self, _cmd) : NO;
+}
+
+static void HookOne(Class cls, SEL sel, BOOL meta) {
+    if (!cls || !sel || gHookN >= 96) return;
+    Method m = meta ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
+    if (!m || method_getNumberOfArguments(m) != 2) return;
+    char *ret = method_copyReturnType(m); BOOL ok = ret && (ret[0] == 'B' || ret[0] == 'c' || ret[0] == 'C'); if (ret) free(ret); if (!ok) return;
+    Class hookCls = meta ? object_getClass(cls) : cls;
+    for (NSUInteger i = 0; i < gHookN; i++) if (gHooks[i].cls == hookCls && gHooks[i].sel == sel) return;
+    IMP orig = NULL; MSHookMessageEx(hookCls, sel, (IMP)h_bool, &orig);
+    if (orig) gHooks[gHookN++] = (FBGRLGHook){hookCls, sel, orig};
+}
+
+static void HookClass(NSString *name) {
+    Class cls = NSClassFromString(name);
+    if (!cls) return;
+    SEL sels[] = {
+        sel_registerName("isEnabled"),
+        sel_registerName("isHomeFeedHeaderEnabled"),
+        sel_registerName("isGlassRenderingOptimizationEnabled"),
+        sel_registerName("isProfileSegmentedTabsGlassDisabled"),
+        sel_registerName("isLegibilityBlurEnabled"),
+        sel_registerName("navBarIsLiquidGlassEnabled"),
+        sel_registerName("isMediaLiquidGlassEnabled"),
+        sel_registerName("isGlassChatbarUXActive"),
+    };
+    for (NSUInteger i = 0; i < sizeof(sels)/sizeof(sels[0]); i++) { HookOne(cls, sels[i], NO); HookOne(cls, sels[i], YES); }
+}
+
+static void FBGRLiquidGlassApplyMCSlots(BOOL forced) {
+    // Slots confirmed from ReactMobileConfigMetadata(8): liquid_glass/nav/iOS26 adjacent params.
+    uint64_t slots[] = {3406, 3426, 4470, 1489};
+    for (NSUInteger i = 0; i < sizeof(slots)/sizeof(slots[0]); i++) forced ? FBGRGateSet(slots[i], YES) : FBGRGateClear(slots[i]);
 }
 
 extern "C" void FBGRLiquidGlassEnsureInstalled(void) {
-    if (gInstalled) return;
-    struct rebinding rb = { "METAIsLiquidGlassEnabled", (void*)h_METAIsLiquidGlassEnabled, (void**)&orig_METAIsLG };
-    int r = rebind_symbols(&rb, 1);
-    gInstalled = (r == 0 && orig_METAIsLG != NULL);
-    FBGRLogHook("LG", "fishhook=%d hooked=%@", r, gInstalled?@"YES":@"NO");
+    HookClass(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper");
+    HookClass(@"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper");
+    HookClass(@"MSGThreadViewController");
+    gInstalled = YES;
+    FBGRLogAppend([NSString stringWithFormat:@"LiquidGlass hooks installed=%lu forced=%@", (unsigned long)gHookN, FBGRLGForced()?@"YES":@"NO"]);
 }
-extern "C" BOOL FBGRLiquidGlassIsHooked(void) { return gInstalled; }
+extern "C" void FBGRLiquidGlassSetForced(BOOL forced) {
+    [FBGRPrefs() setBool:forced forKey:kFBGRLiquidGlassForcedKey];
+    [FBGRPrefs() synchronize];
+    FBGRLiquidGlassApplyMCSlots(forced);
+    FBGRLiquidGlassEnsureInstalled();
+}
+extern "C" NSString *FBGRLiquidGlassDiagnostic(void) { return [NSString stringWithFormat:@"installed=%@\nhooks=%lu\nforced=%@\nmcSlots=3406,3426,4470,1489", gInstalled?@"YES":@"NO", (unsigned long)gHookN, FBGRLGForced()?@"YES":@"NO"]; }
 
 __attribute__((constructor))
-static void ctor(void) { @autoreleasepool { FBGRLiquidGlassEnsureInstalled(); } }
+static void FBGRLiquidGlassCtor(void) {
+    @autoreleasepool {
+        if (FBGRLGForced()) { FBGRLiquidGlassEnsureInstalled(); FBGRLiquidGlassApplyMCSlots(YES); }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (FBGRLGForced()) FBGRLiquidGlassEnsureInstalled(); });
+    }
+}

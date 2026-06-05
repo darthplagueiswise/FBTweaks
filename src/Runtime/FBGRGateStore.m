@@ -1,147 +1,139 @@
 #import "FBGRGateStore.h"
 #import "../FBGramPrefix.h"
+#import <string.h>
 
-#define FBGR_GATE_CACHE_CAP 8192
+#define FBGR_MAX_OVERRIDES 32768
 
-typedef struct {
-    uint64_t slotId;
-    BOOL set;
-    BOOL value;
-} FBGRGateCacheEntry;
+static NSString * const kFBGRRuntimeHookIndexKey = @"fbgr.runtime.hook.index.v1";
 
-static FBGRGateCacheEntry gCache[FBGR_GATE_CACHE_CAP];
-static volatile uint32_t gCacheCount = 0;
-static NSLock *gCacheLock = nil;
-static dispatch_once_t gCacheOnce;
-
-static void FBGRGateStoreInit(void) {
-    dispatch_once(&gCacheOnce, ^{
-        gCacheLock = [NSLock new];
-        gCacheCount = 0;
-    });
-}
+typedef struct { uint64_t slotId; BOOL isSet; BOOL value; } FBGRGateEntry;
+static FBGRGateEntry gEntries[FBGR_MAX_OVERRIDES];
+static NSUInteger gEntryCount = 0;
+static BOOL gWarm = NO;
 
 static NSString *FBGRSlotKey(uint64_t slotId) {
     return [NSString stringWithFormat:@"fbgr.slot.%llu", (unsigned long long)slotId];
 }
 
-static NSInteger FBGRCacheFindUnlocked(uint64_t slotId) {
-    uint32_t n = gCacheCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gCache[i].set && gCache[i].slotId == slotId) return (NSInteger)i;
-    }
+static NSString *FBGRRuntimeHookID(NSString *className, NSString *selectorName, BOOL classMethod) {
+    return [NSString stringWithFormat:@"%@|%@|%@", classMethod ? @"class" : @"inst", className ?: @"", selectorName ?: @""];
+}
+
+static NSInteger FBGRFind(uint64_t slotId) {
+    for (NSUInteger i = 0; i < gEntryCount; i++) if (gEntries[i].isSet && gEntries[i].slotId == slotId) return (NSInteger)i;
     return -1;
 }
 
-static void FBGRCacheSetUnlocked(uint64_t slotId, BOOL value) {
-    NSInteger idx = FBGRCacheFindUnlocked(slotId);
-    if (idx >= 0) {
-        gCache[idx].value = value;
-        gCache[idx].set = YES;
-        return;
+void FBGRGateWarmCacheFromPrefs(void) {
+    @synchronized(FBGRPrefs()) {
+        gEntryCount = 0;
+        NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
+        for (NSString *k in all.allKeys) {
+            if (![k isKindOfClass:NSString.class] || ![k hasPrefix:@"fbgr.slot."]) continue;
+            if (gEntryCount >= FBGR_MAX_OVERRIDES) break;
+            uint64_t slotId = (uint64_t)[[k substringFromIndex:10] longLongValue];
+            gEntries[gEntryCount++] = (FBGRGateEntry){slotId, YES, [FBGRPrefs() boolForKey:k]};
+        }
+        gWarm = YES;
     }
-    uint32_t n = gCacheCount;
-    if (n >= FBGR_GATE_CACHE_CAP) return;
-    gCache[n].slotId = slotId;
-    gCache[n].value = value;
-    gCache[n].set = YES;
-    gCacheCount = n + 1;
 }
 
-static void FBGRCacheClearUnlocked(uint64_t slotId) {
-    NSInteger idx = FBGRCacheFindUnlocked(slotId);
-    if (idx < 0) return;
-    uint32_t n = gCacheCount;
-    uint32_t u = (uint32_t)idx;
-    if (u + 1 < n) gCache[u] = gCache[n - 1];
-    if (n > 0) gCacheCount = n - 1;
-}
-
-void FBGRGateStoreWarmup(void) {
-    FBGRGateStoreInit();
-
-    NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
-    [gCacheLock lock];
-    gCacheCount = 0;
-    for (NSString *k in all.allKeys) {
-        if (![k isKindOfClass:NSString.class]) continue;
-        if (![k hasPrefix:@"fbgr.slot."]) continue;
-        NSString *suffix = [k substringFromIndex:10];
-        if (suffix.length == 0) continue;
-        uint64_t slotId = (uint64_t)[suffix longLongValue];
-        if (slotId == 0 && ![suffix isEqualToString:@"0"]) continue;
-        BOOL value = [FBGRPrefs() boolForKey:k];
-        FBGRCacheSetUnlocked(slotId, value);
-    }
-    [gCacheLock unlock];
-}
-
-BOOL FBGRGateIsSet(uint64_t slotId) {
-    uint32_t n = gCacheCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gCache[i].set && gCache[i].slotId == slotId) return YES;
-    }
-    return NO;
-}
-
-BOOL FBGRGateGet(uint64_t slotId) {
-    uint32_t n = gCacheCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gCache[i].set && gCache[i].slotId == slotId) return gCache[i].value;
-    }
-    return NO;
-}
+BOOL FBGRGateIsSet(uint64_t slotId) { if (!gWarm) FBGRGateWarmCacheFromPrefs(); NSInteger i = FBGRFind(slotId); return i >= 0 && gEntries[i].isSet; }
+BOOL FBGRGateGet(uint64_t slotId) { if (!gWarm) FBGRGateWarmCacheFromPrefs(); NSInteger i = FBGRFind(slotId); return i >= 0 ? gEntries[i].value : NO; }
 
 void FBGRGateSet(uint64_t slotId, BOOL value) {
-    FBGRGateStoreInit();
-    [FBGRPrefs() setBool:value forKey:FBGRSlotKey(slotId)];
-    [FBGRPrefs() synchronize];
-
-    [gCacheLock lock];
-    FBGRCacheSetUnlocked(slotId, value);
-    [gCacheLock unlock];
+    @synchronized(FBGRPrefs()) {
+        if (!gWarm) FBGRGateWarmCacheFromPrefs();
+        NSInteger i = FBGRFind(slotId);
+        if (i < 0 && gEntryCount < FBGR_MAX_OVERRIDES) {
+            i = (NSInteger)gEntryCount++;
+            gEntries[i].slotId = slotId;
+            gEntries[i].isSet = YES;
+        }
+        if (i >= 0) gEntries[i].value = value;
+        [FBGRPrefs() setBool:value forKey:FBGRSlotKey(slotId)];
+        [FBGRPrefs() synchronize];
+        gWarm = YES;
+    }
 }
 
 void FBGRGateClear(uint64_t slotId) {
-    FBGRGateStoreInit();
-    [FBGRPrefs() removeObjectForKey:FBGRSlotKey(slotId)];
-    [FBGRPrefs() synchronize];
-
-    [gCacheLock lock];
-    FBGRCacheClearUnlocked(slotId);
-    [gCacheLock unlock];
+    @synchronized(FBGRPrefs()) {
+        if (!gWarm) FBGRGateWarmCacheFromPrefs();
+        NSInteger i = FBGRFind(slotId);
+        if (i >= 0) {
+            if ((NSUInteger)i + 1 < gEntryCount) memmove(&gEntries[i], &gEntries[i + 1], (gEntryCount - (NSUInteger)i - 1) * sizeof(FBGRGateEntry));
+            gEntryCount--;
+        }
+        [FBGRPrefs() removeObjectForKey:FBGRSlotKey(slotId)];
+        [FBGRPrefs() synchronize];
+        gWarm = YES;
+    }
 }
 
 void FBGRGateClearAll(void) {
-    FBGRGateStoreInit();
-    NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
-    for (NSString *k in all.allKeys) {
-        if ([k isKindOfClass:NSString.class] && [k hasPrefix:@"fbgr.slot."]) {
-            [FBGRPrefs() removeObjectForKey:k];
+    @synchronized(FBGRPrefs()) {
+        NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
+        for (NSString *k in all.allKeys) {
+            if (![k isKindOfClass:NSString.class]) continue;
+            if ([k hasPrefix:@"fbgr.slot."] || [k hasPrefix:@"fbgr.bool."] || [k hasPrefix:@"fbgr.liquidglass."] || [k isEqualToString:kFBGRRuntimeHookIndexKey]) {
+                [FBGRPrefs() removeObjectForKey:k];
+            }
         }
+        [FBGRPrefs() synchronize];
+        gEntryCount = 0;
+        gWarm = YES;
     }
-    [FBGRPrefs() synchronize];
-
-    [gCacheLock lock];
-    gCacheCount = 0;
-    [gCacheLock unlock];
-}
-
-NSUInteger FBGRGateOverrideCount(void) {
-    FBGRGateStoreInit();
-    return (NSUInteger)gCacheCount;
 }
 
 NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void) {
-    FBGRGateStoreInit();
-    NSMutableArray *result = [NSMutableArray array];
+    if (!gWarm) FBGRGateWarmCacheFromPrefs();
+    NSMutableArray *a = [NSMutableArray arrayWithCapacity:gEntryCount];
+    for (NSUInteger i = 0; i < gEntryCount; i++) if (gEntries[i].isSet) [a addObject:@(gEntries[i].slotId)];
+    return [a sortedArrayUsingSelector:@selector(compare:)];
+}
 
-    [gCacheLock lock];
-    uint32_t n = gCacheCount;
-    for (uint32_t i = 0; i < n; i++) {
-        if (gCache[i].set) [result addObject:@(gCache[i].slotId)];
+static NSMutableDictionary *FBGRRuntimeHookIndexMutable(void) {
+    NSDictionary *raw = [FBGRPrefs() dictionaryForKey:kFBGRRuntimeHookIndexKey];
+    NSMutableDictionary *m = raw ? [raw mutableCopy] : [NSMutableDictionary dictionary];
+    return m;
+}
+
+void FBGRGateRememberRuntimeHook(NSString *className, NSString *selectorName, BOOL classMethod) {
+    if (!className.length || !selectorName.length) return;
+    @synchronized(FBGRPrefs()) {
+        NSMutableDictionary *m = FBGRRuntimeHookIndexMutable();
+        NSString *uid = FBGRRuntimeHookID(className, selectorName, classMethod);
+        m[uid] = @{ @"class": className, @"selector": selectorName, @"classMethod": @(classMethod) };
+        [FBGRPrefs() setObject:m forKey:kFBGRRuntimeHookIndexKey];
+        [FBGRPrefs() synchronize];
     }
-    [gCacheLock unlock];
+}
 
-    return [result sortedArrayUsingSelector:@selector(compare:)];
+void FBGRGateForgetRuntimeHook(NSString *className, NSString *selectorName, BOOL classMethod) {
+    if (!className.length || !selectorName.length) return;
+    @synchronized(FBGRPrefs()) {
+        NSMutableDictionary *m = FBGRRuntimeHookIndexMutable();
+        [m removeObjectForKey:FBGRRuntimeHookID(className, selectorName, classMethod)];
+        [FBGRPrefs() setObject:m forKey:kFBGRRuntimeHookIndexKey];
+        [FBGRPrefs() synchronize];
+    }
+}
+
+NSArray<NSDictionary *> *FBGRGateAllRuntimeHookSpecs(void) {
+    NSDictionary *raw = [FBGRPrefs() dictionaryForKey:kFBGRRuntimeHookIndexKey];
+    if (![raw isKindOfClass:NSDictionary.class] || raw.count == 0) return @[];
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:raw.count];
+    for (id v in raw.allValues) if ([v isKindOfClass:NSDictionary.class]) [out addObject:v];
+    return [out sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSString *sa = [NSString stringWithFormat:@"%@ %@ %@", a[@"class"] ?: @"", a[@"selector"] ?: @"", a[@"classMethod"] ?: @""];
+        NSString *sb = [NSString stringWithFormat:@"%@ %@ %@", b[@"class"] ?: @"", b[@"selector"] ?: @"", b[@"classMethod"] ?: @""];
+        return [sa compare:sb];
+    }];
+}
+
+NSUInteger FBGRGateRuntimeHookSpecCount(void) { return FBGRGateAllRuntimeHookSpecs().count; }
+
+NSString *FBGRGateDiagnostic(void) {
+    return [NSString stringWithFormat:@"mcOverrides=%lu\nruntimeHookSpecs=%lu", (unsigned long)FBGRGateAllOverrideSlotIds().count, (unsigned long)FBGRGateRuntimeHookSpecCount()];
 }
