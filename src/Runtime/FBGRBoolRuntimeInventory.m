@@ -81,6 +81,8 @@ static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSS
     if (methods) free(methods);
 }
 
+@implementation FBGRBoolRuntimeInventory
+
 + (NSArray<FBGRBoolRuntimeItem *> *)scanImageKind:(FBGRBoolRuntimeImageKind)kind {
     int n = objc_getClassList(NULL, 0);
     if (n <= 0) return @[];
