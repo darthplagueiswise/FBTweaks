@@ -27,15 +27,20 @@ check('UITableViewCellAccessoryDisclosureIndicator' not in mcvc, 'MC runtime mus
 check('Install hook sem override' not in boolvc and 'UIAlertAction actionWithTitle:@"Force YES' not in boolvc and 'UIAlertAction actionWithTitle:@"Force NO' not in boolvc, 'Bool runtime must use toggle, not confusing force actions sheet')
 
 mc=read('src/Hooks/FBGRMCGateHooks.xm')
-check('__attribute__((constructor))' not in mc and '%ctor' not in mc, 'MC hooks must not install at startup')
-check('objc_getClassList' in mc and 'MSHookMessageEx' in mc, 'MC hooks must perform on-demand real scan and hook')
-check('dispatch_async(dispatch_get_main_queue' not in mc, 'MC hook install must not be delayed async after toggle')
+# WATweaks-compatible model: startup is allowed, but only as a guarded persisted install pass.
+# It must not blindly hook everything without checking persisted overrides/cache.
+check('__attribute__((constructor))' in mc or '%ctor' in mc, 'MC hooks must have startup reapply path like WATweaks')
+check('FBGRMCGateHooksInstallIfPersisted' in mc or 'FBGRGateAllOverrideSlotIds().count' in mc, 'MC startup path must be gated by persisted overrides')
+check('dispatch_after' in mc, 'MC hooks must retry delayed after launch for late-loaded classes')
+check('objc_getClassList' in mc and 'MSHookMessageEx' in mc, 'MC hooks must perform real runtime scan and hook')
 check('getBool:withOptions:' in mc and 'getBool:withOptions:withDefault:' in mc, 'MC hooks must cover bool getter selectors')
+check('mode=persisted startup' in mc or 'InstallIfPersisted' in mc, 'MC diagnostic must describe persisted startup behavior')
 
 boolm=read('src/Runtime/FBGRBoolRuntimeInventory.m')
 check('@implementation FBGRBoolRuntimeInventory' in boolm, 'BoolRuntime implementation context missing')
 check('objc_getClassList' in boolm and 'class_getImageName' in boolm and 'class_copyMethodList' in boolm and 'method_copyReturnType' in boolm, 'Bool runtime must scan real ObjC runtime')
 check('MSHookMessageEx' in boolm, 'Bool runtime must patch through MSHookMessageEx')
+check('FBGRGateAllRuntimeHookSpecs' in boolm or 'FBGRGateRememberRuntimeHook' in boolm, 'Bool runtime must persist/reapply hook specs')
 
 meta=root/'resources/runtime/ReactMobileConfigMetadata.json.gz'
 if meta.exists():
@@ -51,4 +56,4 @@ if errors:
     print('FBTweaks validation failed:', file=sys.stderr)
     for e in errors: print(' - '+e, file=sys.stderr)
     sys.exit(1)
-print('OK: FBTweaks full-name toggles and real hook validation passed')
+print('OK: FBTweaks WATweaks-style persisted startup hook validation passed')
