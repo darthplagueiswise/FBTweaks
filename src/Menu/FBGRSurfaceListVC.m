@@ -2,6 +2,7 @@
 #import "FBGRMenuTheme.h"
 #import "FBGRGateCategoryVC.h"
 #import "FBGRGateRuntimeBrowserVC.h"
+#import "FBGRBoolRuntimeBrowserVC.h"
 #import "FBGRLogViewController.h"
 #import "../Runtime/FBGRGateRegistry.h"
 #import "../Runtime/FBGRGateStore.h"
@@ -18,9 +19,10 @@ extern NSString *FBGRMCObserverDump(void);
 typedef NS_ENUM(NSInteger, FBGRRootSection) {
     FBGRRootSectionProviders = 0,
     FBGRRootSectionAllParams = 1,
-    FBGRRootSectionObserver  = 2,
-    FBGRRootSectionDiag      = 3,
-    FBGRRootSectionCount     = 4,
+    FBGRRootSectionBoolRT    = 2,
+    FBGRRootSectionObserver  = 3,
+    FBGRRootSectionDiag      = 4,
+    FBGRRootSectionCount     = 5,
 };
 
 static UIViewController *FBGRTopVC(void) {
@@ -86,6 +88,7 @@ void FBGRPresentMenu(void) {
     switch (s) {
         case FBGRRootSectionProviders: return (NSInteger)_providers.count;
         case FBGRRootSectionAllParams: return 1;
+        case FBGRRootSectionBoolRT:    return 2; // executable + FBSharedFramework bool scanners
         case FBGRRootSectionObserver:  return 2; // toggle + flush
         case FBGRRootSectionDiag:      return 3; // hooks diag + log + reset all
         default: return 0;
@@ -93,7 +96,7 @@ void FBGRPresentMenu(void) {
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
-    return (@[@"Categorias reais do catálogo", @"Catálogo Completo", @"MC Observer", @"Diagnóstico / Tools"])[(NSUInteger)s];
+    return (@[@"Categorias reais do catálogo", @"Catálogo Completo", @"Bool Runtime Browser", @"MC Observer", @"Diagnóstico / Tools"])[(NSUInteger)s];
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
@@ -104,6 +107,8 @@ void FBGRPresentMenu(void) {
     }
     if (s == FBGRRootSectionAllParams)
         return @"Runtime real lendo ReactMobileConfigMetadata do Facebook.app/container; toggle = override persistente.";
+    if (s == FBGRRootSectionBoolRT)
+        return @"Dois scanners reais por imagem: executável principal Facebook.app/Facebook e FBSharedFramework. Lista BOOL getters sem argumentos e aplica Force YES/NO por MSHookMessageEx sob demanda.";
     if (s == FBGRRootSectionObserver)
         return @"Observer loga slotIds observados em runtime → mc_props_dump.json. "
                @"Ativar por alguns minutos e fazer flush gera o catálogo ao vivo do app.";
@@ -139,6 +144,15 @@ void FBGRPresentMenu(void) {
         c.textLabel.text  = @"Runtime MobileConfig — catálogo real";
         c.detailTextLabel.text = [NSString stringWithFormat:@"%lu params  |  busca + toggle",
             (unsigned long)[FBGRMCCatalog shared].totalCount];
+        c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return c;
+    }
+
+    if (ip.section == FBGRRootSectionBoolRT) {
+        BOOL exec = (ip.row == 0);
+        c.imageView.image = FBGRSymbol(exec ? @"app.dashed" : @"shippingbox.fill", exec ? UIColor.systemBlueColor : UIColor.systemPurpleColor);
+        c.textLabel.text = exec ? @"Executable Bool Runtime — Facebook" : @"FBSharedFramework Bool Runtime";
+        c.detailTextLabel.text = exec ? @"Varre Facebook.app/Facebook por BOOL getters patcháveis" : @"Varre FBSharedFramework.framework por BOOL getters patcháveis";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return c;
     }
@@ -192,6 +206,11 @@ void FBGRPresentMenu(void) {
     if (ip.section == FBGRRootSectionAllParams) {
         [self.navigationController pushViewController:
             [[FBGRGateRuntimeBrowserVC alloc] initWithProvider:nil] animated:YES];
+        return;
+    }
+    if (ip.section == FBGRRootSectionBoolRT) {
+        FBGRBoolRuntimeImageKind kind = ip.row == 0 ? FBGRBoolRuntimeImageKindExecutable : FBGRBoolRuntimeImageKindFBSharedFramework;
+        [self.navigationController pushViewController:[[FBGRBoolRuntimeBrowserVC alloc] initWithImageKind:kind] animated:YES];
         return;
     }
     if (ip.section == FBGRRootSectionObserver && ip.row == 1) {

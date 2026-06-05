@@ -34,6 +34,19 @@ store=(root/'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
 check('FBGRGateEntry gEntries' in store, 'GateStore must use RAM cache for hot path')
 theme=(root/'src/Menu/FBGRMenuTheme.m').read_text(errors='ignore')
 check('UIBlurEffect' not in theme and 'FBGRCreateRealGlassEffect' in theme, 'menu theme must use real UIKit glass only, not blur simulation')
+
+boolh=(root/'src/Runtime/FBGRBoolRuntimeInventory.h').read_text(errors='ignore') if (root/'src/Runtime/FBGRBoolRuntimeInventory.h').exists() else ''
+boolm=(root/'src/Runtime/FBGRBoolRuntimeInventory.m').read_text(errors='ignore') if (root/'src/Runtime/FBGRBoolRuntimeInventory.m').exists() else ''
+boolvc=(root/'src/Menu/FBGRBoolRuntimeBrowserVC.m').read_text(errors='ignore') if (root/'src/Menu/FBGRBoolRuntimeBrowserVC.m').exists() else ''
+surf=(root/'src/Menu/FBGRSurfaceListVC.m').read_text(errors='ignore')
+check('FBGRBoolRuntimeImageKindExecutable' in boolh and 'FBGRBoolRuntimeImageKindFBSharedFramework' in boolh, 'Bool Runtime must expose executable + FBSharedFramework image kinds')
+check('class_getImageName' in boolm and 'objc_copyClassList' in boolm and 'MSHookMessageEx' in boolm, 'Bool Runtime must scan real ObjC runtime and hook via MSHookMessageEx')
+check('method_getNumberOfArguments(m) != 2' in boolm and 'method_copyReturnType' in boolm, 'Bool Runtime must filter no-arg BOOL methods')
+check('/FBSharedFramework.framework/FBSharedFramework' in boolm and '/Facebook.app/Facebook' in boolm, 'Bool Runtime must filter exact executable/framework images')
+check('Force YES' in boolvc and 'Force NO' in boolvc, 'Bool Runtime browser must expose YES/NO patch actions')
+check('FBGRRootSectionBoolRT' in surf and 'Executable Bool Runtime' in surf and 'FBSharedFramework Bool Runtime' in surf, 'SurfaceList must expose both real Bool Runtime browsers')
+check((root/'docs/RUNTIME_BOOL_BROWSER.md').exists(), 'Bool Runtime docs missing')
+
 meta=root/'resources/runtime/ReactMobileConfigMetadata.json.gz'
 if meta.exists():
     try:
