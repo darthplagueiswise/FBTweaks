@@ -36,11 +36,11 @@ clean_build() {
 	rm -rf .theos
 }
 
-make_final() {
+make_package() {
 	if [ "$#" -gt 0 ]; then
-		make FINALPACKAGE=1 "$@"
+		make package FINALPACKAGE=1 "$@"
 	else
-		make FINALPACKAGE=1
+		make package FINALPACKAGE=1
 	fi
 }
 
@@ -51,14 +51,14 @@ case "$MODE" in
 		ensure_theos
 		ensure_packages_dir
 		log "[FBTweaks] Building rootless package with SDK26"
-		make_final THEOS_PACKAGE_SCHEME=rootless "$@"
+		make_package THEOS_PACKAGE_SCHEME=rootless "$@"
 		;;
 	rootful)
 		shift || true
 		ensure_theos
 		ensure_packages_dir
 		log "[FBTweaks] Building rootful package with SDK26"
-		make_final "$@"
+		make_package "$@"
 		;;
 	dylib)
 		shift || true
@@ -66,7 +66,7 @@ case "$MODE" in
 		clean_build
 		ensure_packages_dir
 		log "[FBTweaks] Building dylib only"
-		make_final "$@"
+		make_package "$@"
 		[ -f "$TWEAK_DYLIB" ] || die "Missing dylib: $TWEAK_DYLIB"
 		cp -f "$TWEAK_DYLIB" "$PACKAGES_DIR/${APP_NAME}.dylib"
 		;;
@@ -77,7 +77,7 @@ case "$MODE" in
 		ensure_theos
 		ensure_packages_dir
 		log "[FBTweaks] Building default target: $MODE"
-		make_final "$MODE" "$@"
+		make_package "$MODE" "$@"
 		;;
 esac
 
