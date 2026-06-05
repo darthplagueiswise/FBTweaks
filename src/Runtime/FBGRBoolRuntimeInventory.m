@@ -1,5 +1,6 @@
 #import "FBGRBoolRuntimeInventory.h"
 #import "../FBGramPrefix.h"
+#import "FBGRGateStore.h"
 #import "FBGRLog.h"
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -14,6 +15,7 @@ typedef struct { Class cls; SEL sel; BOOL classMethod; IMP orig; BOOL overrideSe
 static FBGRBoolHook gHooks[FBGR_BOOL_MAX];
 static NSUInteger gHookN = 0;
 static NSUInteger gScanN = 0;
+static NSUInteger gPersistReinstallN = 0;
 
 static NSString *FBGRKey(NSString *className, NSString *selectorName, BOOL classMethod) {
     return [NSString stringWithFormat:@"fbgr.bool.%@.%@.%@", classMethod?@"+":@"-", className ?: @"", selectorName ?: @""];
@@ -38,7 +40,7 @@ static BOOL FBGRSelectorAllowed(NSString *sel) {
     if (!sel.length || [sel containsString:@":"]) return NO;
     NSString *s = sel.lowercaseString;
     if ([s hasPrefix:@"set"] || [s isEqualToString:@"hash"] || [s isEqualToString:@"isproxy"]) return NO;
-    return ([s hasPrefix:@"is"] || [s hasPrefix:@"has"] || [s hasPrefix:@"can"] || [s hasPrefix:@"should"] || [s hasPrefix:@"allows"] || [s containsString:@"enabled"] || [s containsString:@"debug"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] || [s containsString:@"experiment"] || [s containsString:@"liquid"] || [s containsString:@"glass"] || [s containsString:@"tab"] || [s containsString:@"gate"]);
+    return ([s hasPrefix:@"is"] || [s hasPrefix:@"has"] || [s hasPrefix:@"can"] || [s hasPrefix:@"should"] || [s hasPrefix:@"allows"] || [s containsString:@"enabled"] || [s containsString:@"debug"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] || [s containsString:@"employee"] || [s containsString:@"experiment"] || [s containsString:@"liquid"] || [s containsString:@"glass"] || [s containsString:@"tab"] || [s containsString:@"gate"]);
 }
 
 static BOOL FBGRImageMatches(const char *img, FBGRBoolRuntimeImageKind kind) {
@@ -77,6 +79,22 @@ static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSS
     if (methods) free(methods);
 }
 
+static FBGRBoolRuntimeItem *FBGRItemFromSpec(NSDictionary *spec) {
+    if (![spec isKindOfClass:NSDictionary.class]) return nil;
+    NSString *className = [spec[@"class"] isKindOfClass:NSString.class] ? spec[@"class"] : nil;
+    NSString *selectorName = [spec[@"selector"] isKindOfClass:NSString.class] ? spec[@"selector"] : nil;
+    if (!className.length || !selectorName.length) return nil;
+    FBGRBoolRuntimeItem *item = [FBGRBoolRuntimeItem new];
+    item.className = className;
+    item.selectorName = selectorName;
+    item.classMethod = [spec[@"classMethod"] boolValue];
+    NSString *key = FBGRKey(item.className, item.selectorName, item.classMethod);
+    id obj = [FBGRPrefs() objectForKey:key];
+    item.overrideSet = obj != nil;
+    item.overrideValue = [obj boolValue];
+    return item;
+}
+
 @implementation FBGRBoolRuntimeInventory
 + (NSArray<FBGRBoolRuntimeItem *> *)scanImageKind:(FBGRBoolRuntimeImageKind)kind {
     int n = objc_getClassList(NULL, 0);
@@ -108,6 +126,7 @@ static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSS
     if (FBGRFindHook(hookCls, sel, item.classMethod)) { item.hooked = YES; return; }
     Method m = item.classMethod ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
     if (!m || method_getNumberOfArguments(m) != 2) return;
+    char *ret = method_copyReturnType(m); BOOL ok = FBGRReturnIsBool(ret); if (ret) free(ret); if (!ok) return;
     IMP orig = NULL; MSHookMessageEx(hookCls, sel, (IMP)h_bool, &orig);
     if (!orig) return;
     FBGRBoolHook *e = &gHooks[gHookN++]; memset(e, 0, sizeof(*e));
@@ -121,6 +140,7 @@ static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSS
     [self installHookForItem:item];
     NSString *key = FBGRKey(item.className, item.selectorName, item.classMethod);
     [FBGRPrefs() setBool:value forKey:key]; [FBGRPrefs() synchronize];
+    FBGRGateRememberRuntimeHook(item.className, item.selectorName, item.classMethod);
     Class cls = NSClassFromString(item.className);
     FBGRBoolHook *e = cls ? FBGRFindHook(item.classMethod ? object_getClass(cls) : cls, NSSelectorFromString(item.selectorName), item.classMethod) : NULL;
     if (e) { e->overrideSet = YES; e->overrideValue = value; }
@@ -129,10 +149,35 @@ static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSS
 + (void)clearOverrideForItem:(FBGRBoolRuntimeItem *)item {
     NSString *key = FBGRKey(item.className, item.selectorName, item.classMethod);
     [FBGRPrefs() removeObjectForKey:key]; [FBGRPrefs() synchronize];
+    FBGRGateForgetRuntimeHook(item.className, item.selectorName, item.classMethod);
     Class cls = NSClassFromString(item.className);
     FBGRBoolHook *e = cls ? FBGRFindHook(item.classMethod ? object_getClass(cls) : cls, NSSelectorFromString(item.selectorName), item.classMethod) : NULL;
     if (e) e->overrideSet = NO;
     item.overrideSet = NO;
 }
-+ (NSString *)diagnostic { return [NSString stringWithFormat:@"hooked=%lu\nscanRows=%lu", (unsigned long)gHookN, (unsigned long)gScanN]; }
++ (NSUInteger)reinstallPersistedHooks {
+    NSUInteger installed = 0;
+    for (NSDictionary *spec in FBGRGateAllRuntimeHookSpecs()) {
+        FBGRBoolRuntimeItem *item = FBGRItemFromSpec(spec);
+        if (!item.overrideSet) continue;
+        BOOL before = item.hooked;
+        [self installHookForItem:item];
+        if (item.hooked || !before) installed++;
+    }
+    gPersistReinstallN += installed;
+    return installed;
+}
++ (void)clearAllRuntimeOverrides { FBGRGateClearAll(); }
++ (NSString *)diagnostic { return [NSString stringWithFormat:@"hooked=%lu\nscanRows=%lu\npersistedSpecs=%lu\nreinstalled=%lu", (unsigned long)gHookN, (unsigned long)gScanN, (unsigned long)FBGRGateRuntimeHookSpecCount(), (unsigned long)gPersistReinstallN]; }
 @end
+
+static void FBGRReinstallPersistedBoolRuntimeHooks(void) { [FBGRBoolRuntimeInventory reinstallPersistedHooks]; }
+__attribute__((constructor))
+static void FBGRBoolRuntimeCtor(void) {
+    @autoreleasepool {
+        FBGRReinstallPersistedBoolRuntimeHooks();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
+    }
+}

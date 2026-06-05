@@ -143,5 +143,20 @@ extern "C" void FBGRMCGateCacheRefresh(void) {
 }
 
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
-    return [NSString stringWithFormat:@"installed=%@\nhooks=%lu\noverrides=%lu\nmode=on-demand real scan", gInstalled ? @"YES" : @"NO", (unsigned long)gHookN, (unsigned long)FBGRGateAllOverrideSlotIds().count];
+    return [NSString stringWithFormat:@"installed=%@\nhooks=%lu\noverrides=%lu\nruntimeSpecs=%lu\nmode=persisted startup + on-demand real scan", gInstalled ? @"YES" : @"NO", (unsigned long)gHookN, (unsigned long)FBGRGateAllOverrideSlotIds().count, (unsigned long)FBGRGateRuntimeHookSpecCount()];
+}
+
+
+static void FBGRMCGateHooksInstallIfPersisted(void) {
+    FBGRGateWarmCacheFromPrefs();
+    if (FBGRGateAllOverrideSlotIds().count > 0) FBGRMCGateHooksEnsureInstalled();
+}
+
+__attribute__((constructor))
+static void FBGRMCGateHooksCtor(void) {
+    @autoreleasepool {
+        FBGRMCGateHooksInstallIfPersisted();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallIfPersisted(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallIfPersisted(); });
+    }
 }
