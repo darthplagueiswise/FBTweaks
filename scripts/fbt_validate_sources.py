@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import gzip, json, sys
+import gzip, json, sys, re
 root=Path(__file__).resolve().parents[1]
 errors=[]
 def check(c,m):
     if not c: errors.append(m)
+def strip_comments(s):
+    s=re.sub(r'/\*.*?\*/','',s,flags=re.S)
+    s=re.sub(r'//.*','',s)
+    return s
+def function_body(src,name):
+    m=re.search(r'\b(?:BOOL|void|NSArray<NSNumber \*> \*)\s+'+re.escape(name)+r'\s*\([^)]*\)\s*\{',src)
+    if not m: return ''
+    i=m.end(); depth=1; j=i
+    while j < len(src) and depth:
+        if src[j]=='{': depth+=1
+        elif src[j]=='}': depth-=1
+        j+=1
+    return src[i:j-1]
 mf=(root/'Makefile').read_text(errors='ignore')
 check('26.2' in mf and 'iPhoneOS26.2.sdk' in mf, 'Makefile must target SDK26.2')
 check('-fuse-ld=lld' not in mf, 'Makefile must not force lld')
@@ -44,8 +57,12 @@ check('NSStringFromClass([self class])' not in mc, 'MC hot path must not allocat
 check('FBGRLogAppend(msg)' not in mc, 'MC hot path must not log')
 store=(root/'src/Runtime/FBGRGateStore.m').read_text(errors='ignore')
 check('FBGRGateEntry gEntries' in store, 'GateStore must use RAM cache for hot path')
-hot=''.join(store.split('BOOL FBGRGateIsSet',1)[1:]).split('void FBGRGateSet',1)[0]
-check('NSUserDefaults' not in hot and 'FBGRPrefs' not in hot and 'NSString' not in hot and 'FBGRGateWarmCacheFromPrefs' not in hot, 'GateStore get/isSet hot path must be RAM-only')
+store_nc=strip_comments(store)
+is_body=function_body(store_nc,'FBGRGateIsSet')
+get_body=function_body(store_nc,'FBGRGateGet')
+check(is_body and get_body, 'GateStore must define FBGRGateIsSet and FBGRGateGet')
+for forbidden in ['NSUserDefaults','FBGRPrefs','NSString','FBGRGateWarmCacheFromPrefs','dictionaryRepresentation','synchronize']:
+    check(forbidden not in is_body and forbidden not in get_body, f'GateStore hot path must not use {forbidden}')
 theme=(root/'src/Menu/FBGRMenuTheme.m').read_text(errors='ignore')
 check('UIBlurEffect' not in theme and 'FBGRCreateRealGlassEffect' in theme, 'menu theme must use real UIKit glass only, not blur simulation')
 boolh=(root/'src/Runtime/FBGRBoolRuntimeInventory.h').read_text(errors='ignore') if (root/'src/Runtime/FBGRBoolRuntimeInventory.h').exists() else ''
