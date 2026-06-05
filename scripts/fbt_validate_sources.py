@@ -25,6 +25,11 @@ check('METAIsLiquidGlassEnabled' not in reg and 'slot 0' not in reg and '_METAIs
 check('FBGRFlagsFor' in reg and '[[FBGRMCCatalog shared] boolParams]' in reg, 'registry must be generated from runtime catalog')
 catvc=(root/'src/Menu/FBGRGateCategoryVC.m').read_text(errors='ignore')
 check('kFBGRLiquidGlassMaster' not in catvc and 'flag.slotId == 0' not in catvc, 'category VC must not special-case fake LiquidGlass slot0')
+tw=(root/'src/Tweak.x').read_text(errors='ignore')
+check('extern "C"' not in tw, 'Tweak.x is preprocessed as Objective-C .m; it must not contain extern "C" declarations')
+check('extern void FBGRLiquidGlassEnsureInstalled(void);' in tw, 'Tweak.x must declare FBGRLiquidGlassEnsureInstalled as plain extern void')
+check('extern void FBGRMCGateHooksEnsureInstalled(void);' in tw, 'Tweak.x must declare FBGRMCGateHooksEnsureInstalled as plain extern void')
+
 mc=(root/'src/Hooks/FBGRMCGateHooks.xm').read_text(errors='ignore')
 check('__attribute__((constructor))' not in mc, 'MC hooks must not install in constructor')
 check('objc_copyClassList' not in mc, 'MC hooks must not global scan')

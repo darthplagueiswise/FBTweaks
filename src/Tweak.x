@@ -12,8 +12,8 @@
 #import "Menu/FBGRSurfaceListVC.h"
 #import "Runtime/FBGRGateStore.h"
 
-extern "C" void FBGRLiquidGlassEnsureInstalled(void);
-extern "C" void FBGRMCGateHooksEnsureInstalled(void);
+extern void FBGRLiquidGlassEnsureInstalled(void);
+extern void FBGRMCGateHooksEnsureInstalled(void);
 
 // ── Long press handler ────────────────────────────────────────────────────────
 static const void *kFBGRTabBarLP = &kFBGRTabBarLP;
