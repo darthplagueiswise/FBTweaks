@@ -1,13 +1,12 @@
 #pragma once
 #import <UIKit/UIKit.h>
-UIColor *FBGRBg(void);
-UIColor *FBGRCell(void);
-UIColor *FBGRText(void);
-UIColor *FBGRSub(void);
-UIColor *FBGRAccent(NSInteger idx);
-UIColor *FBGRAccentForProvider(NSString *color);
-BOOL     FBGRRealLiquidGlassAvailable(void);
-void     FBGRInstallLiquidGlassBackground(UIView *view);
-void     FBGRApplyTable(UITableView *_Nullable tv, UIViewController *_Nullable vc);
-void     FBGRApplyCell(UITableViewCell *c, NSInteger idx, NSString *_Nullable color);
-UIImage *_Nullable FBGRSymbol(NSString *name, UIColor *tint);
+UIColor *FBGRBackgroundColor(void);
+UIColor *FBGRTextColor(void);
+UIColor *FBGRSecondaryTextColor(void);
+UIColor *FBGRAccentColor(void);
+UIImage *FBGRSymbol(NSString *name, UIColor *color);
+void FBGRApplyGlassController(UIViewController *vc);
+void FBGRApplyGlassTable(UITableView *tableView);
+void FBGRApplyGlassCell(UITableViewCell *cell);
+UIVisualEffectView *FBGRCreateRealGlassView(void);
+void FBGRApplySearchController(UISearchController *search);

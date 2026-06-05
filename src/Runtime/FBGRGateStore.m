@@ -2,14 +2,9 @@
 #import "../FBGramPrefix.h"
 #import <string.h>
 
-#define FBGR_MAX_OVERRIDES 8192
+#define FBGR_MAX_OVERRIDES 16384
 
-typedef struct {
-    uint64_t slotId;
-    BOOL isSet;
-    BOOL value;
-} FBGRGateEntry;
-
+typedef struct { uint64_t slotId; BOOL isSet; BOOL value; } FBGRGateEntry;
 static FBGRGateEntry gEntries[FBGR_MAX_OVERRIDES];
 static NSUInteger gEntryCount = 0;
 static BOOL gWarm = NO;
@@ -19,43 +14,36 @@ static NSString *FBGRSlotKey(uint64_t slotId) {
 }
 
 static NSInteger FBGRFind(uint64_t slotId) {
-    for (NSUInteger i = 0; i < gEntryCount; i++) {
-        if (gEntries[i].isSet && gEntries[i].slotId == slotId) return (NSInteger)i;
-    }
+    for (NSUInteger i = 0; i < gEntryCount; i++) if (gEntries[i].isSet && gEntries[i].slotId == slotId) return (NSInteger)i;
     return -1;
 }
 
 void FBGRGateWarmCacheFromPrefs(void) {
-    @synchronized([NSUserDefaults standardUserDefaults]) {
+    @synchronized(FBGRPrefs()) {
         gEntryCount = 0;
         NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
         for (NSString *k in all.allKeys) {
-            if (![k isKindOfClass:NSString.class]) continue;
-            if (![k hasPrefix:@"fbgr.slot."]) continue;
+            if (![k isKindOfClass:NSString.class] || ![k hasPrefix:@"fbgr.slot."]) continue;
             if (gEntryCount >= FBGR_MAX_OVERRIDES) break;
-
-            NSString *suffix = [k substringFromIndex:10];
-            uint64_t slotId = (uint64_t)[suffix longLongValue];
-            gEntries[gEntryCount++] = (FBGRGateEntry){ slotId, YES, [FBGRPrefs() boolForKey:k] };
+            uint64_t slotId = (uint64_t)[[k substringFromIndex:10] longLongValue];
+            gEntries[gEntryCount++] = (FBGRGateEntry){slotId, YES, [FBGRPrefs() boolForKey:k]};
         }
         gWarm = YES;
     }
 }
 
-/* HOT PATH: RAM-only. */
 BOOL FBGRGateIsSet(uint64_t slotId) {
     NSInteger i = FBGRFind(slotId);
     return i >= 0 && gEntries[i].isSet;
 }
 
-/* HOT PATH: RAM-only. */
 BOOL FBGRGateGet(uint64_t slotId) {
     NSInteger i = FBGRFind(slotId);
     return i >= 0 ? gEntries[i].value : NO;
 }
 
 void FBGRGateSet(uint64_t slotId, BOOL value) {
-    @synchronized([NSUserDefaults standardUserDefaults]) {
+    @synchronized(FBGRPrefs()) {
         NSInteger i = FBGRFind(slotId);
         if (i < 0 && gEntryCount < FBGR_MAX_OVERRIDES) {
             i = (NSInteger)gEntryCount++;
@@ -63,7 +51,6 @@ void FBGRGateSet(uint64_t slotId, BOOL value) {
             gEntries[i].isSet = YES;
         }
         if (i >= 0) gEntries[i].value = value;
-
         [FBGRPrefs() setBool:value forKey:FBGRSlotKey(slotId)];
         [FBGRPrefs() synchronize];
         gWarm = YES;
@@ -71,15 +58,12 @@ void FBGRGateSet(uint64_t slotId, BOOL value) {
 }
 
 void FBGRGateClear(uint64_t slotId) {
-    @synchronized([NSUserDefaults standardUserDefaults]) {
+    @synchronized(FBGRPrefs()) {
         NSInteger i = FBGRFind(slotId);
         if (i >= 0) {
-            if ((NSUInteger)i + 1 < gEntryCount) {
-                memmove(&gEntries[i], &gEntries[i + 1], (gEntryCount - (NSUInteger)i - 1) * sizeof(FBGRGateEntry));
-            }
+            if ((NSUInteger)i + 1 < gEntryCount) memmove(&gEntries[i], &gEntries[i + 1], (gEntryCount - (NSUInteger)i - 1) * sizeof(FBGRGateEntry));
             gEntryCount--;
         }
-
         [FBGRPrefs() removeObjectForKey:FBGRSlotKey(slotId)];
         [FBGRPrefs() synchronize];
         gWarm = YES;
@@ -87,13 +71,9 @@ void FBGRGateClear(uint64_t slotId) {
 }
 
 void FBGRGateClearAll(void) {
-    @synchronized([NSUserDefaults standardUserDefaults]) {
+    @synchronized(FBGRPrefs()) {
         NSDictionary *all = [FBGRPrefs() dictionaryRepresentation] ?: @{};
-        for (NSString *k in all.allKeys) {
-            if ([k isKindOfClass:NSString.class] && [k hasPrefix:@"fbgr.slot."]) {
-                [FBGRPrefs() removeObjectForKey:k];
-            }
-        }
+        for (NSString *k in all.allKeys) if ([k isKindOfClass:NSString.class] && [k hasPrefix:@"fbgr.slot."]) [FBGRPrefs() removeObjectForKey:k];
         [FBGRPrefs() synchronize];
         gEntryCount = 0;
         gWarm = YES;
@@ -102,10 +82,7 @@ void FBGRGateClearAll(void) {
 
 NSArray<NSNumber *> *FBGRGateAllOverrideSlotIds(void) {
     if (!gWarm) FBGRGateWarmCacheFromPrefs();
-
     NSMutableArray *a = [NSMutableArray arrayWithCapacity:gEntryCount];
-    for (NSUInteger i = 0; i < gEntryCount; i++) {
-        if (gEntries[i].isSet) [a addObject:@(gEntries[i].slotId)];
-    }
+    for (NSUInteger i = 0; i < gEntryCount; i++) if (gEntries[i].isSet) [a addObject:@(gEntries[i].slotId)];
     return [a sortedArrayUsingSelector:@selector(compare:)];
 }

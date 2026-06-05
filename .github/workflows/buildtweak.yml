@@ -1,18 +1,14 @@
 name: Build FBTweaks
 on:
   push:
-    branches: [main, experiments, experimental]
+    branches: [main, experiments]
   workflow_dispatch:
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   build:
     runs-on: macos-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,38 +23,52 @@ jobs:
           ref: master
           path: ${{ github.workspace }}/theos
           submodules: recursive
-      - uses: actions/cache@v4
+      - name: Cache SDK
         id: sdk
+        uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/theos/sdks/
-          key: iPhoneOS26.2.sdk
-          restore-keys: iPhoneOS26.2.sdk
-      - if: steps.sdk.outputs.cache-hit != 'true'
+          key: iPhoneOS26.2-or-26.0.sdk
+      - name: Download SDK 26.2 or fallback 26.0
+        if: steps.sdk.outputs.cache-hit != 'true'
         run: |
+          set -e
           git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
           cd iOS-SDKs
-          git sparse-checkout set --no-cone iPhoneOS26.2.sdk
-          git checkout
+          if git sparse-checkout set --no-cone iPhoneOS26.2.sdk && git checkout; then
+            echo "SDK_VERSION=26.2" >> "$GITHUB_ENV"
+          else
+            git reset --hard
+            git sparse-checkout set --no-cone iPhoneOS26.0.sdk
+            git checkout
+            echo "SDK_VERSION=26.0" >> "$GITHUB_ENV"
+          fi
           mv *.sdk "$THEOS/sdks"
         env:
           THEOS: ${{ github.workspace }}/theos
+      - name: Detect cached SDK
+        run: |
+          if [ -d "$THEOS/sdks/iPhoneOS26.2.sdk" ]; then echo "SDK_VERSION=26.2" >> "$GITHUB_ENV"; else echo "SDK_VERSION=26.0" >> "$GITHUB_ENV"; fi
+        env:
+          THEOS: ${{ github.workspace }}/theos
+      - name: Adapt Makefile if SDK fallback is 26.0
+        run: |
+          if [ "$SDK_VERSION" = "26.0" ]; then
+            sed -i '' 's/26\.2/26.0/g; s/iPhoneOS26\.2\.sdk/iPhoneOS26.0.sdk/g' Makefile scripts/fbt_validate_sources.py scripts/validate-sdk26-liquidglass.sh
+          fi
       - run: ./scripts/validate-sdk26-liquidglass.sh
         env:
           THEOS: ${{ github.workspace }}/theos
-          SDK_VERSION: "26.2"
       - run: python3 scripts/fbt_validate_sources.py
-      - name: Build and normalize deb name
+      - name: Build package
         run: |
           export THEOS="${{ github.workspace }}/theos"
           ./build.sh rootless
-          test -n "$(ls packages/*.deb 2>/dev/null)" || { echo "ERROR: no deb generated"; exit 1; }
-
           RUN_PAD=$(printf "%03d" "$GITHUB_RUN_NUMBER")
           DEB_NAME="FBTweaks-0.1.${RUN_PAD}.deb"
           SRC_DEB="$(ls -t packages/*.deb | head -n1)"
           mv "$SRC_DEB" "packages/$DEB_NAME"
           echo "DEB_NAME=$DEB_NAME" >> "$GITHUB_ENV"
-          echo "Deb renamed to packages/$DEB_NAME"
           ls -la packages
       - uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,6 @@
 #pragma once
 #import <UIKit/UIKit.h>
-#import "../Runtime/FBGRGateRegistry.h"
+#import "../FBGramPrefix.h"
 @interface FBGRGateCategoryVC : UITableViewController
-- (instancetype)initWithProvider:(FBGRGateProvider *)provider;
+- (instancetype)initWithCategory:(FBGRFeatureCategory)category;
 @end

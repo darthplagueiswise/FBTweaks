@@ -1,118 +1,156 @@
 #import "FBGRMCCatalog.h"
+#import "FBGRMCEmbeddedCatalog.h"
 #import "../FBGramPrefix.h"
 #import <zlib.h>
 
 @implementation FBGRMCParam
-- (NSString *)description { return [NSString stringWithFormat:@"<FBGRMCParam slotId=%llu %@>", (unsigned long long)self.slotId, self.fullKey]; }
 @end
 
-@interface FBGRMCCatalog ()
-@property(nonatomic, strong) NSMutableDictionary<NSNumber *, FBGRMCParam *> *bySlotId;
-@property(nonatomic, strong) NSArray<FBGRMCParam *> *sorted;
-@property(nonatomic, strong) NSArray<FBGRMCParam *> *boolOnly;
-@property(nonatomic, strong) NSArray<FBGRMCParam *> *iOSBool;
-@property(nonatomic) BOOL loaded;
-@property(nonatomic, copy) NSString *sourcePathMutable;
-@end
-
-@implementation FBGRMCCatalog
-+ (instancetype)shared { static FBGRMCCatalog *s; static dispatch_once_t o; dispatch_once(&o, ^{ s=[self new]; }); return s; }
+static FBGRFeatureCategory FBGRCategorizeKey(NSString *key) {
+    NSString *k = key.lowercaseString ?: @"";
+    if ([k containsString:@"liquid"] || [k containsString:@"glass"]) return FBGRFeatureCategoryLiquidGlass;
+    if ([k containsString:@"tabbar"] || [k containsString:@"tab_bar"] || [k containsString:@"navigation"] || [k containsString:@"nav_bar"]) return FBGRFeatureCategoryTabBar;
+    if ([k containsString:@"gemstone"] || [k containsString:@"dating"] || [k containsString:@"match"] || [k containsString:@"crush"]) return FBGRFeatureCategoryDating;
+    if ([k containsString:@"dogfood"] || [k containsString:@"dogfooding"] || [k containsString:@"dlp"]) return FBGRFeatureCategoryDogfood;
+    if ([k containsString:@"employee"] || [k containsString:@"internal"]) return FBGRFeatureCategoryInternal;
+    if ([k containsString:@"debug"] || [k containsString:@"developer"] || [k containsString:@"dev_menu"] || [k containsString:@"diagnostic"]) return FBGRFeatureCategoryDebug;
+    if ([k containsString:@"gen_ai"] || [k containsString:@"ai_"] || [k containsString:@"mp_ai"] || [k containsString:@"assistant"] || [k containsString:@"ama_"]) return FBGRFeatureCategoryAI;
+    if ([k containsString:@"marketplace"] || [k hasPrefix:@"mp_"]) return FBGRFeatureCategoryMarketplace;
+    if ([k containsString:@"experiment"] || [k containsString:@"qe_"] || [k containsString:@"gk_"] || [k containsString:@"test"]) return FBGRFeatureCategoryExperiments;
+    if ([k containsString:@"ui"] || [k containsString:@"chrome"] || [k containsString:@"button"] || [k containsString:@"search"] || [k containsString:@"menu"] || [k containsString:@"surface"]) return FBGRFeatureCategoryUI;
+    return FBGRFeatureCategoryExperiments;
+}
 
 static NSData *FBGRGunzip(NSData *compressed) {
     if (!compressed.length) return nil;
     z_stream strm; memset(&strm, 0, sizeof(strm));
-    strm.next_in = (Bytef *)compressed.bytes; strm.avail_in = (uInt)compressed.length;
+    strm.next_in = (Bytef *)compressed.bytes;
+    strm.avail_in = (uInt)compressed.length;
     if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) return nil;
-    NSMutableData *out = [NSMutableData dataWithLength:MAX((NSUInteger)8192, compressed.length * 8)];
+    NSMutableData *out = [NSMutableData dataWithLength:MAX((NSUInteger)4096, compressed.length * 8)];
     int status = Z_OK;
     while (status == Z_OK) {
-        if (strm.total_out >= out.length) [out increaseLengthBy:MAX((NSUInteger)8192, compressed.length * 4)];
+        if (strm.total_out >= out.length) [out increaseLengthBy:MAX((NSUInteger)4096, compressed.length * 4)];
         strm.next_out = (Bytef *)out.mutableBytes + strm.total_out;
         strm.avail_out = (uInt)(out.length - strm.total_out);
         status = inflate(&strm, Z_SYNC_FLUSH);
     }
-    inflateEnd(&strm);
-    if (status != Z_STREAM_END) return nil;
+    if (inflateEnd(&strm) != Z_OK || status != Z_STREAM_END) return nil;
     out.length = strm.total_out;
     return out;
 }
 
-static void FBGRAddPath(NSMutableArray<NSString *> *paths, NSString *path) { if (path.length && ![paths containsObject:path]) [paths addObject:path]; }
-static void FBGRCollectMetadataFiles(NSMutableArray<NSString *> *paths, NSString *dir, NSUInteger depth) {
+static NSData *FBGRReadPath(NSString *path, NSString **sourceOut) {
+    if (!path.length) return nil;
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    if (!d.length) return nil;
+    if ([path.lowercaseString hasSuffix:@".gz"]) d = FBGRGunzip(d);
+    if (d.length && sourceOut) *sourceOut = path;
+    return d;
+}
+
+static void FBGRAdd(NSMutableArray<NSString *> *a, NSString *p) { if (p.length && ![a containsObject:p]) [a addObject:p]; }
+
+static void FBGRCollect(NSMutableArray<NSString *> *paths, NSString *dir, NSUInteger depth) {
     if (!dir.length || depth > 2) return;
-    NSFileManager *fm = NSFileManager.defaultManager;
-    BOOL isDir = NO; if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return;
-    for (NSString *name in ([fm contentsOfDirectoryAtPath:dir error:nil] ?: @[])) {
-        NSString *p = [dir stringByAppendingPathComponent:name];
-        BOOL childDir = NO; [fm fileExistsAtPath:p isDirectory:&childDir];
+    BOOL isDir = NO;
+    if (![NSFileManager.defaultManager fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return;
+    NSArray<NSString *> *items = [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *name in items) {
         NSString *low = name.lowercaseString;
-        if ([low hasPrefix:@"reactmobileconfigmetadata"] && ([low hasSuffix:@".json"] || [low hasSuffix:@".json.gz"])) FBGRAddPath(paths, p);
-        if (childDir && depth < 2 && ([low containsString:@"fbtweaks"] || [low containsString:@"runtime"] || [low containsString:@"config"])) FBGRCollectMetadataFiles(paths, p, depth + 1);
+        NSString *p = [dir stringByAppendingPathComponent:name];
+        BOOL childDir = NO; [NSFileManager.defaultManager fileExistsAtPath:p isDirectory:&childDir];
+        if ([low hasPrefix:@"reactmobileconfigmetadata"] && ([low hasSuffix:@".json"] || [low hasSuffix:@".json.gz"])) FBGRAdd(paths, p);
+        if (childDir && ([low containsString:@"fbtweaks"] || [low containsString:@"runtime"] || [low containsString:@"config"])) FBGRCollect(paths, p, depth + 1);
     }
 }
 
-static NSData *FBGRReadMetadataPath(NSString *path, NSString **sourceOut) {
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    if (!data.length) return nil;
-    if ([path.lowercaseString hasSuffix:@".gz"]) data = FBGRGunzip(data);
-    if (data.length && sourceOut) *sourceOut = path;
-    return data;
-}
-
-- (void)loadIfNeeded { @synchronized(self) { if (self.loaded) return; [self _load]; self.loaded = YES; } }
-- (void)_load {
+static NSData *FBGRLoadCatalogData(NSString **sourceOut) {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSString *bundlePath = NSBundle.mainBundle.bundlePath;
-    if (bundlePath.length) {
-        FBGRAddPath(paths, [bundlePath stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
-        FBGRAddPath(paths, [bundlePath stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
-        FBGRCollectMetadataFiles(paths, bundlePath, 0);
-    }
-    FBGRAddPath(paths, @"/private/var/containers/Bundle/Application/5C38EEAB-1818-4C68-BF7D-A13378A902C2/Facebook.app/ReactMobileConfigMetadata.json");
-    FBGRAddPath(paths, @"/private/var/containers/Bundle/Application/5C38EEAB-1818-4C68-BF7D-A13378A902C2/Facebook.app/ReactMobileConfigMetadata.json.gz");
+    NSString *bundle = NSBundle.mainBundle.bundlePath;
+    FBGRAdd(paths, [bundle stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
+    FBGRAdd(paths, [bundle stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
+    FBGRCollect(paths, bundle, 0);
+    FBGRAdd(paths, @"/private/var/containers/Bundle/Application/5C38EEAB-1818-4C68-BF7D-A13378A902C2/Facebook.app/ReactMobileConfigMetadata.json");
+    FBGRAdd(paths, @"/private/var/containers/Bundle/Application/5C38EEAB-1818-4C68-BF7D-A13378A902C2/Facebook.app/ReactMobileConfigMetadata.json.gz");
     NSString *home = NSHomeDirectory();
-    for (NSString *rel in @[@"Documents/FBTweaks/runtime", @"Documents/FBTweaks", @"Library/Application Support/FBTweaks/runtime", @"Library/Application Support/FBTweaks", @"Library/Caches/FBTweaks/runtime", @"Library/Caches/FBTweaks", @"tmp/FBTweaks/runtime", @"tmp/FBTweaks"]) {
+    for (NSString *rel in @[@"Documents/FBTweaks", @"Documents/FBTweaks/runtime", @"Library/Application Support/FBTweaks", @"Library/Application Support/FBTweaks/runtime", @"Library/Caches/FBTweaks", @"tmp/FBTweaks"]) {
         NSString *dir = [home stringByAppendingPathComponent:rel];
-        FBGRAddPath(paths, [dir stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
-        FBGRAddPath(paths, [dir stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
-        FBGRCollectMetadataFiles(paths, dir, 0);
+        FBGRAdd(paths, [dir stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
+        FBGRAdd(paths, [dir stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
+        FBGRCollect(paths, dir, 0);
     }
     for (NSString *base in @[@"/Library/Application Support/FBTweaks/runtime", @"/var/jb/Library/Application Support/FBTweaks/runtime", @"/var/mobile/Library/Application Support/FBTweaks/runtime"]) {
-        FBGRAddPath(paths, [base stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
-        FBGRAddPath(paths, [base stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
-        FBGRCollectMetadataFiles(paths, base, 0);
+        FBGRAdd(paths, [base stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json"]);
+        FBGRAdd(paths, [base stringByAppendingPathComponent:@"ReactMobileConfigMetadata.json.gz"]);
+        FBGRCollect(paths, base, 0);
     }
-    NSString *bundleJson = [NSBundle.mainBundle pathForResource:@"ReactMobileConfigMetadata" ofType:@"json"];
-    NSString *bundleGz = [NSBundle.mainBundle pathForResource:@"ReactMobileConfigMetadata" ofType:@"json.gz"];
-    FBGRAddPath(paths, bundleJson); FBGRAddPath(paths, bundleGz);
-    NSString *source = nil; NSData *data = nil;
-    for (NSString *p in paths) { data = FBGRReadMetadataPath(p, &source); if (data.length) break; }
-    self.sourcePathMutable = source ?: @"(not found)";
-    if (!data.length) { self.bySlotId=[NSMutableDictionary dictionary]; self.sorted=@[]; self.boolOnly=@[]; self.iOSBool=@[]; FBGRLog(@"MCCatalog: no metadata found"); return; }
-    NSError *err=nil; NSDictionary *root=[NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
-    NSDictionary *schema = [root isKindOfClass:NSDictionary.class] ? root[@"schema"] : nil;
-    if (![schema isKindOfClass:NSDictionary.class]) { self.bySlotId=[NSMutableDictionary dictionary]; self.sorted=@[]; self.boolOnly=@[]; self.iOSBool=@[]; FBGRLog(@"MCCatalog: invalid JSON %@ source=%@", err, source); return; }
-    NSMutableDictionary *bySlot=[NSMutableDictionary dictionaryWithCapacity:schema.count]; NSMutableArray *all=[NSMutableArray arrayWithCapacity:schema.count];
-    for (NSString *fullKey in schema) {
-        NSDictionary *v=schema[fullKey]; if (![v isKindOfClass:NSDictionary.class]) continue;
-        FBGRMCParam *p=[FBGRMCParam new];
-        p.slotId=(uint64_t)[v[@"slotId"] unsignedLongLongValue]; p.configKey=(uint64_t)[v[@"configKey"] unsignedLongLongValue];
-        p.fullKey=fullKey; p.type=v[@"type"] ?: @""; p.unitType=[v[@"unitType"] integerValue]; p.defaultBool=[v[@"defaultValue"] boolValue];
-        NSRange colon=[fullKey rangeOfString:@":"]; if (colon.location != NSNotFound) { p.group=[fullKey substringToIndex:colon.location]; p.paramName=[fullKey substringFromIndex:colon.location+1]; } else { p.group=fullKey; p.paramName=fullKey; }
-        bySlot[@(p.slotId)] = p; [all addObject:p];
+    for (NSString *p in paths) {
+        NSData *d = FBGRReadPath(p, sourceOut);
+        if (d.length) return d;
     }
-    self.bySlotId=bySlot;
-    self.sorted=[all sortedArrayUsingComparator:^NSComparisonResult(FBGRMCParam *a, FBGRMCParam *b){ return [@(a.slotId) compare:@(b.slotId)]; }];
-    self.boolOnly=[self.sorted filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _){ return [p.type isEqualToString:@"boolValue"]; }]];
-    self.iOSBool=[self.boolOnly filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _){ return p.unitType == 4; }]];
-    FBGRLog(@"MCCatalog: loaded %lu params (%lu bool, %lu iOS bool) source=%@", (unsigned long)self.sorted.count, (unsigned long)self.boolOnly.count, (unsigned long)self.iOSBool.count, source);
+    NSData *embedded = FBGRMCEmbeddedCatalogJSONData();
+    if (embedded.length && sourceOut) *sourceOut = [NSString stringWithFormat:@"embedded gzip (%lu bytes)", (unsigned long)FBGRMCEmbeddedCatalogCompressedSize()];
+    return embedded;
 }
-- (FBGRMCParam *)paramForSlotId:(uint64_t)slotId { if (!self.loaded) [self loadIfNeeded]; return self.bySlotId[@(slotId)]; }
-- (NSArray<FBGRMCParam *> *)allParams { if (!self.loaded) [self loadIfNeeded]; return self.sorted ?: @[]; }
-- (NSArray<FBGRMCParam *> *)boolParams { if (!self.loaded) [self loadIfNeeded]; return self.boolOnly ?: @[]; }
-- (NSArray<FBGRMCParam *> *)iOSBoolParams { if (!self.loaded) [self loadIfNeeded]; return self.iOSBool ?: @[]; }
-- (NSArray<FBGRMCParam *> *)searchParams:(NSString *)q { if (!self.loaded) [self loadIfNeeded]; if (!q.length) return self.sorted ?: @[]; NSString *low=q.lowercaseString; return [self.sorted filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(FBGRMCParam *p, id _){ return [p.fullKey.lowercaseString containsString:low]; }]]; }
-- (NSUInteger)totalCount { return self.sorted.count; }
-- (BOOL)isLoaded { return self.loaded; }
-- (NSString *)sourcePath { return self.sourcePathMutable ?: @""; }
+
+@interface FBGRMCCatalog ()
+@property(nonatomic, assign) BOOL loaded;
+@property(nonatomic, copy) NSString *sourceDescription;
+@property(nonatomic, strong) NSArray<FBGRMCParam *> *boolParams;
+@property(nonatomic, strong) NSDictionary<NSNumber *, FBGRMCParam *> *bySlot;
+@end
+
+@implementation FBGRMCCatalog
++ (instancetype)shared { static FBGRMCCatalog *s; static dispatch_once_t once; dispatch_once(&once, ^{ s = [self new]; }); return s; }
+
+- (void)loadIfNeeded {
+    if (self.loaded) return;
+    NSString *source = nil;
+    NSData *data = FBGRLoadCatalogData(&source);
+    if (!data.length) { self.loaded = YES; self.boolParams = @[]; self.bySlot = @{}; self.sourceDescription = @"missing"; return; }
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSDictionary *schema = [json isKindOfClass:NSDictionary.class] ? json[@"schema"] : nil;
+    if (![schema isKindOfClass:NSDictionary.class]) schema = json;
+    NSMutableArray *arr = [NSMutableArray array];
+    NSMutableDictionary *map = [NSMutableDictionary dictionary];
+    [schema enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *v, BOOL *stop) {
+        if (![key isKindOfClass:NSString.class] || ![v isKindOfClass:NSDictionary.class]) return;
+        if (![v[@"type"] isEqual:@"boolValue"]) return;
+        NSNumber *slot = v[@"slotId"];
+        if (![slot respondsToSelector:@selector(unsignedLongLongValue)]) return;
+        FBGRMCParam *p = [FBGRMCParam new];
+        p.fullKey = key;
+        NSArray *parts = [key componentsSeparatedByString:@":"];
+        p.group = parts.count ? parts.firstObject : key;
+        p.param = parts.count > 1 ? [[parts subarrayWithRange:NSMakeRange(1, parts.count - 1)] componentsJoinedByString:@":"] : key;
+        p.type = v[@"type"] ?: @"";
+        p.unitType = [v[@"unitType"] description] ?: @"";
+        p.slotId = slot.unsignedLongLongValue;
+        id def = v[@"defaultValue"];
+        p.defaultBool = [def respondsToSelector:@selector(boolValue)] ? [def boolValue] : NO;
+        p.category = FBGRCategorizeKey(key);
+        [arr addObject:p];
+        map[@(p.slotId)] = p;
+    }];
+    [arr sortUsingComparator:^NSComparisonResult(FBGRMCParam *a, FBGRMCParam *b) { return [a.fullKey compare:b.fullKey]; }];
+    self.boolParams = arr;
+    self.bySlot = map;
+    self.sourceDescription = source ?: @"unknown";
+    self.loaded = YES;
+}
+
+- (FBGRMCParam *)paramForSlotId:(uint64_t)slotId { [self loadIfNeeded]; return self.bySlot[@(slotId)]; }
+- (NSArray<FBGRMCParam *> *)paramsForCategory:(FBGRFeatureCategory)cat { return [self search:nil category:cat]; }
+- (NSArray<FBGRMCParam *> *)search:(NSString *)query category:(FBGRFeatureCategory)cat {
+    [self loadIfNeeded];
+    NSString *q = query.lowercaseString;
+    NSMutableArray *out = [NSMutableArray array];
+    for (FBGRMCParam *p in self.boolParams) {
+        if (cat != FBGRFeatureCategoryAll && p.category != cat) continue;
+        if (q.length && ![p.fullKey.lowercaseString containsString:q]) continue;
+        [out addObject:p];
+    }
+    return out;
+}
 @end

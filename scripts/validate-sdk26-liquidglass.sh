@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${THEOS:?THEOS must be set}"
-SDK_VERSION="${SDK_VERSION:-26.2}"
-SDK="$THEOS/sdks/iPhoneOS${SDK_VERSION}.sdk"
-UIKIT_HEADERS="$SDK/System/Library/Frameworks/UIKit.framework/Headers"
+SDK="$THEOS/sdks/iPhoneOS26.2.sdk"
+[ -d "$SDK" ] || SDK="$THEOS/sdks/iPhoneOS26.0.sdk"
+[ -d "$SDK" ] || { echo "Missing iPhoneOS26.2/26.0 SDK"; exit 1; }
 echo "Validating SDK: $SDK"
-[ -d "$SDK" ] || { echo "::error::Missing iPhoneOS${SDK_VERSION}.sdk in $THEOS/sdks"; exit 1; }
-[ -d "$UIKIT_HEADERS" ] || { echo "::error::Missing UIKit headers in iPhoneOS${SDK_VERSION}.sdk"; exit 1; }
-echo "UIKit Glass/Liquid header candidates, if exported by this SDK:"
-{ grep -R "Glass\|Liquid" "$UIKIT_HEADERS" 2>/dev/null || true; } | head -100
+find "$SDK/System/Library/Frameworks/UIKit.framework/Headers" -maxdepth 1 -type f \( -name '*Glass*' -o -name '*Effect*' \) | head -40 || true

@@ -3,9 +3,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void FBGRLogAppend(NSString *msg);
-NSString *FBGRLogSnapshot(void);
-void FBGRLogClear(void);
+NSData *FBGRMCEmbeddedCatalogJSONData(void);
+NSUInteger FBGRMCEmbeddedCatalogCompressedSize(void);
 #ifdef __cplusplus
 }
 #endif

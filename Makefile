@@ -6,13 +6,10 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FBTweaks
 FBTWEAKS_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
-
 $(TWEAK_NAME)_FILES = $(FBTWEAKS_SRC_FILES) modules/fishhook/fishhook.c
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore Security
-$(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
 $(TWEAK_NAME)_LIBRARIES = substrate z
 $(TWEAK_NAME)_USE_MODULES = 0
-
 $(TWEAK_NAME)_CFLAGS = \
 	-fobjc-arc \
 	-F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks \
@@ -24,7 +21,6 @@ $(TWEAK_NAME)_CFLAGS = \
 	-Wno-unused-function \
 	-Wno-incompatible-pointer-types \
 	-Imodules/fishhook
-
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 CCFLAGS += -std=c++11
 

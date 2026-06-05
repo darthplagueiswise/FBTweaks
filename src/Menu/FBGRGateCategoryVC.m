@@ -1,132 +1,36 @@
 #import "FBGRGateCategoryVC.h"
 #import "FBGRMenuTheme.h"
-#import "FBGRGateRuntimeBrowserVC.h"
-#import "../Runtime/FBGRGateStore.h"
 #import "../Runtime/FBGRMCCatalog.h"
+#import "../Runtime/FBGRGateStore.h"
 
-typedef NS_ENUM(NSInteger, FBGRCatSection) {
-    FBGRCatSectionFeatured = 0,
-    FBGRCatSectionActions  = 1,
-    FBGRCatSectionCount    = 2,
-};
+extern void FBGRMCGateHooksEnsureInstalled(void);
+extern void FBGRMCGateCacheRefresh(void);
 
 @interface FBGRGateCategoryVC ()
-@property(nonatomic, strong) FBGRGateProvider *provider;
+@property(nonatomic, assign) FBGRFeatureCategory category;
+@property(nonatomic, strong) NSArray<FBGRMCParam *> *items;
 @end
 
 @implementation FBGRGateCategoryVC
-
-- (instancetype)initWithProvider:(FBGRGateProvider *)p {
-    if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    _provider = p; self.title = p.title; return self;
+- (instancetype)initWithCategory:(FBGRFeatureCategory)category {
+    if (!(self=[super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
+    _category=category; self.title=FBGRFeatureCategoryTitle(category); return self;
 }
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    FBGRApplyTable(self.tableView, self);
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithTitle:@"Limpar" style:UIBarButtonItemStylePlain
-        target:self action:@selector(clearAll)];
-    [[FBGRMCCatalog shared] loadIfNeeded];
-}
-
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated]; [self.tableView reloadData];
-}
-
-- (void)clearAll {
-    for (FBGRFeaturedFlag *f in self.provider.featured) FBGRGateClear(f.slotId);
-    [self.tableView reloadData];
-}
-
-// ── TableView ─────────────────────────────────────────────────────────────────
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return FBGRCatSectionCount; }
-
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
-    if (s == FBGRCatSectionFeatured) return (NSInteger)self.provider.featured.count;
-    return 2; // "Runtime Avançado" + "Resetar categoria"
-}
-
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
-    return s == FBGRCatSectionFeatured ? @"Flags reais do catálogo" : @"Ações";
-}
-
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
-    if (s != FBGRCatSectionFeatured) return nil;
-    NSUInteger set = 0;
-    for (FBGRFeaturedFlag *f in self.provider.featured) if (FBGRGateIsSet(f.slotId)) set++;
-    return [NSString stringWithFormat:@"%lu/%lu override(s). Fonte: ReactMobileConfigMetadata real", (unsigned long)set, (unsigned long)self.provider.featured.count];
-}
-
+- (void)viewDidLoad { [super viewDidLoad]; FBGRApplyGlassController(self); FBGRApplyGlassTable(self.tableView); self.items=[[FBGRMCCatalog shared] paramsForCategory:self.category]; self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"Limpar" style:UIBarButtonItemStylePlain target:self action:@selector(clear)]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBGRGateWarmCacheFromPrefs(); [self.tableView reloadData]; }
+- (void)clear { for (FBGRMCParam *p in self.items) FBGRGateClear(p.slotId); FBGRMCGateCacheRefresh(); [self.tableView reloadData]; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return self.items.count; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return [NSString stringWithFormat:@"%lu flags BOOL reais do ReactMobileConfigMetadata. Fonte: %@", (unsigned long)self.items.count, [FBGRMCCatalog shared].sourceDescription ?: @"?"]; }
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    if (ip.section == FBGRCatSectionFeatured) {
-        FBGRFeaturedFlag *flag = self.provider.featured[(NSUInteger)ip.row];
-
-        UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"feat"];
-        if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"feat"];
-        FBGRApplyCell(c, ip.row, self.provider.accentColor);
-        c.selectionStyle = UITableViewCellSelectionStyleNone;
-
-        BOOL isOn = FBGRGateIsSet(flag.slotId) && FBGRGateGet(flag.slotId);
-
-        c.textLabel.text = flag.title;
-        // Enrich detail from catalog
-        FBGRMCParam *param = [[FBGRMCCatalog shared] paramForSlotId:flag.slotId];
-        NSString *detail = flag.detail ?: @"";
-        if (param && !FBGRGateIsSet(flag.slotId)) {
-            detail = [detail stringByAppendingFormat:@" (default=%@)", param.defaultBool ? @"YES" : @"NO"];
-        } else if (FBGRGateIsSet(flag.slotId)) {
-            detail = [detail stringByAppendingFormat:@" → FORÇADO %@", FBGRGateGet(flag.slotId) ? @"YES" : @"NO"];
-        }
-        c.detailTextLabel.text = detail;
-
-        UISwitch *sw = [[UISwitch alloc] init];
-        sw.on = isOn;
-        sw.tag = (NSInteger)ip.row;
-        sw.onTintColor = FBGRAccentForProvider(self.provider.accentColor);
-        [sw removeTarget:nil action:nil forControlEvents:UIControlEventAllEvents];
-        [sw addTarget:self action:@selector(switchToggled:) forControlEvents:UIControlEventValueChanged];
-        c.accessoryView = sw;
-        return c;
-    }
-
-    // Actions
-    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"act"];
-    if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"act"];
-    FBGRApplyCell(c, ip.section * 10 + ip.row, nil);
-    c.selectionStyle = UITableViewCellSelectionStyleDefault;
-    c.accessoryType  = UITableViewCellAccessoryDisclosureIndicator;
-
-    if (ip.row == 0) {
-        c.textLabel.text  = @"Runtime Avançado";
-        c.imageView.image = FBGRSymbol(@"cpu", FBGRAccentForProvider(self.provider.accentColor));
-    } else {
-        c.textLabel.text  = @"Resetar todos os overrides desta categoria";
-        c.textLabel.textColor = UIColor.systemRedColor;
-        c.imageView.image = FBGRSymbol(@"trash", UIColor.systemRedColor);
-    }
-    return c;
+    UITableViewCell *c=[tv dequeueReusableCellWithIdentifier:@"flag"]; if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"flag"];
+    FBGRApplyGlassCell(c);
+    FBGRMCParam *p=self.items[ip.row];
+    c.textLabel.text=p.fullKey;
+    BOOL set=FBGRGateIsSet(p.slotId); BOOL val=set?FBGRGateGet(p.slotId):p.defaultBool;
+    c.detailTextLabel.text=[NSString stringWithFormat:@"slot=%llu default=%@%@", (unsigned long long)p.slotId, p.defaultBool?@"YES":@"NO", set?[NSString stringWithFormat:@" → FORÇADO %@", val?@"YES":@"NO"]:@""];
+    UISwitch *sw=[UISwitch new]; sw.on=val; sw.tag=ip.row; sw.onTintColor=FBGRAccentColor(); [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; c.accessoryView=sw; c.selectionStyle=UITableViewCellSelectionStyleNone; return c;
 }
-
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    if (ip.section != FBGRCatSectionActions) return;
-    if (ip.row == 0) {
-        FBGRGateRuntimeBrowserVC *vc = [[FBGRGateRuntimeBrowserVC alloc] initWithProvider:self.provider];
-        [self.navigationController pushViewController:vc animated:YES];
-    } else {
-        [self clearAll];
-    }
-}
-
-- (void)switchToggled:(UISwitch *)sw {
-    FBGRFeaturedFlag *flag = self.provider.featured[(NSUInteger)sw.tag];
-    if (sw.isOn) FBGRGateSet(flag.slotId, YES);
-    else FBGRGateClear(flag.slotId);
-    NSIndexPath *ip = [NSIndexPath indexPathForRow:sw.tag inSection:FBGRCatSectionFeatured];
-    [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:FBGRCatSectionFeatured]
-                  withRowAnimation:UITableViewRowAnimationNone];
-}
-
+- (void)toggle:(UISwitch *)sw { FBGRMCParam *p=self.items[sw.tag]; FBGRGateSet(p.slotId, sw.isOn); FBGRMCGateHooksEnsureInstalled(); NSIndexPath *ip=[NSIndexPath indexPathForRow:sw.tag inSection:0]; [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone]; }
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip { [tv deselectRowAtIndexPath:ip animated:YES]; }
 @end
