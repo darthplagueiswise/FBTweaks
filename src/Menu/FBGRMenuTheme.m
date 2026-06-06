@@ -4,7 +4,6 @@
 
 static NSInteger const kFBGRTitleLabelTag = 7701;
 static NSInteger const kFBGRDetailLabelTag = 7702;
-static NSInteger const kFBGRRuntimeSwitchTag = 7788;
 
 static UIColor *FBGRDynamic(UIColor *light, UIColor *dark) {
     if (@available(iOS 13.0, *)) {
