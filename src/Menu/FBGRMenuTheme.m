@@ -2,6 +2,10 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+static NSInteger const kFBGRTitleLabelTag = 7701;
+static NSInteger const kFBGRDetailLabelTag = 7702;
+static NSInteger const kFBGRRuntimeSwitchTag = 7788;
+
 static UIColor *FBGRDynamic(UIColor *light, UIColor *dark) {
     if (@available(iOS 13.0, *)) {
         return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
@@ -12,19 +16,26 @@ static UIColor *FBGRDynamic(UIColor *light, UIColor *dark) {
 }
 
 UIColor *FBGRBackgroundColor(void) {
-    return FBGRDynamic([UIColor colorWithWhite:0.985 alpha:1.0], [UIColor colorWithWhite:0.02 alpha:1.0]);
+    return FBGRDynamic([UIColor colorWithWhite:0.965 alpha:1.0], [UIColor blackColor]);
+}
+UIColor *FBGRGroupedCellColor(void) {
+    return FBGRDynamic([UIColor colorWithWhite:1.0 alpha:1.0], [UIColor colorWithWhite:0.075 alpha:1.0]);
 }
 UIColor *FBGRTextColor(void) { return UIColor.labelColor ?: UIColor.whiteColor; }
-UIColor *FBGRSecondaryTextColor(void) { return UIColor.secondaryLabelColor ?: [UIColor colorWithWhite:0.68 alpha:1.0]; }
+UIColor *FBGRSecondaryTextColor(void) { return UIColor.secondaryLabelColor ?: [UIColor colorWithWhite:0.62 alpha:1.0]; }
+UIColor *FBGRSeparatorColor(void) { return UIColor.separatorColor ?: FBGRDynamic([UIColor colorWithWhite:0.78 alpha:1.0], [UIColor colorWithWhite:1.0 alpha:0.10]); }
 UIColor *FBGRAccentColor(void) { return UIColor.labelColor ?: UIColor.whiteColor; }
-UIFont *FBGRTitleFont(void) { return [UIFont systemFontOfSize:9.5 weight:UIFontWeightSemibold]; }
-UIFont *FBGRDetailFont(void) { return [UIFont systemFontOfSize:7.25 weight:UIFontWeightRegular]; }
+
+UIFont *FBGRTitleFont(void) { return [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold]; }
+UIFont *FBGRDetailFont(void) { return [UIFont systemFontOfSize:8.6 weight:UIFontWeightRegular]; }
+UIFont *FBGRRootTitleFont(void) { return [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold]; }
+UIFont *FBGRRootDetailFont(void) { return [UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular]; }
 
 UIImage *FBGRSymbol(NSString *name, UIColor *color) {
     UIImage *img = [UIImage systemImageNamed:name ?: @"circle"] ?: [UIImage systemImageNamed:@"circle"];
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightRegular scale:UIImageSymbolScaleSmall];
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightRegular scale:UIImageSymbolScaleMedium];
     img = [img imageByApplyingSymbolConfiguration:cfg] ?: img;
-    return [img imageWithTintColor:color ?: FBGRAccentColor() renderingMode:UIImageRenderingModeAlwaysOriginal];
+    return [img imageWithTintColor:color ?: FBGRSecondaryTextColor() renderingMode:UIImageRenderingModeAlwaysOriginal];
 }
 
 static UIVisualEffect *FBGRCreateRealGlassEffect(void) {
@@ -48,123 +59,166 @@ UIVisualEffectView *FBGRCreateRealGlassView(void) {
     if (!effect) return nil;
     UIVisualEffectView *v = [[UIVisualEffectView alloc] initWithEffect:effect];
     v.userInteractionEnabled = NO;
-    v.layer.cornerRadius = 10.0;
-    v.layer.masksToBounds = YES;
-    v.contentView.backgroundColor = FBGRDynamic([UIColor colorWithWhite:1.0 alpha:0.22], [UIColor colorWithWhite:1.0 alpha:0.055]);
+    v.backgroundColor = UIColor.clearColor;
     return v;
 }
 
 void FBGRApplyGlassController(UIViewController *vc) {
+    if (!vc) return;
     vc.view.backgroundColor = FBGRBackgroundColor();
+    vc.navigationController.view.backgroundColor = FBGRBackgroundColor();
+    vc.navigationController.navigationBar.tintColor = FBGRTextColor();
+    vc.navigationController.toolbar.tintColor = FBGRTextColor();
+
     UINavigationBar *bar = vc.navigationController.navigationBar;
-    if (bar) {
-        bar.tintColor = FBGRTextColor();
-        if (@available(iOS 26.0, *)) {
-            // Built against SDK 26: leave the native UIKit chrome in charge of Liquid Glass.
-        } else {
-            UINavigationBarAppearance *ap = [UINavigationBarAppearance new];
-            [ap configureWithDefaultBackground];
-            ap.backgroundColor = FBGRBackgroundColor();
-            ap.titleTextAttributes = @{ NSForegroundColorAttributeName: FBGRTextColor(), NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold] };
-            ap.largeTitleTextAttributes = @{ NSForegroundColorAttributeName: FBGRTextColor() };
-            bar.standardAppearance = ap;
-            bar.scrollEdgeAppearance = ap;
-            bar.compactAppearance = ap;
-        }
+    if (!bar) return;
+    bar.translucent = YES;
+    if (@available(iOS 26.0, *)) {
+        // Built with SDK 26: let UIKit own native Liquid Glass chrome.
+        return;
+    }
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *ap = [UINavigationBarAppearance new];
+        [ap configureWithDefaultBackground];
+        ap.backgroundColor = FBGRBackgroundColor();
+        ap.shadowColor = UIColor.clearColor;
+        ap.titleTextAttributes = @{ NSForegroundColorAttributeName: FBGRTextColor(), NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold] };
+        ap.largeTitleTextAttributes = @{ NSForegroundColorAttributeName: FBGRTextColor() };
+        bar.standardAppearance = ap;
+        bar.scrollEdgeAppearance = ap;
+        bar.compactAppearance = ap;
     }
 }
 
 void FBGRApplyGlassTable(UITableView *tableView) {
+    if (!tableView) return;
     tableView.backgroundColor = UIColor.clearColor;
     tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-    tableView.separatorColor = UIColor.separatorColor;
+    tableView.separatorColor = FBGRSeparatorColor();
     tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     tableView.rowHeight = UITableViewAutomaticDimension;
-    tableView.estimatedRowHeight = 48.0;
-    if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 8.0;
+    tableView.estimatedRowHeight = 46.0;
+    tableView.contentInset = UIEdgeInsetsMake(12, 0, 24, 0);
+    tableView.separatorInset = UIEdgeInsetsMake(0, 54, 0, 0);
+    tableView.layoutMargins = UIEdgeInsetsMake(0, 32, 0, 32);
+    if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 18.0;
 }
 
 void FBGRApplyGlassCell(UITableViewCell *cell) {
-    cell.backgroundColor = UIColor.clearColor;
+    if (!cell) return;
+    cell.backgroundView = nil;
+    cell.backgroundColor = FBGRGroupedCellColor();
     cell.contentView.backgroundColor = UIColor.clearColor;
     cell.textLabel.textColor = FBGRTextColor();
     cell.detailTextLabel.textColor = FBGRSecondaryTextColor();
-    cell.textLabel.font = FBGRTitleFont();
-    cell.detailTextLabel.font = FBGRDetailFont();
-    cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.numberOfLines = 0;
-    UIVisualEffectView *glass = FBGRCreateRealGlassView();
-    if (glass) {
-        UIView *bg = [[UIView alloc] initWithFrame:CGRectZero];
-        glass.translatesAutoresizingMaskIntoConstraints = NO;
-        [bg addSubview:glass];
-        [NSLayoutConstraint activateConstraints:@[
-            [glass.leadingAnchor constraintEqualToAnchor:bg.leadingAnchor constant:3],
-            [glass.trailingAnchor constraintEqualToAnchor:bg.trailingAnchor constant:-3],
-            [glass.topAnchor constraintEqualToAnchor:bg.topAnchor constant:2],
-            [glass.bottomAnchor constraintEqualToAnchor:bg.bottomAnchor constant:-2],
-        ]];
-        cell.backgroundView = bg;
-    } else {
-        cell.backgroundColor = FBGRDynamic([UIColor colorWithWhite:1.0 alpha:0.70], [UIColor colorWithWhite:1.0 alpha:0.045]);
-    }
+    cell.textLabel.font = FBGRRootTitleFont();
+    cell.detailTextLabel.font = FBGRRootDetailFont();
+    cell.textLabel.numberOfLines = 1;
+    cell.detailTextLabel.numberOfLines = 1;
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    cell.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    cell.preservesSuperviewLayoutMargins = YES;
+    cell.layoutMargins = UIEdgeInsetsMake(0, 16, 0, 16);
+    cell.separatorInset = UIEdgeInsetsMake(0, 54, 0, 0);
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 }
 
-void FBGRApplyReadableTextCell(UITableViewCell *cell, NSString *title, NSString *detail) {
+static UILabel *FBGRLabelInCell(UITableViewCell *cell, NSInteger tag, UIFont *font, UIColor *color) {
+    UILabel *label = [cell.contentView viewWithTag:tag];
+    if (!label) {
+        label = [UILabel new];
+        label.tag = tag;
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        label.numberOfLines = 0;
+        label.lineBreakMode = NSLineBreakByCharWrapping;
+        [cell.contentView addSubview:label];
+    }
+    label.font = font;
+    label.textColor = color;
+    return label;
+}
+
+static void FBGRRemoveManagedConstraints(UITableViewCell *cell) {
+    NSMutableArray<NSLayoutConstraint *> *remove = [NSMutableArray array];
+    for (NSLayoutConstraint *c in cell.contentView.constraints) {
+        if (c.identifier && [c.identifier hasPrefix:@"FBGRCellText."]) [remove addObject:c];
+    }
+    if (remove.count) [NSLayoutConstraint deactivateConstraints:remove];
+}
+
+void FBGRApplyReadableTextCellWithReservedTrailing(UITableViewCell *cell, NSString *title, NSString *detail, CGFloat reservedTrailing) {
+    if (!cell) return;
     FBGRApplyGlassCell(cell);
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
 
-    UILabel *titleLabel = [cell.contentView viewWithTag:7701];
-    UILabel *detailLabel = [cell.contentView viewWithTag:7702];
-    if (!titleLabel) {
-        titleLabel = [UILabel new];
-        titleLabel.tag = 7701;
-        titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        titleLabel.numberOfLines = 0;
-        titleLabel.lineBreakMode = NSLineBreakByCharWrapping;
-        titleLabel.font = FBGRTitleFont();
-        titleLabel.textColor = FBGRTextColor();
-        [cell.contentView addSubview:titleLabel];
-    }
-    if (!detailLabel) {
-        detailLabel = [UILabel new];
-        detailLabel.tag = 7702;
-        detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        detailLabel.numberOfLines = 0;
-        detailLabel.lineBreakMode = NSLineBreakByCharWrapping;
-        detailLabel.font = FBGRDetailFont();
-        detailLabel.textColor = FBGRSecondaryTextColor();
-        [cell.contentView addSubview:detailLabel];
-    }
-    titleLabel.font = FBGRTitleFont();
-    detailLabel.font = FBGRDetailFont();
-    titleLabel.textColor = FBGRTextColor();
-    detailLabel.textColor = FBGRSecondaryTextColor();
-    if (titleLabel.constraints.count == 0 && detailLabel.constraints.count == 0) {
-        [NSLayoutConstraint activateConstraints:@[
-            [titleLabel.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
-            [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.trailingAnchor constant:-6],
-            [titleLabel.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:7],
-            [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-            [detailLabel.trailingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor],
-            [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:1],
-            [detailLabel.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-7],
-        ]];
-    }
+    UILabel *titleLabel = FBGRLabelInCell(cell, kFBGRTitleLabelTag, FBGRTitleFont(), FBGRTextColor());
+    UILabel *detailLabel = FBGRLabelInCell(cell, kFBGRDetailLabelTag, FBGRDetailFont(), FBGRSecondaryTextColor());
+    FBGRRemoveManagedConstraints(cell);
+
+    CGFloat trailing = MAX(12.0, reservedTrailing);
+    NSArray<NSLayoutConstraint *> *constraints = @[
+        [titleLabel.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:14.0],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.trailingAnchor constant:-trailing],
+        [titleLabel.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:6.0],
+        [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:titleLabel.trailingAnchor],
+        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:1.0],
+        [detailLabel.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-6.0],
+    ];
+    for (NSLayoutConstraint *c in constraints) c.identifier = @"FBGRCellText.constraint";
+    [NSLayoutConstraint activateConstraints:constraints];
     titleLabel.text = title ?: @"";
     detailLabel.text = detail ?: @"";
 }
 
+void FBGRApplyReadableTextCell(UITableViewCell *cell, NSString *title, NSString *detail) {
+    FBGRApplyReadableTextCellWithReservedTrailing(cell, title, detail, 18.0);
+}
+
+void FBGRApplyRootTextCell(UITableViewCell *cell, NSString *title, NSString *detail) {
+    if (!cell) return;
+    FBGRApplyGlassCell(cell);
+    cell.textLabel.text = title ?: @"";
+    cell.detailTextLabel.text = detail ?: @"";
+    cell.textLabel.font = FBGRRootTitleFont();
+    cell.detailTextLabel.font = FBGRRootDetailFont();
+    cell.textLabel.textColor = FBGRTextColor();
+    cell.detailTextLabel.textColor = FBGRSecondaryTextColor();
+    cell.textLabel.numberOfLines = 1;
+    cell.detailTextLabel.numberOfLines = 1;
+}
+
 void FBGRApplySearchController(UISearchController *search) {
+    if (!search) return;
     search.searchBar.searchBarStyle = UISearchBarStyleMinimal;
     search.searchBar.tintColor = FBGRTextColor();
     search.searchBar.placeholder = @"Buscar";
     search.obscuresBackgroundDuringPresentation = NO;
+    if (@available(iOS 16.0, *)) {
+        search.searchBar.scopeBarActivation = UISearchBarScopeBarActivationManual;
+    }
 }
 
 void FBGRConfigureCompactSwitch(UISwitch *sw) {
-    sw.transform = CGAffineTransformMakeScale(0.64, 0.64);
-    sw.onTintColor = UIColor.systemGray2Color ?: FBGRSecondaryTextColor();
+    if (!sw) return;
+    sw.transform = CGAffineTransformMakeScale(0.76, 0.76);
+    sw.onTintColor = UIColor.systemGrayColor ?: FBGRSecondaryTextColor();
     sw.thumbTintColor = UIColor.whiteColor;
+}
+
+void FBGRInstallSwitchInCell(UITableViewCell *cell, UISwitch *sw) {
+    if (!cell || !sw) return;
+    cell.accessoryView = nil;
+    for (UIView *v in cell.contentView.subviews.copy) {
+        if ([v isKindOfClass:UISwitch.class]) [v removeFromSuperview];
+    }
+    NSInteger originalTag = sw.tag;
+    sw.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:sw];
+    [NSLayoutConstraint activateConstraints:@[
+        [sw.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-6.0],
+        [sw.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+    ]];
+    sw.tag = originalTag;
 }

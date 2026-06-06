@@ -21,8 +21,9 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    FBGRApplyGlassController(self); FBGRApplyGlassTable(self.tableView);
-    self.tableView.estimatedRowHeight = 48.0;
+    FBGRApplyGlassController(self);
+    FBGRApplyGlassTable(self.tableView);
+    self.tableView.estimatedRowHeight = 44.0;
     self.items = [[FBGRMCCatalog shared] paramsForCategory:self.category] ?: @[];
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
@@ -59,14 +60,18 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self reload]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return self.visible.count; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return [NSString stringWithFormat:@"%lu flags BOOL · search/apply/restart no topo", (unsigned long)self.visible.count]; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return [NSString stringWithFormat:@"%lu flags BOOL · buscar, aplicar e reiniciar no topo", (unsigned long)self.visible.count]; }
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c=[tv dequeueReusableCellWithIdentifier:@"flag"]; if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"flag"];
+    UITableViewCell *c=[tv dequeueReusableCellWithIdentifier:@"flag"];
+    if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"flag"];
     FBGRMCParam *p=self.visible[ip.row];
     BOOL set=FBGRGateIsSet(p.slotId); BOOL val=set?FBGRGateGet(p.slotId):p.defaultBool;
     NSString *detail=[NSString stringWithFormat:@"slot=%llu · default=%@%@", (unsigned long long)p.slotId, p.defaultBool?@"YES":@"NO", set?[NSString stringWithFormat:@" → %@", val?@"YES":@"NO"]:@""];
-    FBGRApplyReadableTextCell(c, p.fullKey, detail);
-    UISwitch *sw=[UISwitch new]; sw.on=val; sw.tag=ip.row; FBGRConfigureCompactSwitch(sw); [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; c.accessoryView=sw; c.selectionStyle=UITableViewCellSelectionStyleNone; return c;
+    FBGRApplyReadableTextCellWithReservedTrailing(c, p.fullKey, detail, 58.0);
+    UISwitch *sw=[UISwitch new]; sw.on=val; sw.tag=ip.row; FBGRConfigureCompactSwitch(sw); [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
+    FBGRInstallSwitchInCell(c, sw);
+    c.selectionStyle=UITableViewCellSelectionStyleNone;
+    return c;
 }
 - (void)toggle:(UISwitch *)sw { if (sw.tag >= self.visible.count) return; FBGRMCParam *p=self.visible[sw.tag]; FBGRGateSet(p.slotId, sw.isOn); FBGRMCGateHooksEnsureInstalled(); FBGRMCGateCacheRefresh(); [self reload]; }
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip { [tv deselectRowAtIndexPath:ip animated:YES]; }
