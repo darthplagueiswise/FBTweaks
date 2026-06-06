@@ -7,8 +7,7 @@ def check(c,m):
     if not c: errors.append(m)
 def read(p): return (root/p).read_text(errors='ignore')
 
-# Keep existing validation broad enough for fresh tree and patch tree.
-for p in ['src/Menu/FBGRMenuTheme.m','src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m','src/Runtime/FBGRBoolRuntimeInventory.m','src/Hooks/FBGRMCGateHooks.xm']:
+for p in ['src/Menu/FBGRMenuTheme.m','src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m','src/Runtime/FBGRBoolRuntimeInventory.m','src/Hooks/FBGRMCGateHooks.xm','src/Hooks/FBGRLiquidGlassHooks.xm']:
     check((root/p).exists(), f'{p} missing')
 
 theme=read('src/Menu/FBGRMenuTheme.m')
@@ -27,20 +26,27 @@ check('UITableViewCellAccessoryDisclosureIndicator' not in mcvc, 'MC runtime mus
 check('Install hook sem override' not in boolvc and 'UIAlertAction actionWithTitle:@"Force YES' not in boolvc and 'UIAlertAction actionWithTitle:@"Force NO' not in boolvc, 'Bool runtime must use toggle, not confusing force actions sheet')
 
 mc=read('src/Hooks/FBGRMCGateHooks.xm')
-# WATweaks-compatible model: startup is allowed, but only as a guarded persisted install pass.
-# It must not blindly hook everything without checking persisted overrides/cache.
 check('__attribute__((constructor))' in mc or '%ctor' in mc, 'MC hooks must have startup reapply path like WATweaks')
-check('FBGRMCGateHooksInstallIfPersisted' in mc or 'FBGRGateAllOverrideSlotIds().count' in mc, 'MC startup path must be gated by persisted overrides')
+check('FBGRMCGateHooksInstallIfPersisted' in mc, 'MC startup path must be gated by persisted overrides')
+check('FBGRMCGateHooksInstallKnownClasses' in mc and 'FBGRMCGateHooksInstallFullScan' in mc, 'MC hooks must split known startup from full scan')
 check('dispatch_after' in mc, 'MC hooks must retry delayed after launch for late-loaded classes')
 check('objc_getClassList' in mc and 'MSHookMessageEx' in mc, 'MC hooks must perform real runtime scan and hook')
 check('getBool:withOptions:' in mc and 'getBool:withOptions:withDefault:' in mc, 'MC hooks must cover bool getter selectors')
-check('mode=persisted startup' in mc or 'InstallIfPersisted' in mc, 'MC diagnostic must describe persisted startup behavior')
+ctor_match=re.search(r'FBGRMCGateHooksCtor\(void\).*?\n\}', mc, re.S)
+ctor=ctor_match.group(0) if ctor_match else ''
+check('FBGRMCGateHooksInstallFullScan' not in ctor and 'FBGRMCGateHooksEnsureInstalled' not in ctor, 'MC constructor must not call full broad scan directly')
+check('mode=persisted startup known classes + on-demand full scan' in mc, 'MC diagnostic must describe safe startup/full scan split')
 
 boolm=read('src/Runtime/FBGRBoolRuntimeInventory.m')
 check('@implementation FBGRBoolRuntimeInventory' in boolm, 'BoolRuntime implementation context missing')
 check('objc_getClassList' in boolm and 'class_getImageName' in boolm and 'class_copyMethodList' in boolm and 'method_copyReturnType' in boolm, 'Bool runtime must scan real ObjC runtime')
 check('MSHookMessageEx' in boolm, 'Bool runtime must patch through MSHookMessageEx')
-check('FBGRGateAllRuntimeHookSpecs' in boolm or 'FBGRGateRememberRuntimeHook' in boolm, 'Bool runtime must persist/reapply hook specs')
+check('FBGRGateAllRuntimeHookSpecs' in boolm and 'FBGRGateRememberRuntimeHook' in boolm, 'Bool runtime must persist/reapply hook specs')
+check('UIApplicationDidFinishLaunchingNotification' in boolm and 'startup=delayed' in boolm, 'Bool runtime restart reapply must be delayed, not dyld-immediate')
+
+lg=read('src/Hooks/FBGRLiquidGlassHooks.xm')
+check('UIApplicationDidFinishLaunchingNotification' in lg and 'startup=delayed' in lg, 'LiquidGlass restart reapply must be delayed')
+check('FBGRLiquidGlassStartupPass' in lg and 'FBGRLGForced' in lg, 'LiquidGlass must only reapply persisted state when enabled')
 
 meta=root/'resources/runtime/ReactMobileConfigMetadata.json.gz'
 if meta.exists():
@@ -56,4 +62,4 @@ if errors:
     print('FBTweaks validation failed:', file=sys.stderr)
     for e in errors: print(' - '+e, file=sys.stderr)
     sys.exit(1)
-print('OK: FBTweaks WATweaks-style persisted startup hook validation passed')
+print('OK: FBTweaks safe WATweaks-style startup validation passed')

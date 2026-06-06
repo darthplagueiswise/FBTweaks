@@ -168,14 +168,15 @@ static FBGRBoolRuntimeItem *FBGRItemFromSpec(NSDictionary *spec) {
     return installed;
 }
 + (void)clearAllRuntimeOverrides { FBGRGateClearAll(); }
-+ (NSString *)diagnostic { return [NSString stringWithFormat:@"hooked=%lu\nscanRows=%lu\npersistedSpecs=%lu\nreinstalled=%lu", (unsigned long)gHookN, (unsigned long)gScanN, (unsigned long)FBGRGateRuntimeHookSpecCount(), (unsigned long)gPersistReinstallN]; }
++ (NSString *)diagnostic { return [NSString stringWithFormat:@"hooked=%lu\nscanRows=%lu\npersistedSpecs=%lu\nreinstalled=%lu\nstartup=delayed", (unsigned long)gHookN, (unsigned long)gScanN, (unsigned long)FBGRGateRuntimeHookSpecCount(), (unsigned long)gPersistReinstallN]; }
 @end
 
 static void FBGRReinstallPersistedBoolRuntimeHooks(void) { [FBGRBoolRuntimeInventory reinstallPersistedHooks]; }
 __attribute__((constructor))
 static void FBGRBoolRuntimeCtor(void) {
     @autoreleasepool {
-        FBGRReinstallPersistedBoolRuntimeHooks();
+        [[NSNotificationCenter defaultCenter] addObserverForName:@"UIApplicationDidFinishLaunchingNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) { FBGRReinstallPersistedBoolRuntimeHooks(); }];
+        dispatch_async(dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRReinstallPersistedBoolRuntimeHooks(); });

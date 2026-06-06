@@ -19,7 +19,8 @@ typedef struct {
 #define FBGR_MC_MAX_HOOKS 512
 static FBGRMCHook gHooks[FBGR_MC_MAX_HOOKS];
 static NSUInteger gHookN = 0;
-static BOOL gInstalled = NO;
+static BOOL gKnownInstalled = NO;
+static BOOL gFullScanInstalled = NO;
 static BOOL gInstalling = NO;
 static __thread BOOL gGuard = NO;
 
@@ -97,17 +98,29 @@ static void FBGRHookClass(Class cls) {
     }
 }
 
-static void FBGRInstallInternal(void) {
-    if (gInstalled || gInstalling) return;
-    gInstalling = YES;
-    FBGRGateWarmCacheFromPrefs();
-
-    NSArray<NSString *> *known = @[
+static NSArray<NSString *> *FBGRKnownMCClasses(void) {
+    return @[
         @"FBMobileConfigContextManager", @"FBMobileConfigUserSessionContextManager", @"FBMobileConfigSessionlessContextManager",
         @"FBMobileConfigFBTAPI", @"FBMobileConfigFBTContextManager", @"FBMobileConfigAPI", @"FBMobileConfigGlobalContext",
         @"FBMobileConfigContextObjcImpl", @"FBMobileConfigAdminIDContextManager", @"RCTMobileConfigNative", @"MobileConfigModule"
     ];
-    for (NSString *name in known) FBGRHookClass(NSClassFromString(name));
+}
+
+static void FBGRMCGateHooksInstallKnownClasses(void) {
+    if (gKnownInstalled || gInstalling) return;
+    gInstalling = YES;
+    FBGRGateWarmCacheFromPrefs();
+    for (NSString *name in FBGRKnownMCClasses()) FBGRHookClass(NSClassFromString(name));
+    gKnownInstalled = YES;
+    gInstalling = NO;
+    FBGRLogAppend([NSString stringWithFormat:@"MC known hooks installed: %lu hooks", (unsigned long)gHookN]);
+}
+
+static void FBGRMCGateHooksInstallFullScan(void) {
+    if (gFullScanInstalled || gInstalling) return;
+    FBGRMCGateHooksInstallKnownClasses();
+    gInstalling = YES;
+    FBGRGateWarmCacheFromPrefs();
 
     int n = objc_getClassList(NULL, 0);
     if (n > 0) {
@@ -123,14 +136,14 @@ static void FBGRInstallInternal(void) {
         free(classes);
     }
 
-    gInstalled = YES;
+    gFullScanInstalled = YES;
     gInstalling = NO;
-    FBGRLogAppend([NSString stringWithFormat:@"MC hooks installed: %lu hooks", (unsigned long)gHookN]);
+    FBGRLogAppend([NSString stringWithFormat:@"MC full hooks installed on demand: %lu hooks", (unsigned long)gHookN]);
 }
 
 extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
-    if ([NSThread isMainThread]) FBGRInstallInternal();
-    else dispatch_sync(dispatch_get_main_queue(), ^{ FBGRInstallInternal(); });
+    if ([NSThread isMainThread]) FBGRMCGateHooksInstallFullScan();
+    else dispatch_sync(dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallFullScan(); });
 }
 
 extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) {
@@ -143,19 +156,20 @@ extern "C" void FBGRMCGateCacheRefresh(void) {
 }
 
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
-    return [NSString stringWithFormat:@"installed=%@\nhooks=%lu\noverrides=%lu\nruntimeSpecs=%lu\nmode=persisted startup + on-demand real scan", gInstalled ? @"YES" : @"NO", (unsigned long)gHookN, (unsigned long)FBGRGateAllOverrideSlotIds().count, (unsigned long)FBGRGateRuntimeHookSpecCount()];
+    return [NSString stringWithFormat:@"knownInstalled=%@\nfullScanInstalled=%@\nhooks=%lu\noverrides=%lu\nruntimeSpecs=%lu\nmode=persisted startup known classes + on-demand full scan", gKnownInstalled ? @"YES" : @"NO", gFullScanInstalled ? @"YES" : @"NO", (unsigned long)gHookN, (unsigned long)FBGRGateAllOverrideSlotIds().count, (unsigned long)FBGRGateRuntimeHookSpecCount()];
 }
-
 
 static void FBGRMCGateHooksInstallIfPersisted(void) {
     FBGRGateWarmCacheFromPrefs();
-    if (FBGRGateAllOverrideSlotIds().count > 0) FBGRMCGateHooksEnsureInstalled();
+    if (FBGRGateAllOverrideSlotIds().count == 0) return;
+    FBGRMCGateHooksInstallKnownClasses();
 }
 
 __attribute__((constructor))
 static void FBGRMCGateHooksCtor(void) {
     @autoreleasepool {
-        FBGRMCGateHooksInstallIfPersisted();
+        [[NSNotificationCenter defaultCenter] addObserverForName:@"UIApplicationDidFinishLaunchingNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) { FBGRMCGateHooksInstallIfPersisted(); }];
+        dispatch_async(dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallIfPersisted(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallIfPersisted(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ FBGRMCGateHooksInstallIfPersisted(); });
     }
