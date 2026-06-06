@@ -195,9 +195,8 @@ void FBGRApplySearchController(UISearchController *search) {
     search.searchBar.tintColor = FBGRTextColor();
     search.searchBar.placeholder = @"Buscar";
     search.obscuresBackgroundDuringPresentation = NO;
-    if (@available(iOS 16.0, *)) {
-        search.searchBar.scopeBarActivation = UISearchBarScopeBarActivationManual;
-    }
+    // Keep this header-safe: no iOS 26-only search bar symbols here.
+    // UIKit still renders the search controller natively on-device.
 }
 
 void FBGRConfigureCompactSwitch(UISwitch *sw) {
