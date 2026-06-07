@@ -2,7 +2,7 @@
 #import <zlib.h>
 
 static const unsigned char kFBGRMCEmbeddedCatalogGZ[] = {
-    31, 139, 8, 8, 134, 9, 35, 106, 2, 255, 82, 101, 97, 99, 116, 77, 111, 98, 105, 108, 101, 67, 111, 110,
+    31, 139, 8, 8, 32, 220, 36, 106, 2, 255, 82, 101, 97, 99, 116, 77, 111, 98, 105, 108, 101, 67, 111, 110,
     102, 105, 103, 77, 101, 116, 97, 100, 97, 116, 97, 46, 106, 115, 111, 110, 0, 204, 189, 217, 146, 228, 56, 150,
     37, 248, 62, 95, 81, 18, 207, 89, 35, 220, 23, 149, 150, 150, 201, 201, 12, 169, 74, 233, 174, 138, 238, 136,
     204, 106, 233, 39, 10, 148, 132, 170, 34, 140, 155, 115, 177, 37, 186, 231, 223, 7, 23, 36, 213, 212, 204, 46,
@@ -5795,7 +5795,7 @@ static const unsigned char kFBGRMCEmbeddedCatalogGZ[] = {
     124, 252, 249, 11, 35, 238, 42, 58, 52, 14, 21, 0,
 };
 
-static NSData *FBGRGunzip(NSData *compressed) {
+static NSData *FBGRGunzipEmbedded(NSData *compressed) {
     if (!compressed.length) return nil;
     z_stream strm; memset(&strm, 0, sizeof(strm));
     strm.next_in = (Bytef *)compressed.bytes;
@@ -5816,7 +5816,7 @@ static NSData *FBGRGunzip(NSData *compressed) {
 
 NSData *FBGRMCEmbeddedCatalogJSONData(void) {
     NSData *gz = [NSData dataWithBytesNoCopy:(void *)kFBGRMCEmbeddedCatalogGZ length:sizeof(kFBGRMCEmbeddedCatalogGZ) freeWhenDone:NO];
-    return FBGRGunzip(gz);
+    return FBGRGunzipEmbedded(gz);
 }
 
 NSUInteger FBGRMCEmbeddedCatalogCompressedSize(void) { return sizeof(kFBGRMCEmbeddedCatalogGZ); }

@@ -5,75 +5,78 @@
 
 extern void FBGRMCGateHooksEnsureInstalled(void);
 extern void FBGRMCGateCacheRefresh(void);
-extern NSString *FBGRMCGateHooksDiagnostic(void);
 
-@interface FBGRGateCategoryVC () <UISearchResultsUpdating>
+@interface FBGRGateCategoryVC ()
 @property(nonatomic, assign) FBGRFeatureCategory category;
 @property(nonatomic, strong) NSArray<FBGRMCParam *> *items;
-@property(nonatomic, strong) NSArray<FBGRMCParam *> *visible;
-@property(nonatomic, strong) UISearchController *search;
 @end
 
 @implementation FBGRGateCategoryVC
 - (instancetype)initWithCategory:(FBGRFeatureCategory)category {
-    if (!(self=[super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    _category=category; self.title=FBGRFeatureCategoryTitle(category); return self;
+    if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
+    _category = category;
+    self.title = FBGRFeatureCategoryTitle(category);
+    return self;
 }
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     FBGRApplyGlassController(self);
     FBGRApplyGlassTable(self.tableView);
-    self.tableView.estimatedRowHeight = 44.0;
-    self.items = [[FBGRMCCatalog shared] paramsForCategory:self.category] ?: @[];
-    self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.search.searchResultsUpdater = self;
-    FBGRApplySearchController(self.search);
-    self.navigationItem.searchController = self.search;
-    self.navigationItem.hidesSearchBarWhenScrolling = YES;
-    [self configureToolbarButtons];
-    [self reload];
+    self.items = [[FBGRMCCatalog shared] paramsForCategory:self.category];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Limpar" style:UIBarButtonItemStylePlain target:self action:@selector(clear)];
 }
-- (void)configureToolbarButtons {
-    UIBarButtonItem *restart = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"power"] style:UIBarButtonItemStylePlain target:self action:@selector(restartApp)];
-    UIBarButtonItem *apply = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(applyHooks)];
-    UIBarButtonItem *searchButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(showSearch)];
-    UIBarButtonItem *clearButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"trash"] style:UIBarButtonItemStylePlain target:self action:@selector(clearVisible)];
-    self.navigationItem.rightBarButtonItems = @[restart, apply, searchButton, clearButton];
-}
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBGRGateWarmCacheFromPrefs(); [self reload]; }
-- (void)showSearch { self.search.active = YES; [self.search.searchBar becomeFirstResponder]; }
-- (void)restartApp { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ exit(0); }); }
-- (void)applyHooks { FBGRMCGateHooksEnsureInstalled(); FBGRMCGateCacheRefresh(); [self alert:@"Hooks" msg:FBGRMCGateHooksDiagnostic() ?: @"Hooks solicitados."]; [self reload]; }
-- (void)clearVisible { for (FBGRMCParam *p in self.visible) FBGRGateClear(p.slotId); FBGRMCGateCacheRefresh(); [self reload]; }
-- (void)reload {
-    NSString *q = self.search.searchBar.text.lowercaseString ?: @"";
-    if (!q.length) { self.visible = self.items; }
-    else {
-        NSMutableArray *m = [NSMutableArray array];
-        for (FBGRMCParam *p in self.items) {
-            if ([p.fullKey.lowercaseString containsString:q] || [FBGRFeatureCategoryTitle(p.category).lowercaseString containsString:q] || [[NSString stringWithFormat:@"%llu", (unsigned long long)p.slotId] containsString:q]) [m addObject:p];
-        }
-        self.visible = m;
-    }
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    FBGRGateWarmCacheFromPrefs();
     [self.tableView reloadData];
 }
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self reload]; }
+
+- (void)clear {
+    for (FBGRMCParam *p in self.items) FBGRGateClear(p.slotId);
+    FBGRMCGateCacheRefresh();
+    [self.tableView reloadData];
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return self.visible.count; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return [NSString stringWithFormat:@"%lu flags BOOL · buscar, aplicar e reiniciar no topo", (unsigned long)self.visible.count]; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.items.count; }
+
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
+    NSUInteger forced = 0;
+    for (FBGRMCParam *p in self.items) if (FBGRGateIsSet(p.slotId)) forced++;
+    return [NSString stringWithFormat:@"%lu/%lu override(s). Nome completo quebrando linha; switch ON=Force YES, OFF=Force NO.", (unsigned long)forced, (unsigned long)self.items.count];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c=[tv dequeueReusableCellWithIdentifier:@"flag"];
-    if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"flag"];
-    FBGRMCParam *p=self.visible[ip.row];
-    BOOL set=FBGRGateIsSet(p.slotId); BOOL val=set?FBGRGateGet(p.slotId):p.defaultBool;
-    NSString *detail=[NSString stringWithFormat:@"slot=%llu · default=%@%@", (unsigned long long)p.slotId, p.defaultBool?@"YES":@"NO", set?[NSString stringWithFormat:@" → %@", val?@"YES":@"NO"]:@""];
-    FBGRApplyReadableTextCellWithReservedTrailing(c, p.fullKey, detail, 58.0);
-    UISwitch *sw=[UISwitch new]; sw.on=val; sw.tag=ip.row; FBGRConfigureCompactSwitch(sw); [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
-    FBGRInstallSwitchInCell(c, sw);
-    c.selectionStyle=UITableViewCellSelectionStyleNone;
+    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"flag"];
+    if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"flag"];
+
+    FBGRMCParam *p = self.items[(NSUInteger)ip.row];
+    BOOL set = FBGRGateIsSet(p.slotId);
+    BOOL val = set ? FBGRGateGet(p.slotId) : p.defaultBool;
+
+    UISwitch *sw = [UISwitch new];
+    sw.on = val;
+    sw.tag = ip.row;
+    sw.onTintColor = FBGRAccentColor();
+    [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
+
+    NSString *subtitle = [NSString stringWithFormat:@"slot=%llu · default=%@%@",
+                          (unsigned long long)p.slotId,
+                          p.defaultBool ? @"YES" : @"NO",
+                          set ? [NSString stringWithFormat:@" → FORÇADO %@", val ? @"YES" : @"NO"] : @""];
+    FBGRConfigureSwitchCell(c, p.fullKey, subtitle, sw, FBGRSymbol(FBGRFeatureCategoryIcon(p.category), FBGRAccentColor()));
+    c.selectionStyle = UITableViewCellSelectionStyleNone;
     return c;
 }
-- (void)toggle:(UISwitch *)sw { if (sw.tag >= self.visible.count) return; FBGRMCParam *p=self.visible[sw.tag]; FBGRGateSet(p.slotId, sw.isOn); FBGRMCGateHooksEnsureInstalled(); FBGRMCGateCacheRefresh(); [self reload]; }
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip { [tv deselectRowAtIndexPath:ip animated:YES]; }
-- (void)alert:(NSString *)title msg:(NSString *)msg { UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]]; [self presentViewController:a animated:YES completion:nil]; }
+
+- (void)toggle:(UISwitch *)sw {
+    FBGRMCParam *p = self.items[(NSUInteger)sw.tag];
+    FBGRGateSet(p.slotId, sw.isOn);
+    FBGRMCGateHooksEnsureInstalled();
+    NSIndexPath *ip = [NSIndexPath indexPathForRow:sw.tag inSection:0];
+    [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+}
+
 @end

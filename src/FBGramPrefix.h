@@ -17,7 +17,9 @@ static inline NSUserDefaults *FBGRPrefs(void) {
     return u;
 }
 
-static inline BOOL FBGRPref(NSString *k) { return [FBGRPrefs() boolForKey:k]; }
+static inline BOOL FBGRPref(NSString *key) {
+    return key.length ? [FBGRPrefs() boolForKey:key] : NO;
+}
 
 typedef struct { uint64_t value; } mc_bool_param_t;
 

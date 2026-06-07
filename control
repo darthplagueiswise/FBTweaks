@@ -2,7 +2,7 @@ Package: com.darthplagueiswise.fbtweaks
 Name: FBTweaks
 Version: 0.1.0
 Architecture: iphoneos-arm64
-Description: Facebook SDK26.2 tweak with real LiquidGlass UI and runtime browsers.
+Description: Facebook SDK26.2 tweak with LiquidGlass UI and real runtime browsers.
 Maintainer: darthplagueiswise
 Author: darthplagueiswise
 Section: Tweaks

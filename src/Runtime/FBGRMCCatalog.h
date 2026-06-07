@@ -20,6 +20,8 @@
 + (instancetype)shared;
 - (void)loadIfNeeded;
 - (FBGRMCParam *)paramForSlotId:(uint64_t)slotId;
+- (FBGRMCParam *)paramForFullKey:(NSString *)fullKey;
+- (uint64_t)slotIdForKey:(NSString *)key found:(BOOL *)found;
 - (NSArray<FBGRMCParam *> *)paramsForCategory:(FBGRFeatureCategory)cat;
 - (NSArray<FBGRMCParam *> *)search:(NSString *)query category:(FBGRFeatureCategory)cat;
 @end

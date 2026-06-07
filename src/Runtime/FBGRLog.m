@@ -17,7 +17,7 @@ void FBGRLogAppend(NSString *msg) {
     dispatch_async(gLogQ, ^{
         NSString *line = [NSString stringWithFormat:@"%@ %@", NSDate.date, msg];
         [gLog addObject:line];
-        if (gLog.count > 400) [gLog removeObjectsInRange:NSMakeRange(0, gLog.count - 400)];
+        if (gLog.count > 500) [gLog removeObjectsInRange:NSMakeRange(0, gLog.count - 500)];
     });
 }
 

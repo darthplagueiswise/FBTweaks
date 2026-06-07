@@ -21,7 +21,5 @@ typedef NS_ENUM(NSInteger, FBGRBoolRuntimeImageKind) {
 + (void)setOverrideForItem:(FBGRBoolRuntimeItem *)item value:(BOOL)value;
 + (void)clearOverrideForItem:(FBGRBoolRuntimeItem *)item;
 + (void)installHookForItem:(FBGRBoolRuntimeItem *)item;
-+ (NSUInteger)reinstallPersistedHooks;
-+ (void)clearAllRuntimeOverrides;
 + (NSString *)diagnostic;
 @end
