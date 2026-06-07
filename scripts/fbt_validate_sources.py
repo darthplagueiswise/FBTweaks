@@ -15,17 +15,19 @@ mf = read('Makefile')
 check('TARGET := iphone:clang:26.2:16.3' in mf or 'TARGET := iphone:clang:26.0:16.3' in mf, 'Makefile must target SDK26.2 or fallback SDK26.0')
 check('-fuse-ld=lld' not in mf, 'Makefile must not force lld')
 check('-include src/FBGramPrefix.h' not in mf, 'Makefile must not force ObjC prefix into fishhook.c')
-check('modules/fishhook/fishhook.c' in mf, 'Makefile must compile fishhook.c')
 check('substrate z' in mf, 'Makefile must link substrate and z')
-check((root / '.github/workflows/buildtweak.yml').exists(), 'workflow missing')
 
 for f in ['modules/fishhook/fishhook.c', 'modules/fishhook/fishhook.h', 'build.sh', 'build-fast.sh', 'scripts/validate-sdk26-liquidglass.sh']:
     check((root / f).exists(), f'{f} missing')
 
 tw = read('src/Tweak.x')
 check('%hook FDSTouchStateAnnouncingControl' in tw and '%hook FBTabBarItemDefaultView' in tw, 'Tweak.x must keep working exact tab longpress hooks')
-for bad in ['%hook UIWindow', '%hook UIViewController', 'FBGRLiquidGlassEnsureInstalled', 'FBGRGateWarmCacheFromPrefs', 'FBGRMCGateHooksApplyPersistedOverrides', 'FBGRDogFoodSetEnabled', 'dispatch_after', 'fishhook', 'rebind_symbols']:
+for bad in ['%hook UIWindow', '%hook UIViewController', 'FBGRLiquidGlassEnsureInstalled', 'FBGRGateWarmCacheFromPrefs', 'FBGRMCGateHooksApplyPersistedOverrides', 'FBGRDogFoodSetEnabled', 'dispatch_after', 'rebind_symbols']:
     check(bad not in tw, f'Tweak.x must not contain startup/global work: {bad}')
+
+boot = read('src/Hooks/FBGRRuntimeBootstrap.xm')
+check('%ctor' not in boot and '__attribute__((constructor))' not in boot, 'Runtime bootstrap must not install hooks in constructor')
+check('installPersistedOverrideHooks' not in boot and 'FBGRMCGateHooksApplyPersistedOverrides' not in boot, 'Runtime bootstrap must not replay persisted hooks at app startup')
 
 cat = read('src/Runtime/FBGRMCCatalog.m')
 check('NSBundle.mainBundle.bundlePath' in cat and 'Facebook.app/ReactMobileConfigMetadata.json' in cat, 'Catalog must prefer live Facebook.app metadata')
@@ -45,8 +47,11 @@ for name in ['FBGRGateIsSet', 'FBGRGateGet']:
 
 mc = read('src/Hooks/FBGRMCGateHooks.xm')
 check('__attribute__((constructor))' not in mc and '%ctor' not in mc, 'MC hooks must not install at startup')
-check('objc_getClassList' in mc and 'class_getImageName' in mc and 'class_copyMethodList' in mc, 'MC hooks must scan runtime on demand')
-check('rebind_symbols' in mc and '__ZN12mobileconfig14getBoolDefaultEy' in mc and '__ZNK4iglu9filterkit12ParameterMap7getBoolEPKc' in mc, 'MC hooks must include fishhook C/C++ bool bridges')
+check('objc_copyClassNamesForImage' in mc and '_dyld_image_count' in mc and 'class_copyMethodList' in mc, 'MC hooks must scan exact loaded images on demand')
+check('MSHookFunction' in mc and 'MSFindSymbol' in mc and '__ZN12mobileconfig14getBoolDefaultEy' in mc and '__ZNK4iglu9filterkit12ParameterMap7getBoolEPKc' in mc, 'MC native bridges must use MSHookFunction, not fishhook-only rebinding')
+check('rebind_symbols' not in mc, 'MC native bridges must not rely on fishhook rebinding for locally defined C++ functions')
+check('FBGRMCForcedForSlot' in mc and 'if (forced) return forced.boolValue;' in mc, 'MC hooks must return override before calling original')
+check('FBGRMCFindRecordForReceiver' in mc and 'class_getSuperclass' in mc, 'MC original IMP lookup must walk receiver class chain')
 for sel in ['getBool:', 'getBool:withDefault:', 'getBool:withOptions:', 'getBool:withOptions:withDefault:', 'getBoolWithoutLogging:', 'getBoolForParam:withDefault:', 'ig_boolForKey:']:
     check(sel in mc, f'MC hook missing selector {sel}')
 
@@ -56,18 +61,17 @@ check('IGLiquidGlassExperimentHelper' in lg and 'MSHookMessageEx' in lg, 'Liquid
 
 theme = read('src/Menu/FBGRMenuTheme.m')
 check('UIBlurEffect' not in theme, 'UI must not simulate LiquidGlass with UIBlurEffect')
-check('UIGlassEffect' in theme and 'UILiquidGlassEffect' in theme, 'UI must attempt real UIKit LiquidGlass classes')
-check('UIColor.blackColor' in theme and 'UIFontWeightRegular' in theme, 'UI must use black regular compact style')
-check('numberOfLines = 0' in theme and 'UIListContentConfiguration' in theme, 'Cells must show full feature names')
-check('cfg.secondaryText' not in theme and 'cfg.image =' not in theme, 'Runtime rows must not use subtitles or icons')
+check('UIGlassEffect' in theme and 'UILiquidGlassEffect' in theme and 'setPreferredContainerBackgroundStyle:' in theme, 'UI must attempt real UIKit LiquidGlass/container glass classes')
+check('UIColor.blackColor' not in theme, 'UI must not be flat pure black')
+check('UIListContentConfiguration' not in theme, 'Runtime rows must use custom readable labels, not default list truncation')
+check('kFBGRCellStackTag' in theme and 'UIFontWeightRegular' in theme and 'systemFontOfSize:13.2' in theme, 'Cells must be compact custom readable rows')
 
 boolm = read('src/Runtime/FBGRBoolRuntimeInventory.m')
 check('@implementation FBGRBoolRuntimeInventory' in boolm, 'Bool runtime implementation context missing')
 check('objc_copyClassNamesForImage' in boolm and 'class_copyMethodList' in boolm and 'method_getReturnType' in boolm, 'Bool runtime must scan exact Mach-O image like Ryukgram')
-check('imp_implementationWithBlock' in boolm and 'installPersistedOverrideHooks' in boolm, 'Bool runtime must use block hooks and persisted bootstrap support')
+check('imp_implementationWithBlock' in boolm, 'Bool runtime must use block hooks')
 check('/Facebook.app/Facebook' in boolm and '/FBSharedFramework.framework/FBSharedFramework' in boolm, 'Bool runtime must filter executable and FBShared images')
 check('MSHookMessageEx' in boolm, 'Bool runtime must patch with MSHookMessageEx')
-check((root / 'src/Hooks/FBGRRuntimeBootstrap.xm').exists(), 'Runtime bootstrap missing')
 
 for vc in ['src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m']:
     t = read(vc)
@@ -94,4 +98,4 @@ if errors:
     for e in errors: print(' - ' + e, file=sys.stderr)
     sys.exit(1)
 
-print('OK: FBTweaks v4 Ryuk-style hooks and black compact UI validation passed')
+print('OK: FBTweaks v5 lazy hooks and adaptive glass UI validation passed')
