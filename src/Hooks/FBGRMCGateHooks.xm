@@ -2,7 +2,6 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
-#import <mach-o/dyld.h>
 #import <dlfcn.h>
 #import <string.h>
 #import "../FBGramPrefix.h"
@@ -10,302 +9,238 @@
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../Runtime/FBGRLog.h"
 
-typedef BOOL (*Key1IMP)(id, SEL, id);
-typedef BOOL (*KeyDefaultIMP)(id, SEL, id, BOOL);
 typedef BOOL (*Param1IMP)(id, SEL, mc_bool_param_t);
 typedef BOOL (*ParamDefaultIMP)(id, SEL, mc_bool_param_t, BOOL);
 typedef BOOL (*ParamOptionsIMP)(id, SEL, mc_bool_param_t, id);
 typedef BOOL (*ParamOptionsDefaultIMP)(id, SEL, mc_bool_param_t, id, BOOL);
+typedef BOOL (*Key1IMP)(id, SEL, id);
+typedef BOOL (*KeyDefaultIMP)(id, SEL, id, BOOL);
 
 typedef NS_ENUM(uint8_t, FBGRMCSigKind) {
     FBGRMCSigNone = 0,
-    FBGRMCSigKey1 = 1,
-    FBGRMCSigKeyDefault = 2,
-    FBGRMCSigParam1 = 3,
-    FBGRMCSigParamDefault = 4,
-    FBGRMCSigParamOptions = 5,
-    FBGRMCSigParamOptionsDefault = 6,
+    FBGRMCSigParam1 = 1,
+    FBGRMCSigParamDefault = 2,
+    FBGRMCSigParamOptions = 3,
+    FBGRMCSigParamOptionsDefault = 4,
+    FBGRMCSigKey1 = 5,
+    FBGRMCSigKeyDefault = 6,
 };
 
-typedef struct { Class cls; SEL sel; FBGRMCSigKind kind; BOOL classMethod; IMP orig; } FBGRMCRecord;
-#define FBGR_MC_MAX_RECORDS 768
+typedef struct {
+    Class cls;
+    SEL sel;
+    FBGRMCSigKind kind;
+    IMP orig;
+    BOOL classMethod;
+} FBGRMCRecord;
+
+#define FBGR_MC_MAX_RECORDS 256
 static FBGRMCRecord gRecords[FBGR_MC_MAX_RECORDS];
 static NSUInteger gRecordCount = 0;
 static BOOL gInstalled = NO;
 static BOOL gInstalling = NO;
-static NSUInteger gScannedClasses = 0;
-static NSUInteger gFunctionHookCount = 0;
+static NSUInteger gScannedMethods = 0;
+static NSUInteger gRejectedMethods = 0;
 static __thread BOOL gGuard = NO;
 
-typedef BOOL (*MCGetBoolDefaultFn)(uint64_t slot);
-typedef BOOL (*IgluGetBoolFn)(void *self, const char *key);
-static MCGetBoolDefaultFn orig_mc_getBoolDefault = NULL;
-static IgluGetBoolFn orig_iglu_getBool = NULL;
+typedef BOOL (*MCGetBoolSlotFn)(uint64_t slot);
+static MCGetBoolSlotFn orig_mc_getBoolDefault = NULL;
+static NSUInteger gFunctionHookCount = 0;
 
-static FBGRMCRecord *FBGRMCFindRecordExact(Class cls, SEL sel, FBGRMCSigKind kind) {
-    for (NSUInteger i = 0; i < gRecordCount; i++) {
-        if (gRecords[i].cls == cls && gRecords[i].sel == sel && gRecords[i].kind == kind) return &gRecords[i];
-    }
-    return NULL;
-}
-
-static FBGRMCRecord *FBGRMCFindRecordForReceiver(id self, SEL sel, FBGRMCSigKind kind) {
-    Class cls = object_getClass(self);
+static FBGRMCRecord *FBGRFindRecord(Class cls, SEL sel, FBGRMCSigKind kind) {
     for (Class c = cls; c; c = class_getSuperclass(c)) {
-        FBGRMCRecord *r = FBGRMCFindRecordExact(c, sel, kind);
-        if (r) return r;
+        for (NSUInteger i = 0; i < gRecordCount; i++) {
+            if (gRecords[i].cls == c && gRecords[i].sel == sel && gRecords[i].kind == kind) return &gRecords[i];
+        }
     }
     return NULL;
 }
 
-static NSNumber *FBGRMCForcedForSlot(uint64_t slot) {
+static NSNumber *FBGRForcedForSlot(uint64_t slot) {
     if (FBGRGateIsSet(slot)) return @(FBGRGateGet(slot));
     return nil;
 }
 
-static NSNumber *FBGRMCForcedForKey(id keyObject) {
-    if ([keyObject isKindOfClass:NSNumber.class]) return FBGRMCForcedForSlot([(NSNumber *)keyObject unsignedLongLongValue]);
+static NSNumber *FBGRForcedForKey(id keyObject) {
+    if ([keyObject isKindOfClass:NSNumber.class]) return FBGRForcedForSlot([(NSNumber *)keyObject unsignedLongLongValue]);
     if (![keyObject isKindOfClass:NSString.class]) return nil;
     BOOL found = NO;
     uint64_t slot = [[FBGRMCCatalog shared] slotIdForKey:(NSString *)keyObject found:&found];
-    return found ? FBGRMCForcedForSlot(slot) : nil;
+    return found ? FBGRForcedForSlot(slot) : nil;
 }
 
-static BOOL FBGRMCCallKey1(id self, SEL _cmd, id key) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigKey1);
-    Key1IMP orig = r ? (Key1IMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, key) : NO;
+static BOOL FBGRCallParam1(id self, SEL _cmd, mc_bool_param_t p) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigParam1);
+    return r && r->orig ? ((Param1IMP)r->orig)(self, _cmd, p) : NO;
 }
-
-static BOOL FBGRMCCallKeyDefault(id self, SEL _cmd, id key, BOOL def) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigKeyDefault);
-    KeyDefaultIMP orig = r ? (KeyDefaultIMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, key, def) : def;
+static BOOL FBGRCallParamDefault(id self, SEL _cmd, mc_bool_param_t p, BOOL def) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigParamDefault);
+    return r && r->orig ? ((ParamDefaultIMP)r->orig)(self, _cmd, p, def) : def;
 }
-
-static BOOL FBGRMCCallParam1(id self, SEL _cmd, mc_bool_param_t p) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigParam1);
-    Param1IMP orig = r ? (Param1IMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, p) : NO;
+static BOOL FBGRCallParamOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigParamOptions);
+    return r && r->orig ? ((ParamOptionsIMP)r->orig)(self, _cmd, p, opts) : NO;
 }
-
-static BOOL FBGRMCCallParamDefault(id self, SEL _cmd, mc_bool_param_t p, BOOL def) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigParamDefault);
-    ParamDefaultIMP orig = r ? (ParamDefaultIMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, p, def) : def;
+static BOOL FBGRCallParamOptionsDefault(id self, SEL _cmd, mc_bool_param_t p, id opts, BOOL def) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigParamOptionsDefault);
+    return r && r->orig ? ((ParamOptionsDefaultIMP)r->orig)(self, _cmd, p, opts, def) : def;
 }
-
-static BOOL FBGRMCCallParamOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigParamOptions);
-    ParamOptionsIMP orig = r ? (ParamOptionsIMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, p, opts) : NO;
+static BOOL FBGRCallKey1(id self, SEL _cmd, id key) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigKey1);
+    return r && r->orig ? ((Key1IMP)r->orig)(self, _cmd, key) : NO;
 }
-
-static BOOL FBGRMCCallParamOptionsDefault(id self, SEL _cmd, mc_bool_param_t p, id opts, BOOL def) {
-    FBGRMCRecord *r = FBGRMCFindRecordForReceiver(self, _cmd, FBGRMCSigParamOptionsDefault);
-    ParamOptionsDefaultIMP orig = r ? (ParamOptionsDefaultIMP)r->orig : NULL;
-    return orig ? orig(self, _cmd, p, opts, def) : def;
-}
-
-static BOOL h_key1(id self, SEL _cmd, id key) {
-    NSNumber *forced = FBGRMCForcedForKey(key);
-    if (forced) return forced.boolValue;
-    if (gGuard) return NO;
-    gGuard = YES;
-    BOOL out = FBGRMCCallKey1(self, _cmd, key);
-    gGuard = NO;
-    return out;
-}
-
-static BOOL h_keyDefault(id self, SEL _cmd, id key, BOOL def) {
-    NSNumber *forced = FBGRMCForcedForKey(key);
-    if (forced) return forced.boolValue;
-    if (gGuard) return def;
-    gGuard = YES;
-    BOOL out = FBGRMCCallKeyDefault(self, _cmd, key, def);
-    gGuard = NO;
-    return out;
+static BOOL FBGRCallKeyDefault(id self, SEL _cmd, id key, BOOL def) {
+    FBGRMCRecord *r = FBGRFindRecord(object_getClass(self), _cmd, FBGRMCSigKeyDefault);
+    return r && r->orig ? ((KeyDefaultIMP)r->orig)(self, _cmd, key, def) : def;
 }
 
 static BOOL h_param1(id self, SEL _cmd, mc_bool_param_t p) {
-    NSNumber *forced = FBGRMCForcedForSlot(p.value);
+    NSNumber *forced = FBGRForcedForSlot(p.value);
     if (forced) return forced.boolValue;
     if (gGuard) return NO;
-    gGuard = YES;
-    BOOL out = FBGRMCCallParam1(self, _cmd, p);
-    gGuard = NO;
-    return out;
+    gGuard = YES; BOOL out = FBGRCallParam1(self, _cmd, p); gGuard = NO; return out;
 }
-
 static BOOL h_paramDefault(id self, SEL _cmd, mc_bool_param_t p, BOOL def) {
-    NSNumber *forced = FBGRMCForcedForSlot(p.value);
+    NSNumber *forced = FBGRForcedForSlot(p.value);
     if (forced) return forced.boolValue;
     if (gGuard) return def;
-    gGuard = YES;
-    BOOL out = FBGRMCCallParamDefault(self, _cmd, p, def);
-    gGuard = NO;
-    return out;
+    gGuard = YES; BOOL out = FBGRCallParamDefault(self, _cmd, p, def); gGuard = NO; return out;
 }
-
 static BOOL h_paramOptions(id self, SEL _cmd, mc_bool_param_t p, id opts) {
-    NSNumber *forced = FBGRMCForcedForSlot(p.value);
+    NSNumber *forced = FBGRForcedForSlot(p.value);
     if (forced) return forced.boolValue;
     if (gGuard) return NO;
-    gGuard = YES;
-    BOOL out = FBGRMCCallParamOptions(self, _cmd, p, opts);
-    gGuard = NO;
-    return out;
+    gGuard = YES; BOOL out = FBGRCallParamOptions(self, _cmd, p, opts); gGuard = NO; return out;
 }
-
 static BOOL h_paramOptionsDefault(id self, SEL _cmd, mc_bool_param_t p, id opts, BOOL def) {
-    NSNumber *forced = FBGRMCForcedForSlot(p.value);
+    NSNumber *forced = FBGRForcedForSlot(p.value);
     if (forced) return forced.boolValue;
     if (gGuard) return def;
-    gGuard = YES;
-    BOOL out = FBGRMCCallParamOptionsDefault(self, _cmd, p, opts, def);
-    gGuard = NO;
-    return out;
+    gGuard = YES; BOOL out = FBGRCallParamOptionsDefault(self, _cmd, p, opts, def); gGuard = NO; return out;
 }
-
-static BOOL h_mc_getBoolDefault(uint64_t slot) {
-    NSNumber *forced = FBGRMCForcedForSlot(slot);
+static BOOL h_key1(id self, SEL _cmd, id key) {
+    NSNumber *forced = FBGRForcedForKey(key);
+    if (forced) return forced.boolValue;
+    if (gGuard) return NO;
+    gGuard = YES; BOOL out = FBGRCallKey1(self, _cmd, key); gGuard = NO; return out;
+}
+static BOOL h_keyDefault(id self, SEL _cmd, id key, BOOL def) {
+    NSNumber *forced = FBGRForcedForKey(key);
+    if (forced) return forced.boolValue;
+    if (gGuard) return def;
+    gGuard = YES; BOOL out = FBGRCallKeyDefault(self, _cmd, key, def); gGuard = NO; return out;
+}
+static BOOL h_mc_getBoolSlot(uint64_t slot) {
+    NSNumber *forced = FBGRForcedForSlot(slot);
     if (forced) return forced.boolValue;
     return orig_mc_getBoolDefault ? orig_mc_getBoolDefault(slot) : NO;
 }
 
-static BOOL h_iglu_getBool(void *selfPtr, const char *key) {
-    NSString *s = key ? [NSString stringWithUTF8String:key] : nil;
-    NSNumber *forced = FBGRMCForcedForKey(s);
-    if (forced) return forced.boolValue;
-    return orig_iglu_getBool ? orig_iglu_getBool(selfPtr, key) : NO;
-}
-
 static NSString *FBGRArgType(Method m, unsigned int idx) {
-    char buf[256]; memset(buf, 0, sizeof(buf));
-    method_getArgumentType(m, idx, buf, sizeof(buf));
+    char buf[256]; memset(buf, 0, sizeof(buf)); method_getArgumentType(m, idx, buf, sizeof(buf));
     return [NSString stringWithUTF8String:buf] ?: @"";
 }
-
-static BOOL FBGRReturnIsBool(Method m) {
-    char buf[16]; memset(buf, 0, sizeof(buf));
-    method_getReturnType(m, buf, sizeof(buf));
-    return buf[0] == 'B' || buf[0] == 'c' || buf[0] == 'C';
+static NSString *FBGRReturnType(Method m) {
+    char buf[32]; memset(buf, 0, sizeof(buf)); method_getReturnType(m, buf, sizeof(buf));
+    return [NSString stringWithUTF8String:buf] ?: @"";
 }
-
+static BOOL FBGRReturnIsBool(Method m) {
+    NSString *t = FBGRReturnType(m);
+    return [t isEqualToString:@"B"] || [t isEqualToString:@"c"] || [t isEqualToString:@"C"];
+}
 static BOOL FBGRArgIsObject(Method m, unsigned int idx) {
     NSString *t = FBGRArgType(m, idx);
     return [t hasPrefix:@"@"] || [t hasPrefix:@"?"];
 }
+static BOOL FBGRArgIsBool(Method m, unsigned int idx) {
+    NSString *t = FBGRArgType(m, idx);
+    return [t isEqualToString:@"B"] || [t isEqualToString:@"c"] || [t isEqualToString:@"C"];
+}
+static BOOL FBGRArgIsMCBoolParam(Method m, unsigned int idx) {
+    NSString *t = FBGRArgType(m, idx);
+    if (!t.length) return NO;
+    if ([t containsString:@"mc_bool_param_t"]) return YES;
+    if ([t containsString:@"mc_sessionbased_bool_param_t"]) return YES;
+    if ([t containsString:@"mc_sessionless_bool_param_t"]) return YES;
+    if ([t containsString:@"mc_adminID_bool_param_t"]) return YES;
+    return ([t containsString:@"_bool_param_t"] && [t containsString:@"=Q"]);
+}
+static BOOL FBGRSelectorLooksKeyBased(SEL sel) {
+    NSString *s = NSStringFromSelector(sel).lowercaseString;
+    return [s containsString:@"bool"] && ([s containsString:@"key"] || [s containsString:@"param"] || [s containsString:@"config"] || [s containsString:@"gate"]);
+}
 
-static FBGRMCSigKind FBGRKindForMethod(NSString *selName, Method m) {
-    if (!FBGRReturnIsBool(m)) return FBGRMCSigNone;
+static FBGRMCSigKind FBGRKindForMethod(Method m, BOOL allowKeyMethods) {
+    if (!m || !FBGRReturnIsBool(m)) return FBGRMCSigNone;
     unsigned int argc = method_getNumberOfArguments(m);
-    BOOL objFirst = argc > 2 ? FBGRArgIsObject(m, 2) : NO;
-
-    if ([selName isEqualToString:@"getBool:"] || [selName isEqualToString:@"getBoolWithoutLogging:"] || [selName isEqualToString:@"boolValueForParamKey:"] || [selName isEqualToString:@"ig_boolForKey:"]) {
-        if (argc == 3) return objFirst ? FBGRMCSigKey1 : FBGRMCSigParam1;
-    }
-    if ([selName isEqualToString:@"getBool:withDefault:"] || [selName isEqualToString:@"getBoolWithoutLogging:withDefault:"] || [selName isEqualToString:@"getBoolForParam:withDefault:"] || [selName isEqualToString:@"boolForParameter:withDefault:"] || [selName isEqualToString:@"getBoolValue:defaultValue:"] || [selName isEqualToString:@"getBool_XStackIncompatibleButUsedAcrossFBAndIG:withDefault:"] || [selName isEqualToString:@"ig_boolForKey:defaultValue:"]) {
-        if (argc == 4) return objFirst ? FBGRMCSigKeyDefault : FBGRMCSigParamDefault;
-    }
-    if ([selName isEqualToString:@"getBool:withOptions:"] || [selName isEqualToString:@"getBoolForParam:withOptions:"]) {
-        if (argc == 4 && !objFirst) return FBGRMCSigParamOptions;
-    }
-    if ([selName isEqualToString:@"getBool:withOptions:withDefault:"] || [selName isEqualToString:@"getBool:withOptions:defaultValue:"] || [selName isEqualToString:@"getBoolForParam:withOptions:withDefault:"]) {
-        if (argc == 5 && !objFirst) return FBGRMCSigParamOptionsDefault;
-    }
+    if (argc == 3 && FBGRArgIsMCBoolParam(m, 2)) return FBGRMCSigParam1;
+    if (argc == 4 && FBGRArgIsMCBoolParam(m, 2) && FBGRArgIsBool(m, 3)) return FBGRMCSigParamDefault;
+    if (argc == 4 && FBGRArgIsMCBoolParam(m, 2) && FBGRArgIsObject(m, 3)) return FBGRMCSigParamOptions;
+    if (argc == 5 && FBGRArgIsMCBoolParam(m, 2) && FBGRArgIsObject(m, 3) && FBGRArgIsBool(m, 4)) return FBGRMCSigParamOptionsDefault;
+    if (allowKeyMethods && FBGRSelectorLooksKeyBased(method_getName(m)) && argc == 3 && FBGRArgIsObject(m, 2)) return FBGRMCSigKey1;
+    if (allowKeyMethods && FBGRSelectorLooksKeyBased(method_getName(m)) && argc == 4 && FBGRArgIsObject(m, 2) && FBGRArgIsBool(m, 3)) return FBGRMCSigKeyDefault;
     return FBGRMCSigNone;
 }
 
 static IMP FBGRReplacementForKind(FBGRMCSigKind kind) {
     switch (kind) {
-        case FBGRMCSigKey1: return (IMP)h_key1;
-        case FBGRMCSigKeyDefault: return (IMP)h_keyDefault;
         case FBGRMCSigParam1: return (IMP)h_param1;
         case FBGRMCSigParamDefault: return (IMP)h_paramDefault;
         case FBGRMCSigParamOptions: return (IMP)h_paramOptions;
         case FBGRMCSigParamOptionsDefault: return (IMP)h_paramOptionsDefault;
+        case FBGRMCSigKey1: return (IMP)h_key1;
+        case FBGRMCSigKeyDefault: return (IMP)h_keyDefault;
         default: return NULL;
     }
 }
 
-static NSArray<NSString *> *FBGRRelevantImagePaths(void) {
-    NSMutableArray *paths = [NSMutableArray array];
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; i++) {
-        const char *c = _dyld_get_image_name(i);
-        if (!c) continue;
-        NSString *p = [NSString stringWithUTF8String:c] ?: @"";
-        if (([p containsString:@"/Facebook.app/Facebook"] && ![p hasSuffix:@".dylib"]) || [p containsString:@"/FBSharedFramework.framework/FBSharedFramework"]) {
-            if (![paths containsObject:p]) [paths addObject:p];
-        }
-    }
-    return paths;
-}
-
-static void FBGRHookMethod(Class cls, Method m, BOOL classMethod) {
-    if (!cls || !m || gRecordCount >= FBGR_MC_MAX_RECORDS) return;
+static void FBGRHookMethod(Class ownerClass, Method m, FBGRMCSigKind kind, BOOL classMethod) {
+    if (!ownerClass || !m || kind == FBGRMCSigNone || gRecordCount >= FBGR_MC_MAX_RECORDS) return;
     SEL sel = method_getName(m);
-    NSString *selName = NSStringFromSelector(sel);
-    FBGRMCSigKind kind = FBGRKindForMethod(selName, m);
-    if (kind == FBGRMCSigNone) return;
-
-    Class hookClass = classMethod ? object_getClass(cls) : cls;
-    if (!hookClass || FBGRMCFindRecordExact(hookClass, sel, kind)) return;
-
-    IMP replacement = FBGRReplacementForKind(kind);
-    if (!replacement) return;
-
-    IMP orig = NULL;
-    MSHookMessageEx(hookClass, sel, replacement, &orig);
-    if (!orig) return;
-    gRecords[gRecordCount++] = (FBGRMCRecord){ hookClass, sel, kind, classMethod, orig };
-}
-
-static void FBGRScanImageAndHook(NSString *imagePath) {
-    if (!imagePath.length) return;
-    unsigned int classCount = 0;
-    const char **classNames = objc_copyClassNamesForImage(imagePath.UTF8String, &classCount);
-    if (!classNames) return;
-    for (unsigned int i = 0; i < classCount; i++) {
-        Class cls = classNames[i] ? objc_getClass(classNames[i]) : Nil;
-        if (!cls) continue;
-        gScannedClasses++;
-        unsigned int count = 0;
-        Method *methods = class_copyMethodList(cls, &count);
-        for (unsigned int j = 0; methods && j < count; j++) FBGRHookMethod(cls, methods[j], NO);
-        if (methods) free(methods);
-        count = 0;
-        methods = class_copyMethodList(object_getClass(cls), &count);
-        for (unsigned int j = 0; methods && j < count; j++) FBGRHookMethod(cls, methods[j], YES);
-        if (methods) free(methods);
+    Class hookClass = classMethod ? object_getClass(ownerClass) : ownerClass;
+    if (!hookClass) return;
+    for (NSUInteger i = 0; i < gRecordCount; i++) {
+        if (gRecords[i].cls == hookClass && gRecords[i].sel == sel && gRecords[i].kind == kind) return;
     }
-    free(classNames);
+    IMP repl = FBGRReplacementForKind(kind);
+    if (!repl) return;
+    IMP orig = NULL;
+    MSHookMessageEx(hookClass, sel, repl, &orig);
+    if (!orig) return;
+    gRecords[gRecordCount++] = (FBGRMCRecord){ hookClass, sel, kind, orig, classMethod };
 }
 
-static void FBGRScanAndHookObjC(void) {
-    for (NSString *path in FBGRRelevantImagePaths()) FBGRScanImageAndHook(path);
+static void FBGRHookClassByTypes(NSString *className, BOOL allowKeyMethods) {
+    Class cls = NSClassFromString(className);
+    if (!cls) return;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    for (unsigned int i = 0; i < count; i++) {
+        gScannedMethods++;
+        FBGRMCSigKind kind = FBGRKindForMethod(methods[i], allowKeyMethods);
+        if (kind == FBGRMCSigNone) gRejectedMethods++;
+        FBGRHookMethod(cls, methods[i], kind, NO);
+    }
+    if (methods) free(methods);
+
+    count = 0;
+    methods = class_copyMethodList(object_getClass(cls), &count);
+    for (unsigned int i = 0; i < count; i++) {
+        gScannedMethods++;
+        FBGRMCSigKind kind = FBGRKindForMethod(methods[i], allowKeyMethods);
+        if (kind == FBGRMCSigNone) gRejectedMethods++;
+        FBGRHookMethod(cls, methods[i], kind, YES);
+    }
+    if (methods) free(methods);
 }
 
-static void *FBGRFindRuntimeSymbol(const char *symbol) {
-    if (!symbol) return NULL;
+static void FBGRInstallFunctionHookIfPresent(const char *symbol) {
+    if (!symbol || orig_mc_getBoolDefault) return;
     void *addr = MSFindSymbol(NULL, symbol);
-    if (!addr && symbol[0] == '_') addr = dlsym(RTLD_DEFAULT, symbol + 1);
     if (!addr) addr = dlsym(RTLD_DEFAULT, symbol);
-    return addr;
-}
-
-static void FBGRHookFunctionIfFound(const char *symbol, void *replacement, void **orig) {
-    if (!symbol || !replacement || !orig || *orig) return;
-    void *addr = FBGRFindRuntimeSymbol(symbol);
     if (!addr) return;
-    MSHookFunction(addr, replacement, orig);
-    if (*orig) gFunctionHookCount++;
-}
-
-static void FBGRInstallFunctionHooks(void) {
-    FBGRHookFunctionIfFound("__ZN12mobileconfig14getBoolDefaultEy", (void *)h_mc_getBoolDefault, (void **)&orig_mc_getBoolDefault);
-    FBGRHookFunctionIfFound("__ZNK4iglu9filterkit12ParameterMap7getBoolEPKc", (void *)h_iglu_getBool, (void **)&orig_iglu_getBool);
+    MSHookFunction(addr, (void *)h_mc_getBoolSlot, (void **)&orig_mc_getBoolDefault);
+    if (orig_mc_getBoolDefault) gFunctionHookCount++;
 }
 
 static void FBGRInstall(void) {
@@ -313,22 +248,42 @@ static void FBGRInstall(void) {
     gInstalling = YES;
     FBGRGateWarmCacheFromPrefs();
     [[FBGRMCCatalog shared] loadIfNeeded];
-    FBGRInstallFunctionHooks();
-    FBGRScanAndHookObjC();
-    gInstalled = YES;
+
+    for (NSString *name in @[
+        @"FBMobileConfigContextManager",
+        @"FBMobileConfigContextObjcImpl",
+        @"FBMobileConfigSessionlessContextManager",
+        @"FBMobileConfigUserSessionContextManager",
+        @"FBMobileConfigAdminIDContextManager",
+        @"FBMobileConfigStartupConfigs",
+        @"FBMobileConfigStartupConfigsDeprecated"
+    ]) FBGRHookClassByTypes(name, NO);
+
+    for (NSString *name in @[
+        @"RCTMobileConfigNative",
+        @"NativeMobileConfigModuleSpecBase"
+    ]) FBGRHookClassByTypes(name, YES);
+
+    FBGRInstallFunctionHookIfPresent("__ZN12mobileconfig14getBoolDefaultEy");
+    FBGRInstallFunctionHookIfPresent("_ZN12mobileconfig14getBoolDefaultEy");
+
+    gInstalled = (gRecordCount > 0 || gFunctionHookCount > 0);
     gInstalling = NO;
-    FBGRLogAppend([NSString stringWithFormat:@"MC hooks installed: objc=%lu functions=%lu scanned=%lu", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedClasses]);
+    FBGRLogAppend([NSString stringWithFormat:@"MC exact hooks install pass: installed=%@ records=%lu function=%lu scanned=%lu rejected=%lu", gInstalled ? @"YES" : @"NO", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods]);
 }
 
-extern "C" void FBGRMCGateHooksEnsureInstalled(void) { FBGRInstall(); }
-extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) { FBGRGateWarmCacheFromPrefs(); if (FBGRGateAllOverrideSlotIds().count > 0) FBGRInstall(); }
-extern "C" void FBGRMCGateCacheRefresh(void) { FBGRGateWarmCacheFromPrefs(); }
+static void FBGRScheduleRetry(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!gInstalled) FBGRInstall();
+    });
+}
 
+extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
+    FBGRInstall();
+    if (!gInstalled) { FBGRScheduleRetry(1.0); FBGRScheduleRetry(2.0); FBGRScheduleRetry(5.0); }
+}
+extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) { FBGRGateWarmCacheFromPrefs(); FBGRMCGateHooksEnsureInstalled(); }
+extern "C" void FBGRMCGateCacheRefresh(void) { FBGRGateWarmCacheFromPrefs(); }
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
-    return [NSString stringWithFormat:@"installed=%@\nobjc hooks=%lu\nfunction hooks=%lu\nscanned classes=%lu\noverrides=%lu\nstrategy: MSHookFunction for native symbols + MSHookMessageEx for ObjC getters",
-        gInstalled ? @"YES" : @"NO",
-        (unsigned long)gRecordCount,
-        (unsigned long)gFunctionHookCount,
-        (unsigned long)gScannedClasses,
-        (unsigned long)FBGRGateAllOverrideSlotIds().count];
+    return [NSString stringWithFormat:@"installed=%@\nrecords=%lu\nfunction hooks=%lu\nscanned methods=%lu\nrejected methods=%lu\noverrides=%lu\nstrategy=exact *_bool_param_t type-encoding hooks, not selector-name hooks", gInstalled ? @"YES" : @"NO", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods, (unsigned long)FBGRGateAllOverrideSlotIds().count];
 }

@@ -72,7 +72,7 @@ check('@implementation FBGRBoolRuntimeInventory' in boolm, 'Bool runtime impleme
 check('objc_copyClassNamesForImage' in boolm and 'class_copyMethodList' in boolm and 'method_getReturnType' in boolm, 'Bool runtime must scan exact Mach-O image like Ryukgram')
 check('imp_implementationWithBlock' in boolm, 'Bool runtime must use block hooks')
 check('/Facebook.app/Facebook' in boolm and '/FBSharedFramework.framework/FBSharedFramework' in boolm, 'Bool runtime must filter executable and FBShared images')
-check('MSHookMessageEx' in boolm, 'Bool runtime must patch with MSHookMessageEx')
+check('method_setImplementation' in boolm or 'MSHookMessageEx' in boolm, 'Bool runtime must patch exact owner implementation')
 
 for vc in ['src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m']:
     t = read(vc)
