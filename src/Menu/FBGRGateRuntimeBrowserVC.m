@@ -48,9 +48,7 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self reload]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.visible.count; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-    return [NSString stringWithFormat:@"%lu bool params reais. Toggle ON=Force YES, OFF=Force NO. Fonte: %@", (unsigned long)self.visible.count, [FBGRMCCatalog shared].sourceDescription ?: @"?"];
-}
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return nil; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"mc"];
@@ -66,12 +64,12 @@ extern NSString *FBGRMCGateHooksDiagnostic(void);
     sw.onTintColor = FBGRAccentColor();
     [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
 
-    NSString *subtitle = [NSString stringWithFormat:@"%@ · slot=%llu · default=%@%@",
+    NSString *subtitle = [NSString stringWithFormat:@"%@ · slot %llu · default %@%@",
                           FBGRFeatureCategoryTitle(p.category),
                           (unsigned long long)p.slotId,
                           p.defaultBool ? @"YES" : @"NO",
-                          set ? [NSString stringWithFormat:@" · FORÇADO %@", val ? @"YES" : @"NO"] : @""];
-    FBGRConfigureSwitchCell(c, p.fullKey, subtitle, sw, FBGRSymbol(FBGRFeatureCategoryIcon(p.category), FBGRAccentColor()));
+                          set ? [NSString stringWithFormat:@" · override %@", val ? @"ON" : @"OFF"] : @""];
+    FBGRConfigureSwitchCell(c, p.fullKey, subtitle, sw, nil);
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     return c;
 }

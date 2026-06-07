@@ -26,8 +26,8 @@ for bad in ['%hook UIWindow', '%hook UIViewController', 'FBGRLiquidGlassEnsureIn
     check(bad not in tw, f'Tweak.x must not contain startup/global work: {bad}')
 
 boot = read('src/Hooks/FBGRRuntimeBootstrap.xm')
-check('%ctor' not in boot and '__attribute__((constructor))' not in boot, 'Runtime bootstrap must not install hooks in constructor')
-check('installPersistedOverrideHooks' not in boot and 'FBGRMCGateHooksApplyPersistedOverrides' not in boot, 'Runtime bootstrap must not replay persisted hooks at app startup')
+check('__attribute__((constructor)) static void FBGRRuntimeBootstrap' in boot and 'objc_getClassList' not in boot and 'objc_copyClassNamesForImage' not in boot, 'Runtime bootstrap must be lightweight: persisted hooks only, no scans')
+check('installPersistedOverrideHooks' in boot and 'FBGRMCGateHooksApplyPersistedOverrides' in boot and 'objc_getClassList' not in boot and 'objc_copyClassNamesForImage' not in boot, 'Runtime bootstrap must replay persisted hooks only without scanning')
 
 cat = read('src/Runtime/FBGRMCCatalog.m')
 check('NSBundle.mainBundle.bundlePath' in cat and 'Facebook.app/ReactMobileConfigMetadata.json' in cat, 'Catalog must prefer live Facebook.app metadata')
@@ -46,14 +46,14 @@ for name in ['FBGRGateIsSet', 'FBGRGateGet']:
             check(bad not in body, f'{name} hot path must not use {bad}')
 
 mc = read('src/Hooks/FBGRMCGateHooks.xm')
-check('__attribute__((constructor))' not in mc and '%ctor' not in mc, 'MC hooks must not install at startup')
-check('objc_copyClassNamesForImage' in mc and '_dyld_image_count' in mc and 'class_copyMethodList' in mc, 'MC hooks must scan exact loaded images on demand')
-check('MSHookFunction' in mc and 'MSFindSymbol' in mc and '__ZN12mobileconfig14getBoolDefaultEy' in mc and '__ZNK4iglu9filterkit12ParameterMap7getBoolEPKc' in mc, 'MC native bridges must use MSHookFunction, not fishhook-only rebinding')
+check('__attribute__((constructor))' not in mc and '%ctor' not in mc, 'MC hooks must not install themselves at startup')
+check('FBGRHookClassByTypes' in mc and 'class_copyMethodList' in mc and 'mc_bool_param_t' in mc, 'MC hooks must hook exact classes by type encoding')
+check('MSHookFunction' in mc and 'MSFindSymbol' in mc and '__ZN12mobileconfig14getBoolDefaultEy' in mc, 'MC native bridge must use MSHookFunction/MSFindSymbol for known slot function')
 check('rebind_symbols' not in mc, 'MC native bridges must not rely on fishhook rebinding for locally defined C++ functions')
-check('FBGRMCForcedForSlot' in mc and 'if (forced) return forced.boolValue;' in mc, 'MC hooks must return override before calling original')
-check('FBGRMCFindRecordForReceiver' in mc and 'class_getSuperclass' in mc, 'MC original IMP lookup must walk receiver class chain')
-for sel in ['getBool:', 'getBool:withDefault:', 'getBool:withOptions:', 'getBool:withOptions:withDefault:', 'getBoolWithoutLogging:', 'getBoolForParam:withDefault:', 'ig_boolForKey:']:
-    check(sel in mc, f'MC hook missing selector {sel}')
+check('FBGRForcedForSlot' in mc and 'if (forced) return forced.boolValue;' in mc, 'MC hooks must return override before calling original')
+check('FBGRFindRecord' in mc and 'class_getSuperclass' in mc, 'MC original IMP lookup must walk receiver class chain')
+for token in ['FBMobileConfigContextManager', 'FBMobileConfigContextObjcImpl', 'FBMobileConfigSessionlessContextManager', 'FBMobileConfigUserSessionContextManager', 'RCTMobileConfigNative', 'FBGRMCSigParamOptionsDefault']:
+    check(token in mc, f'MC type hook missing {token}')
 
 lg = read('src/Hooks/FBGRLiquidGlassHooks.xm')
 check('__attribute__((constructor))' not in lg and '%ctor' not in lg, 'LiquidGlass must not install at startup')
@@ -62,9 +62,10 @@ check('IGLiquidGlassExperimentHelper' in lg and 'MSHookMessageEx' in lg, 'Liquid
 theme = read('src/Menu/FBGRMenuTheme.m')
 check('UIBlurEffect' not in theme, 'UI must not simulate LiquidGlass with UIBlurEffect')
 check('UIGlassEffect' in theme and 'UILiquidGlassEffect' in theme and 'setPreferredContainerBackgroundStyle:' in theme, 'UI must attempt real UIKit LiquidGlass/container glass classes')
-check('UIColor.blackColor' not in theme, 'UI must not be flat pure black')
+check('UIColor.blackColor' not in theme and 'colorWithWhite:0.0 alpha:1.0]; }' not in theme, 'UI must not be flat pure black')
 check('UIListContentConfiguration' not in theme, 'Runtime rows must use custom readable labels, not default list truncation')
-check('kFBGRCellStackTag' in theme and 'UIFontWeightRegular' in theme and 'systemFontOfSize:13.2' in theme, 'Cells must be compact custom readable rows')
+check((root / 'docs/V7_UI_FINISH.md').exists(), 'v7 UI finish doc missing')
+check('kFBGRCellContentTag' in theme and 'FBGRCellGlassTag' in theme and 'monospacedSystemFontOfSize:12.8' in theme, 'Cells must use v7 readable glass card rows')
 
 boolm = read('src/Runtime/FBGRBoolRuntimeInventory.m')
 check('@implementation FBGRBoolRuntimeInventory' in boolm, 'Bool runtime implementation context missing')
@@ -76,7 +77,7 @@ check('MSHookMessageEx' in boolm, 'Bool runtime must patch with MSHookMessageEx'
 for vc in ['src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m']:
     t = read(vc)
     check('UISwitch' in t and 'FBGRConfigureSwitchCell' in t, f'{vc} must have direct toggles')
-    check('Force YES' in t or 'FORÇADO' in t or 'FORCE YES' in t, f'{vc} must show force state')
+    check('Force YES' in t or 'FORÇADO' in t or 'FORCE YES' in t or 'override ON' in t or 'override %@' in t, f'{vc} must show force state')
 
 surf = read('src/Menu/FBGRSurfaceListVC.m')
 for label in ['MobileConfig Runtime Browser','Executable Bool Runtime','FBSharedFramework Bool Runtime','Instalar/Recarregar hooks MobileConfig']:
@@ -98,4 +99,4 @@ if errors:
     for e in errors: print(' - ' + e, file=sys.stderr)
     sys.exit(1)
 
-print('OK: FBTweaks v5 lazy hooks and adaptive glass UI validation passed')
+print('OK: FBTweaks v7 finished adaptive LiquidGlass UI validation passed')

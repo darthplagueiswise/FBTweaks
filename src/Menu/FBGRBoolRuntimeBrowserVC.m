@@ -50,9 +50,7 @@
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self reload]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.visible.count; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-    return @"Scanner real: class_getImageName + class_copyMethodList + method_copyReturnType. Toggle ON=Force YES, OFF=Force NO. Toque na linha para limpar override.";
-}
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section { return nil; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"bool"];
@@ -65,11 +63,11 @@
     sw.onTintColor = FBGRAccentColor();
     [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
 
-    NSString *title = [NSString stringWithFormat:@"%@[%@ %@]", i.classMethod ? @"+" : @"-", i.className, i.selectorName];
-    NSString *subtitle = [NSString stringWithFormat:@"%@%@",
-                          i.hooked ? @"HOOKED · " : @"hook sob demanda · ",
-                          i.overrideSet ? (i.overrideValue ? @"FORCE YES" : @"FORCE NO") : @"sem override"];
-    FBGRConfigureSwitchCell(c, title, subtitle, sw, FBGRSymbol(@"cpu", FBGRAccentColor()));
+    NSString *title = [NSString stringWithFormat:@"%@ %@", i.classMethod ? @"+" : @"-", i.selectorName];
+    NSString *subtitle = [NSString stringWithFormat:@"%@ · %@",
+                          i.className ?: @"?",
+                          i.overrideSet ? (i.overrideValue ? @"override ON" : @"override OFF") : (i.hooked ? @"hooked" : @"sem override")];
+    FBGRConfigureSwitchCell(c, title, subtitle, sw, nil);
     return c;
 }
 

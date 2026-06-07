@@ -51,9 +51,7 @@ static NSArray<NSNumber *> *FBGRCategories(void) {
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return [NSString stringWithFormat:@"Metadata: %lu BOOL flags · %@", (unsigned long)[FBGRMCCatalog shared].boolParams.count, [FBGRMCCatalog shared].sourceDescription ?: @"?"];
-    if (section == 1) return @"Os três runtimes têm toggle direto. Não existe apply separado dentro deles.";
-    return @"Instalar/Recarregar hooks é só para MobileConfig/bridge. Os toggles dos runtimes já aplicam Force YES/NO.";
+    return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -70,20 +68,14 @@ static NSArray<NSNumber *> *FBGRCategories(void) {
 
     if (ip.section == 1) {
         NSArray *titles = @[@"MobileConfig Runtime Browser", @"Executable Bool Runtime — Facebook", @"FBSharedFramework Bool Runtime"];
-        NSArray *subs = @[@"ReactMobileConfigMetadata real, toggle por slotId", @"Varre /Facebook.app/Facebook e aplica MSHookMessageEx", @"Varre /FBSharedFramework.framework/FBSharedFramework e aplica MSHookMessageEx"];
+        NSArray *subs = @[@"toggle por slotId", @"Facebook executable", @"FBSharedFramework"];
         FBGRConfigureCell(c, titles[(NSUInteger)ip.row], subs[(NSUInteger)ip.row], FBGRSymbol(ip.row == 0 ? @"slider.horizontal.3" : @"cpu", FBGRAccentColor()));
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return c;
     }
 
     NSArray *titles = @[@"Instalar/Recarregar hooks MobileConfig", @"Aplicar overrides persistidos", @"Forçar helpers LiquidGlass", @"Preset DogFood/Internal", @"Limpar todos MC overrides"];
-    NSArray *subs = @[
-        @"Instala ObjC hooks e fishhook on-demand, nunca no startup.",
-        @"Aquece RAM cache e instala hooks se houver override salvo.",
-        @"Ativa hooks dos helpers Swift IGLiquidGlassExperimentHelper.",
-        @"Liga conjunto de slots MC internos conhecidos.",
-        @"Remove somente overrides fbgr.slot.*"
-    ];
+    NSArray *subs = @[@"MobileConfig bridge", @"RAM cache", @"SDK26 helpers", @"slots internos", @"remove fbgr.slot.*"];
     UIColor *color = ip.row == 4 ? UIColor.systemRedColor : FBGRAccentColor();
     NSArray *icons = @[@"bolt.fill", @"arrow.clockwise", @"sparkles", @"ladybug.fill", @"trash"];
     FBGRConfigureCell(c, titles[(NSUInteger)ip.row], subs[(NSUInteger)ip.row], FBGRSymbol(icons[(NSUInteger)ip.row], color));
