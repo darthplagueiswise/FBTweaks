@@ -140,6 +140,9 @@ static BOOL FBGRArgIsObject(Method m, unsigned int idx) {
 }
 
 static FBGRMCSigKind FBGRKindForMethod(NSString *selName, Method m) {
+    char ret[8] = {0};
+    method_getReturnType(m, ret, sizeof(ret));
+    if (!(ret[0] == 'B' || ret[0] == 'c' || ret[0] == 'C')) return FBGRMCSigNone;
     unsigned int argc = method_getNumberOfArguments(m);
     BOOL objFirst = argc > 2 ? FBGRArgIsObject(m, 2) : NO;
 
@@ -147,7 +150,7 @@ static FBGRMCSigKind FBGRKindForMethod(NSString *selName, Method m) {
         if (argc == 3) return objFirst ? FBGRMCSigKey1 : FBGRMCSigParam1;
     }
 
-    if ([selName isEqualToString:@"getBool:withDefault:"] || [selName isEqualToString:@"getBoolWithoutLogging:withDefault:"] || [selName isEqualToString:@"getBoolForParam:withDefault:"] || [selName isEqualToString:@"boolForParameter:withDefault:"] || [selName isEqualToString:@"ig_boolForKey:defaultValue:"]) {
+    if ([selName isEqualToString:@"getBool:withDefault:"] || [selName isEqualToString:@"getBool:defaultValue:"] || [selName isEqualToString:@"getBool:default:"] || [selName isEqualToString:@"getBoolWithoutLogging:withDefault:"] || [selName isEqualToString:@"getBoolWithoutLoggingForParam:withDefault:"] || [selName isEqualToString:@"getBoolForParam:withDefault:"] || [selName isEqualToString:@"boolForParameter:withDefault:"] || [selName isEqualToString:@"getBoolValue:defaultValue:"] || [selName isEqualToString:@"getBool_XStackIncompatibleButUsedAcrossFBAndIG:withDefault:"] || [selName isEqualToString:@"ig_boolForKey:defaultValue:"]) {
         if (argc == 4) return objFirst ? FBGRMCSigKeyDefault : FBGRMCSigParamDefault;
     }
 
@@ -252,7 +255,7 @@ static void FBGRInstall(void) {
 }
 
 extern "C" void FBGRMCGateHooksEnsureInstalled(void) { FBGRInstall(); }
-extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) { FBGRGateWarmCacheFromPrefs(); FBGRInstall(); }
+extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) { FBGRGateWarmCacheFromPrefs(); if (FBGRGateAllOverrideSlotIds().count > 0) FBGRInstall(); }
 extern "C" void FBGRMCGateCacheRefresh(void) { FBGRGateWarmCacheFromPrefs(); }
 
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {

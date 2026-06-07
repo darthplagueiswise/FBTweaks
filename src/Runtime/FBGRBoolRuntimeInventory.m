@@ -2,48 +2,50 @@
 #import "../FBGramPrefix.h"
 #import "FBGRLog.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
+#import <mach-o/dyld.h>
 #import <string.h>
+
+static NSString *const kFBGRBoolOverridesKey = @"fbgr.runtime.bool.overrides.v2";
 
 @implementation FBGRBoolRuntimeItem
 @end
 
-typedef BOOL (*BoolNoArgIMP)(id, SEL);
-typedef struct {
-    Class cls;
-    SEL sel;
-    BOOL classMethod;
-    IMP orig;
-    BOOL overrideSet;
-    BOOL overrideValue;
-} FBGRBoolHook;
-
-#define FBGR_BOOL_MAX 4096
-static FBGRBoolHook gHooks[FBGR_BOOL_MAX];
-static NSUInteger gHookN = 0;
+static NSMutableDictionary<NSString *, NSValue *> *gOriginalIMPs;
+static NSMutableSet<NSString *> *gHookedNames;
 static NSUInteger gScanN = 0;
 
-static NSString *FBGRBoolKey(NSString *className, NSString *selectorName, BOOL classMethod) {
-    return [NSString stringWithFormat:@"fbgr.bool.%@.%@.%@", classMethod ? @"+" : @"-", className ?: @"", selectorName ?: @""];
+static NSString *FBGRRuntimeBoolKey(NSString *className, NSString *selectorName, BOOL classMethod) {
+    return [NSString stringWithFormat:@"%c%@#%@", classMethod ? '+' : '-', className ?: @"", selectorName ?: @""];
 }
 
-static FBGRBoolHook *FBGRFindHook(Class cls, SEL sel, BOOL classMethod) {
-    for (NSUInteger i = 0; i < gHookN; i++) if (gHooks[i].cls == cls && gHooks[i].sel == sel && gHooks[i].classMethod == classMethod) return &gHooks[i];
-    for (NSUInteger i = 0; i < gHookN; i++) if (gHooks[i].sel == sel && gHooks[i].classMethod == classMethod) return &gHooks[i];
-    return NULL;
+static BOOL FBGRSplitRuntimeBoolKey(NSString *name, NSString **className, NSString **selectorName, BOOL *classMethod) {
+    if (name.length < 4) return NO;
+    unichar prefix = [name characterAtIndex:0];
+    if (prefix != '+' && prefix != '-') return NO;
+    NSRange r = [name rangeOfString:@"#"];
+    if (r.location == NSNotFound || r.location <= 1 || NSMaxRange(r) >= name.length) return NO;
+    if (className) *className = [name substringWithRange:NSMakeRange(1, r.location - 1)];
+    if (selectorName) *selectorName = [name substringFromIndex:NSMaxRange(r)];
+    if (classMethod) *classMethod = (prefix == '+');
+    return YES;
 }
 
-static BOOL h_bool(id self, SEL _cmd) {
-    BOOL classCall = object_isClass(self);
-    Class cls = classCall ? (Class)self : [self class];
-    FBGRBoolHook *e = FBGRFindHook(classCall ? (Class)self : cls, _cmd, classCall);
-    if (!e) e = FBGRFindHook(cls, _cmd, NO);
-    if (e && e->overrideSet) return e->overrideValue;
-    return (e && e->orig) ? ((BoolNoArgIMP)e->orig)(self, _cmd) : NO;
+static NSMutableDictionary *FBGRBoolOverridesMutable(void) {
+    NSDictionary *d = [FBGRPrefs() dictionaryForKey:kFBGRBoolOverridesKey];
+    return [d isKindOfClass:NSDictionary.class] ? [d mutableCopy] : [NSMutableDictionary dictionary];
 }
 
-static BOOL FBGRReturnIsBool(const char *ret) {
-    if (!ret || !ret[0]) return NO;
+static NSNumber *FBGRBoolOverrideState(NSString *className, NSString *selectorName, BOOL classMethod) {
+    id v = [FBGRPrefs() dictionaryForKey:kFBGRBoolOverridesKey][FBGRRuntimeBoolKey(className, selectorName, classMethod)];
+    return [v respondsToSelector:@selector(boolValue)] ? @([v boolValue]) : nil;
+}
+
+static BOOL FBGRReturnIsBool(Method m) {
+    if (!m || method_getNumberOfArguments(m) != 2) return NO;
+    char ret[8] = {0};
+    method_getReturnType(m, ret, sizeof(ret));
     return ret[0] == 'B' || ret[0] == 'c' || ret[0] == 'C';
 }
 
@@ -53,134 +55,154 @@ static BOOL FBGRSelectorAllowed(NSString *sel) {
     if ([s hasPrefix:@"set"]) return NO;
     if ([s isEqualToString:@"hash"] || [s isEqualToString:@"isproxy"] || [s isEqualToString:@"respondstoselector"]) return NO;
     return ([s hasPrefix:@"is"] || [s hasPrefix:@"has"] || [s hasPrefix:@"can"] || [s hasPrefix:@"should"] ||
-            [s containsString:@"enabled"] || [s containsString:@"debug"] || [s containsString:@"dogfood"] ||
-            [s containsString:@"internal"] || [s containsString:@"experiment"] || [s containsString:@"liquid"] ||
-            [s containsString:@"glass"] || [s containsString:@"tab"] || [s containsString:@"gate"]);
+            [s hasPrefix:@"allow"] || [s hasPrefix:@"use"] || [s containsString:@"enabled"] ||
+            [s containsString:@"debug"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] ||
+            [s containsString:@"experiment"] || [s containsString:@"liquid"] || [s containsString:@"glass"] ||
+            [s containsString:@"tab"] || [s containsString:@"gate"] || [s containsString:@"gating"]);
 }
 
-static BOOL FBGRImageMatches(const char *img, FBGRBoolRuntimeImageKind kind) {
-    if (!img) return NO;
-    NSString *s = [NSString stringWithUTF8String:img] ?: @"";
-    if (kind == FBGRBoolRuntimeImageKindExecutable) return [s containsString:@"/Facebook.app/Facebook"];
-    return [s containsString:@"/FBSharedFramework.framework/FBSharedFramework"];
+static NSString *FBGRImagePathForKind(FBGRBoolRuntimeImageKind kind) {
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) continue;
+        if (kind == FBGRBoolRuntimeImageKindExecutable) {
+            if (strstr(name, "/Facebook.app/Facebook") && !strstr(name, ".dylib")) return [NSString stringWithUTF8String:name];
+        } else {
+            if (strstr(name, "/FBSharedFramework.framework/FBSharedFramework")) return [NSString stringWithUTF8String:name];
+        }
+    }
+    return nil;
 }
 
-static void FBGRAddMethods(NSMutableArray *out, Class cls, BOOL classMethod, NSString *img) {
+static void FBGRAppendMethods(Class cls, BOOL classMethod, NSString *img, NSMutableArray *out) {
+    Class target = classMethod ? object_getClass(cls) : cls;
     unsigned int count = 0;
-    Method *methods = class_copyMethodList(classMethod ? object_getClass(cls) : cls, &count);
+    Method *methods = target ? class_copyMethodList(target, &count) : NULL;
+    if (!methods) return;
     for (unsigned int i = 0; i < count; i++) {
         Method m = methods[i];
-        if (method_getNumberOfArguments(m) != 2) continue;
-        char *ret = method_copyReturnType(m);
-        BOOL ok = FBGRReturnIsBool(ret);
-        if (ret) free(ret);
-        if (!ok) continue;
-
+        if (!FBGRReturnIsBool(m)) continue;
         SEL sel = method_getName(m);
         NSString *selName = NSStringFromSelector(sel);
         if (!FBGRSelectorAllowed(selName)) continue;
-
         FBGRBoolRuntimeItem *item = [FBGRBoolRuntimeItem new];
         item.className = NSStringFromClass(cls);
         item.selectorName = selName;
-        item.imageName = img;
+        item.imageName = img ?: @"";
         item.classMethod = classMethod;
-
-        NSString *key = FBGRBoolKey(item.className, item.selectorName, item.classMethod);
-        id obj = [FBGRPrefs() objectForKey:key];
-        item.overrideSet = obj != nil;
-        item.overrideValue = [obj boolValue];
-
-        Class hookCls = classMethod ? object_getClass(cls) : cls;
-        item.hooked = FBGRFindHook(hookCls, sel, classMethod) != NULL;
+        NSNumber *ov = FBGRBoolOverrideState(item.className, item.selectorName, item.classMethod);
+        item.overrideSet = (ov != nil);
+        item.overrideValue = ov.boolValue;
+        item.hooked = [gHookedNames containsObject:FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod)];
         [out addObject:item];
     }
-    if (methods) free(methods);
+    free(methods);
 }
 
 @implementation FBGRBoolRuntimeInventory
 
 + (NSArray<FBGRBoolRuntimeItem *> *)scanImageKind:(FBGRBoolRuntimeImageKind)kind {
-    int n = objc_getClassList(NULL, 0);
-    if (n <= 0) return @[];
-    Class *classes = (Class *)calloc((NSUInteger)n, sizeof(Class));
-    n = objc_getClassList(classes, n);
-
     NSMutableArray *out = [NSMutableArray array];
-    for (int i = 0; i < n; i++) {
-        Class cls = classes[i];
-        const char *imgC = class_getImageName(cls);
-        if (!FBGRImageMatches(imgC, kind)) continue;
-        NSString *img = imgC ? [NSString stringWithUTF8String:imgC] : @"";
-        FBGRAddMethods(out, cls, NO, img);
-        FBGRAddMethods(out, cls, YES, img);
+    NSString *imagePath = FBGRImagePathForKind(kind);
+    unsigned int classCount = 0;
+    const char **classNames = imagePath.length ? objc_copyClassNamesForImage(imagePath.UTF8String, &classCount) : NULL;
+    if (classNames) {
+        for (unsigned int i = 0; i < classCount; i++) {
+            const char *cname = classNames[i];
+            if (!cname) continue;
+            Class cls = objc_getClass(cname);
+            if (!cls) continue;
+            FBGRAppendMethods(cls, NO, imagePath, out);
+            FBGRAppendMethods(cls, YES, imagePath, out);
+        }
+        free(classNames);
     }
-    free(classes);
-
     [out sortUsingComparator:^NSComparisonResult(FBGRBoolRuntimeItem *a, FBGRBoolRuntimeItem *b) {
-        NSComparisonResult r = [a.className compare:b.className];
-        return r == NSOrderedSame ? [a.selectorName compare:b.selectorName] : r;
+        NSComparisonResult r = [a.className caseInsensitiveCompare:b.className];
+        return r == NSOrderedSame ? [a.selectorName caseInsensitiveCompare:b.selectorName] : r;
     }];
     gScanN += out.count;
     return out;
 }
 
 + (void)installHookForItem:(FBGRBoolRuntimeItem *)item {
-    if (!item.className.length || !item.selectorName.length || gHookN >= FBGR_BOOL_MAX) return;
-    Class cls = NSClassFromString(item.className);
-    if (!cls) return;
+    if (!item.className.length || !item.selectorName.length) return;
+    NSString *key = FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod);
+    @synchronized (self) {
+        if ([gHookedNames containsObject:key]) { item.hooked = YES; return; }
+    }
+    Class cls = objc_getClass(item.className.UTF8String);
     SEL sel = NSSelectorFromString(item.selectorName);
-    Class hookCls = item.classMethod ? object_getClass(cls) : cls;
-    if (FBGRFindHook(hookCls, sel, item.classMethod)) return;
-
+    if (!cls || !sel) return;
     Method m = item.classMethod ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
-    if (!m || method_getNumberOfArguments(m) != 2) return;
+    if (!FBGRReturnIsBool(m)) return;
+    Class hookClass = item.classMethod ? object_getClass(cls) : cls;
+    if (!hookClass) return;
 
-    IMP orig = NULL;
-    MSHookMessageEx(hookCls, sel, (IMP)h_bool, &orig);
-    if (!orig) return;
+    __block IMP originalIMP = NULL;
+    BOOL isClassMethod = item.classMethod;
+    NSString *className = [item.className copy];
+    NSString *selectorName = [item.selectorName copy];
+    IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
+        NSNumber *forced = FBGRBoolOverrideState(className, selectorName, isClassMethod);
+        if (forced) return forced.boolValue;
+        IMP orig = NULL;
+        @synchronized ([FBGRBoolRuntimeInventory class]) {
+            orig = [[gOriginalIMPs objectForKey:key] pointerValue];
+        }
+        return orig ? ((BOOL (*)(id, SEL))orig)(receiver, sel) : NO;
+    });
 
-    FBGRBoolHook *e = &gHooks[gHookN++];
-    memset(e, 0, sizeof(*e));
-    e->cls = hookCls;
-    e->sel = sel;
-    e->classMethod = item.classMethod;
-    e->orig = orig;
-
-    NSString *key = FBGRBoolKey(item.className, item.selectorName, item.classMethod);
-    id obj = [FBGRPrefs() objectForKey:key];
-    e->overrideSet = obj != nil;
-    e->overrideValue = [obj boolValue];
+    MSHookMessageEx(hookClass, sel, replacement, &originalIMP);
+    @synchronized (self) {
+        if (!gOriginalIMPs) gOriginalIMPs = [NSMutableDictionary dictionary];
+        if (!gHookedNames) gHookedNames = [NSMutableSet set];
+        if (originalIMP) gOriginalIMPs[key] = [NSValue valueWithPointer:originalIMP];
+        [gHookedNames addObject:key];
+    }
     item.hooked = YES;
 }
 
 + (void)setOverrideForItem:(FBGRBoolRuntimeItem *)item value:(BOOL)value {
     [self installHookForItem:item];
-    NSString *key = FBGRBoolKey(item.className, item.selectorName, item.classMethod);
-    [FBGRPrefs() setBool:value forKey:key];
+    NSMutableDictionary *d = FBGRBoolOverridesMutable();
+    d[FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod)] = @(value);
+    [FBGRPrefs() setObject:d forKey:kFBGRBoolOverridesKey];
     [FBGRPrefs() synchronize];
-
-    Class cls = NSClassFromString(item.className);
-    FBGRBoolHook *e = cls ? FBGRFindHook(item.classMethod ? object_getClass(cls) : cls, NSSelectorFromString(item.selectorName), item.classMethod) : NULL;
-    if (e) { e->overrideSet = YES; e->overrideValue = value; }
     item.overrideSet = YES;
     item.overrideValue = value;
     item.hooked = YES;
 }
 
 + (void)clearOverrideForItem:(FBGRBoolRuntimeItem *)item {
-    NSString *key = FBGRBoolKey(item.className, item.selectorName, item.classMethod);
-    [FBGRPrefs() removeObjectForKey:key];
+    NSMutableDictionary *d = FBGRBoolOverridesMutable();
+    [d removeObjectForKey:FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod)];
+    [FBGRPrefs() setObject:d forKey:kFBGRBoolOverridesKey];
     [FBGRPrefs() synchronize];
-
-    Class cls = NSClassFromString(item.className);
-    FBGRBoolHook *e = cls ? FBGRFindHook(item.classMethod ? object_getClass(cls) : cls, NSSelectorFromString(item.selectorName), item.classMethod) : NULL;
-    if (e) e->overrideSet = NO;
     item.overrideSet = NO;
 }
 
-+ (NSString *)diagnostic {
-    return [NSString stringWithFormat:@"bool runtime hooks=%lu\nscan rows=%lu", (unsigned long)gHookN, (unsigned long)gScanN];
++ (void)installPersistedOverrideHooks {
+    NSDictionary *d = [FBGRPrefs() dictionaryForKey:kFBGRBoolOverridesKey];
+    if (![d isKindOfClass:NSDictionary.class] || d.count == 0) return;
+    for (NSString *key in d) {
+        NSString *cls = nil, *sel = nil; BOOL classMethod = NO;
+        if (!FBGRSplitRuntimeBoolKey(key, &cls, &sel, &classMethod)) continue;
+        FBGRBoolRuntimeItem *item = [FBGRBoolRuntimeItem new];
+        item.className = cls;
+        item.selectorName = sel;
+        item.classMethod = classMethod;
+        [self installHookForItem:item];
+    }
 }
 
++ (void)clearAllOverrides {
+    [FBGRPrefs() removeObjectForKey:kFBGRBoolOverridesKey];
+    [FBGRPrefs() synchronize];
+}
+
++ (NSString *)diagnostic {
+    return [NSString stringWithFormat:@"bool runtime hooks=%lu\nscan rows=%lu\noverrides=%lu", (unsigned long)gHookedNames.count, (unsigned long)gScanN, (unsigned long)[FBGRPrefs() dictionaryForKey:kFBGRBoolOverridesKey].count];
+}
 @end

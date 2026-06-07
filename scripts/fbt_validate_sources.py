@@ -57,13 +57,17 @@ check('IGLiquidGlassExperimentHelper' in lg and 'MSHookMessageEx' in lg, 'Liquid
 theme = read('src/Menu/FBGRMenuTheme.m')
 check('UIBlurEffect' not in theme, 'UI must not simulate LiquidGlass with UIBlurEffect')
 check('UIGlassEffect' in theme and 'UILiquidGlassEffect' in theme, 'UI must attempt real UIKit LiquidGlass classes')
+check('UIColor.blackColor' in theme and 'UIFontWeightRegular' in theme, 'UI must use black regular compact style')
 check('numberOfLines = 0' in theme and 'UIListContentConfiguration' in theme, 'Cells must show full feature names')
+check('cfg.secondaryText' not in theme and 'cfg.image =' not in theme, 'Runtime rows must not use subtitles or icons')
 
 boolm = read('src/Runtime/FBGRBoolRuntimeInventory.m')
 check('@implementation FBGRBoolRuntimeInventory' in boolm, 'Bool runtime implementation context missing')
-check('objc_getClassList' in boolm and 'class_getImageName' in boolm and 'class_copyMethodList' in boolm and 'method_copyReturnType' in boolm, 'Bool runtime must scan real ObjC runtime')
+check('objc_copyClassNamesForImage' in boolm and 'class_copyMethodList' in boolm and 'method_getReturnType' in boolm, 'Bool runtime must scan exact Mach-O image like Ryukgram')
+check('imp_implementationWithBlock' in boolm and 'installPersistedOverrideHooks' in boolm, 'Bool runtime must use block hooks and persisted bootstrap support')
 check('/Facebook.app/Facebook' in boolm and '/FBSharedFramework.framework/FBSharedFramework' in boolm, 'Bool runtime must filter executable and FBShared images')
 check('MSHookMessageEx' in boolm, 'Bool runtime must patch with MSHookMessageEx')
+check((root / 'src/Hooks/FBGRRuntimeBootstrap.xm').exists(), 'Runtime bootstrap missing')
 
 for vc in ['src/Menu/FBGRGateCategoryVC.m','src/Menu/FBGRGateRuntimeBrowserVC.m','src/Menu/FBGRBoolRuntimeBrowserVC.m']:
     t = read(vc)
@@ -90,4 +94,4 @@ if errors:
     for e in errors: print(' - ' + e, file=sys.stderr)
     sys.exit(1)
 
-print('OK: FBTweaks v3 real hooks, toggles and full-name UI validation passed')
+print('OK: FBTweaks v4 Ryuk-style hooks and black compact UI validation passed')
