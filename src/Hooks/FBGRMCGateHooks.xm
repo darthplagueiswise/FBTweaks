@@ -16,6 +16,7 @@ typedef BOOL (*ParamOptionsIMP)(id, SEL, mc_bool_param_t, id);
 typedef BOOL (*ParamOptionsDefaultIMP)(id, SEL, mc_bool_param_t, id, BOOL);
 
 typedef NS_ENUM(uint8_t, FBGRMCSigKind) {
+    FBGRMCSigNone = 0,
     FBGRMCSigKey1 = 1,
     FBGRMCSigKeyDefault = 2,
     FBGRMCSigParam1 = 3,
@@ -158,7 +159,7 @@ static FBGRMCSigKind FBGRKindForMethod(NSString *selName, Method m) {
         if (argc == 5 && !objFirst) return FBGRMCSigParamOptionsDefault;
     }
 
-    return 0;
+    return FBGRMCSigNone;
 }
 
 static IMP FBGRReplacementForKind(FBGRMCSigKind kind) {
