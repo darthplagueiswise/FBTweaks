@@ -8,9 +8,9 @@
 #import "../Runtime/FBGRGateStore.h"
 #import "../Runtime/FBGRLog.h"
 #import "../Runtime/FBGRBoolRuntimeInventory.h"
+extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void);
 
 extern void FBGRMCGateHooksEnsureInstalled(void);
-extern void FBGRMCGateHooksApplyPersistedOverrides(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 extern void FBGRLiquidGlassSetForced(BOOL forced);
 extern NSString *FBGRLiquidGlassDiagnostic(void);
