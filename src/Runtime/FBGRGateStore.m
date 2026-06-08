@@ -51,19 +51,13 @@ void FBGRGateWarmCacheFromPrefs(void) {
 }
 
 BOOL FBGRGateIsSet(uint64_t slotId) {
-    @synchronized(FBGRPrefs()) {
-        FBGREnsureWarmLocked();
-        NSInteger i = FBGRFind(slotId);
-        return i >= 0 && gEntries[i].isSet;
-    }
+    NSInteger i = FBGRFind(slotId);
+    return i >= 0 && gEntries[i].isSet;
 }
 
 BOOL FBGRGateGet(uint64_t slotId) {
-    @synchronized(FBGRPrefs()) {
-        FBGREnsureWarmLocked();
-        NSInteger i = FBGRFind(slotId);
-        return i >= 0 ? gEntries[i].value : NO;
-    }
+    NSInteger i = FBGRFind(slotId);
+    return i >= 0 ? gEntries[i].value : NO;
 }
 
 void FBGRGateSet(uint64_t slotId, BOOL value) {
