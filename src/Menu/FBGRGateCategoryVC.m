@@ -2,9 +2,7 @@
 #import "FBGRMenuTheme.h"
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../Runtime/FBGRGateStore.h"
-
-extern void FBGRMCGateHooksEnsureInstalled(void);
-extern void FBGRMCGateCacheRefresh(void);
+#import "../Hooks/FBGRHookExports.h"
 
 @interface FBGRGateCategoryVC ()
 @property(nonatomic, assign) FBGRFeatureCategory category;

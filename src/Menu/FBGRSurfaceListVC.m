@@ -8,13 +8,10 @@
 #import "../Runtime/FBGRGateStore.h"
 #import "../Runtime/FBGRLog.h"
 #import "../Runtime/FBGRBoolRuntimeInventory.h"
-extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void);
+#import "../Hooks/FBGRHookExports.h"
 
-extern void FBGRMCGateHooksEnsureInstalled(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
-extern void FBGRLiquidGlassSetForced(BOOL forced);
 extern NSString *FBGRLiquidGlassDiagnostic(void);
-extern void FBGRDogFoodSetEnabled(BOOL enabled);
 extern NSString *FBGRDogFoodDiagnostic(void);
 
 static NSArray<NSNumber *> *FBGRCategories(void) {

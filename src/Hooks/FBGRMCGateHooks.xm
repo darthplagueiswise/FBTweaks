@@ -39,6 +39,8 @@ static FBGRMCRecord gRecords[FBGR_MC_MAX_RECORDS];
 static NSUInteger gRecordCount = 0;
 static BOOL gInstalled = NO;
 static BOOL gInstalling = NO;
+static BOOL gRetryWindowScheduled = NO;
+static NSUInteger gInstallPasses = 0;
 static NSUInteger gScannedMethods = 0;
 static NSUInteger gRejectedMethods = 0;
 static __thread BOOL gGuard = NO;
@@ -244,8 +246,9 @@ static void FBGRInstallFunctionHookIfPresent(const char *symbol) {
 }
 
 static void FBGRInstall(void) {
-    if (gInstalled || gInstalling) return;
+    if (gInstalling) return;
     gInstalling = YES;
+gInstallPasses++;
     FBGRGateWarmCacheFromPrefs();
     [[FBGRMCCatalog shared] loadIfNeeded];
 
@@ -269,21 +272,39 @@ static void FBGRInstall(void) {
 
     gInstalled = (gRecordCount > 0 || gFunctionHookCount > 0);
     gInstalling = NO;
-    FBGRLogAppend([NSString stringWithFormat:@"MC exact hooks install pass: installed=%@ records=%lu function=%lu scanned=%lu rejected=%lu", gInstalled ? @"YES" : @"NO", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods]);
+    FBGRLogAppend([NSString stringWithFormat:@"MC exact hooks install pass %lu: installed=%@ records=%lu function=%lu scanned=%lu rejected=%lu overrides=%lu", (unsigned long)gInstallPasses, gInstalled ? @"YES" : @"NO", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods, (unsigned long)FBGRGateAllOverrideSlotIds().count]);
 }
 
-static void FBGRScheduleRetry(NSTimeInterval delay) {
+static void FBGRScheduleRetry(NSTimeInterval delay, BOOL lastPass) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!gInstalled) FBGRInstall();
+        FBGRInstall();
+        if (lastPass) gRetryWindowScheduled = NO;
     });
+}
+
+static void FBGRScheduleRetryWindow(void) {
+    if (gRetryWindowScheduled) return;
+
+    gRetryWindowScheduled = YES;
+    FBGRScheduleRetry(0.75, NO);
+    FBGRScheduleRetry(2.0, NO);
+    FBGRScheduleRetry(5.0, YES);
 }
 
 extern "C" void FBGRMCGateHooksEnsureInstalled(void) {
     FBGRInstall();
-    if (!gInstalled) { FBGRScheduleRetry(1.0); FBGRScheduleRetry(2.0); FBGRScheduleRetry(5.0); }
+    FBGRScheduleRetryWindow();
 }
-extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) { FBGRGateWarmCacheFromPrefs(); FBGRMCGateHooksEnsureInstalled(); }
-extern "C" void FBGRMCGateCacheRefresh(void) { FBGRGateWarmCacheFromPrefs(); }
+
+extern "C" void FBGRMCGateHooksApplyPersistedOverrides(void) {
+    FBGRGateWarmCacheFromPrefs();
+    FBGRMCGateHooksEnsureInstalled();
+}
+
+extern "C" void FBGRMCGateCacheRefresh(void) {
+    FBGRGateWarmCacheFromPrefs();
+}
+
 extern "C" NSString *FBGRMCGateHooksDiagnostic(void) {
-    return [NSString stringWithFormat:@"installed=%@\nrecords=%lu\nfunction hooks=%lu\nscanned methods=%lu\nrejected methods=%lu\noverrides=%lu\nstrategy=exact *_bool_param_t type-encoding hooks, not selector-name hooks", gInstalled ? @"YES" : @"NO", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods, (unsigned long)FBGRGateAllOverrideSlotIds().count];
+    return [NSString stringWithFormat:@"installed=%@\ninstall passes=%lu\nretry window=%@\nrecords=%lu\nfunction hooks=%lu\nscanned methods=%lu\nrejected methods=%lu\noverrides=%lu\nstrategy=exact *_bool_param_t type-encoding hooks, repeatable late-class scan", gInstalled ? @"YES" : @"NO", (unsigned long)gInstallPasses, gRetryWindowScheduled ? @"active" : @"idle", (unsigned long)gRecordCount, (unsigned long)gFunctionHookCount, (unsigned long)gScannedMethods, (unsigned long)gRejectedMethods, (unsigned long)FBGRGateAllOverrideSlotIds().count];
 }

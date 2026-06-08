@@ -179,15 +179,22 @@ static void FBGRAppendMethods(Class cls, BOOL classMethod, NSString *img, NSMuta
 }
 
 + (void)setOverrideForItem:(FBGRBoolRuntimeItem *)item value:(BOOL)value {
+    NSString *key = FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod);
+
     [self installHookForItem:item];
+
     NSMutableDictionary *d = FBGRBoolOverridesMutable();
-    d[FBGRRuntimeBoolKey(item.className, item.selectorName, item.classMethod)] = @(value);
+    d[key] = @(value);
     [FBGRPrefs() setObject:d forKey:kFBGRBoolOverridesKey];
     [FBGRPrefs() removeObjectForKey:kFBGRBoolLegacyOverridesKey];
     [FBGRPrefs() synchronize];
+
     item.overrideSet = YES;
     item.overrideValue = value;
-    item.hooked = YES;
+
+    @synchronized (self) {
+        item.hooked = [gHookedNames containsObject:key];
+    }
 }
 
 + (void)clearOverrideForItem:(FBGRBoolRuntimeItem *)item {

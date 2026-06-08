@@ -2,8 +2,8 @@
 #import "FBGRMenuTheme.h"
 #import "../Runtime/FBGRMCCatalog.h"
 #import "../Runtime/FBGRGateStore.h"
+#import "../Hooks/FBGRHookExports.h"
 
-extern void FBGRMCGateHooksEnsureInstalled(void);
 extern NSString *FBGRMCGateHooksDiagnostic(void);
 
 @interface FBGRGateRuntimeBrowserVC () <UISearchResultsUpdating>
