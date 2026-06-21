@@ -1,0 +1,9 @@
+Package: com.darthplagueiswise.fbtweak
+Name: FBTweak
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Sideload/rootless tweak para o Facebook iOS (v566+). UIKit + runtime browsers para MobileConfig vivo, ObjC BOOL hooks, modo employee/internal, Liquid Glass, floating tab bar e dating.
+Maintainer: darthplagueiswise
+Author: darthplagueiswise
+Section: Tweaks
+Depends: mobilesubstrate

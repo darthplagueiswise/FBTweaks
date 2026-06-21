@@ -1,0 +1,12 @@
+{
+  "$generated": "@generated SignedSource<<6d655628321930991dcf06760eb2b24e>>",
+  "ConsentPromptContainerQuery": {
+    "id": "32188317884115418",
+    "variables": [
+      "flow_name",
+      "source",
+      "extra_params_json"
+    ],
+    "requiredVariables": []
+  }
+}

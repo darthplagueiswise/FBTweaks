@@ -1,0 +1,21 @@
+{
+  "$generated": "@generated SignedSource<<e6bca64f240ae6736ec1e6317915e46c>>",
+  "PromotionsHubViewQuery": {
+    "id": "29336333792677282",
+    "variables": [
+      "id"
+    ],
+    "requiredVariables": [
+      "id"
+    ]
+  },
+  "PromotionsHubVitalsQuery": {
+    "id": "9692128877551285",
+    "variables": [
+      "id"
+    ],
+    "requiredVariables": [
+      "id"
+    ]
+  }
+}

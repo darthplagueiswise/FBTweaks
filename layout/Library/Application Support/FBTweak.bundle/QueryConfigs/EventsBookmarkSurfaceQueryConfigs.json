@@ -1,0 +1,23 @@
+{
+  "$generated": "@generated SignedSource<<e9e297e87bc14b7408785fc06e3bec13>>",
+  "EventsBookmarkSurfaceQuery": {
+    "id": "27054778477521089",
+    "variables": [
+      "context",
+      "lat_long",
+      "location_id",
+      "type",
+      "is_ptr",
+      "feed_query_params",
+      "ref_notif_type",
+      "start_timestamp",
+      "end_timestamp",
+      "scale",
+      "events_render_location",
+      "gps_point",
+      "radius",
+      "suggested_radius_enabled"
+    ],
+    "requiredVariables": []
+  }
+}
