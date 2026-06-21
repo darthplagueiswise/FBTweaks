@@ -1,5 +1,6 @@
 #import "FBTMobileConfigRuntime.h"
 #import "FBTFlagCatalog.h"
+#import "FBTNativeMobileConfigOverrides.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
@@ -117,13 +118,15 @@ NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key) {
 
 void FBTMobileConfigSetOverride(uint64_t key, NSString *type, id value) {
     if (!type.length || !value) return;
+    BOOL nativeApplied = FBTNativeMobileConfigApplyOverride(key, type, value);
     NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyMobileConfigOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
-    all[FBTMCKeyString(key)] = @{ @"t": type, @"v": value };
+    all[FBTMCKeyString(key)] = @{ @"t": type, @"v": value, @"native": @(nativeApplied) };
     [FBTDefaults setDict:all forKey:FBTKeyMobileConfigOverrides];
     FBTMobileConfigReloadPrefs();
 }
 
 void FBTMobileConfigClearOverride(uint64_t key) {
+    FBTNativeMobileConfigRemoveOverride(key);
     NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyMobileConfigOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
     [all removeObjectForKey:FBTMCKeyString(key)];
     [FBTDefaults setDict:all forKey:FBTKeyMobileConfigOverrides];
@@ -131,6 +134,10 @@ void FBTMobileConfigClearOverride(uint64_t key) {
 }
 
 void FBTMobileConfigClearAllOverrides(void) {
+    NSDictionary *all = [FBTDefaults dictForKey:FBTKeyMobileConfigOverrides];
+    for (NSString *ks in all) {
+        FBTNativeMobileConfigRemoveOverride((uint64_t)[ks unsignedLongLongValue]);
+    }
     [FBTDefaults setDict:@{} forKey:FBTKeyMobileConfigOverrides];
     FBTMobileConfigReloadPrefs();
 }
@@ -151,6 +158,7 @@ NSArray<NSDictionary *> *FBTMobileConfigSnapshot(void) {
         } else {
             m[@"forced"] = @NO;
         }
+        m[@"nativeStatus"] = FBTNativeMobileConfigStatus() ?: @"";
         [out addObject:m];
     }
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
@@ -224,8 +232,9 @@ void FBTInstallMobileConfigRuntime(void) {
     if (sInstalled) return;
     sInstalled = YES;
     FBTMobileConfigReloadPrefs();
+    FBTInstallNativeMobileConfigContextCapture();
 
-    // v3.1: fishhook-only. The v3 crash was CODESIGNING / Invalid Page
+    // v3.2: fishhook for imports/GOT plus native override table for contexts captured via ObjC dispatch. The v3 crash was CODESIGNING / Invalid Page
     // inside FBSharedFramework at MSGCSessionedMobileConfigGetString+796,
     // caused by direct MSHookFunction on signed __TEXT. fishhook only rewrites
     // import pointers/GOT and does not dirty executable pages. It captures
@@ -238,5 +247,5 @@ void FBTInstallMobileConfigRuntime(void) {
         { "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString },
     };
     rebind_symbols(rbs, 4);
-    FBTLog(@"MobileConfig fishhook-only instalado");
+    FBTLog(@"MobileConfig runtime instalado: fishhook imports + native override context capture");
 }

@@ -4,6 +4,7 @@
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "../Runtime/FBTFlagCatalog.h"
+#import "../Runtime/FBTNativeMobileConfigOverrides.h"
 
 extern void FBTInstallLiquidGlassHooks(void);
 
@@ -111,9 +112,9 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook-only nos readers MSGCSessioned*; não suja __TEXT assinado.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura de contexto ObjC para OverridesTable nativo; sem patch em __TEXT assinado.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Força por chave capturada no accessor hookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
+            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/framework e salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled, @"restart": @YES },
         ],
         @[
@@ -142,7 +143,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"MobileConfig runtime precisa estar ativo no launch para fishhookar os readers. Captura e overrides ligam/desligam ao vivo depois que o hook já está instalado.";
+    if (section == 2) return @"MobileConfig runtime instala fishhook nos imports e hooks ObjC leves para capturar FBMobileConfigContext. Override nativo aplica quando a tela já gerou contexto vivo.";
     if (section == 3) return @"O browser ObjC não varre classes no launch. Hook novo criado na UI fica salvo e também reinstala no próximo launch.";
     return nil;
 }
@@ -184,7 +185,10 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
-        if (sender.isOn) FBTInstallMobileConfigRuntime();
+        if (sender.isOn) {
+            FBTInstallMobileConfigRuntime();
+            FBTInstallNativeMobileConfigContextCapture();
+        }
         FBTMobileConfigReloadPrefs();
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigCaptureEnabled] ||
@@ -253,6 +257,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
 - (void)reloadSnapshot {
+    self.navigationItem.prompt = FBTNativeMobileConfigStatus();
     self.entries = FBTMobileConfigSnapshot();
     [self applyFilter];
 }
@@ -279,7 +284,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
         cfg.text = @"Nenhuma leitura capturada ainda";
-        cfg.secondaryText = @"Deixa MobileConfig runtime + captura ligados, reabre o Facebook se necessário, e navega nas telas que tu quer investigar.";
+        cfg.secondaryText = [NSString stringWithFormat:@"Deixa MobileConfig runtime + captura ligados, reabre o Facebook se necessário, e navega nas telas que tu quer investigar. %@", FBTNativeMobileConfigStatus() ?: @""];
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
         cell.accessoryType = UITableViewCellAccessoryNone;
@@ -291,7 +296,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     NSString *forced = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@"  FORCE %@=%@", e[@"forcedType"] ?: @"", e[@"forcedValue"] ?: @""] : @"";
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = name;
-    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@ · count %@ · result %@%@", config, e[@"type"] ?: @"?", e[@"count"] ?: @0, e[@"result"] ?: @"", forced];
+    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@ · count %@ · result %@%@\n%@", config, e[@"type"] ?: @"?", e[@"count"] ?: @0, e[@"result"] ?: @"", forced, e[@"nativeStatus"] ?: FBTNativeMobileConfigStatus() ?: @""];
     cfg.secondaryTextProperties.numberOfLines = 3;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
@@ -305,7 +310,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     NSDictionary *entry = self.filtered[indexPath.row];
     uint64_t key = (uint64_t)[entry[@"key"] unsignedLongLongValue];
     NSString *type = entry[@"type"] ?: @"bool";
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:entry[@"param"] ?: entry[@"hex"] message:[NSString stringWithFormat:@"%@\nkey %@", entry[@"config"] ?: @"", entry[@"hex"] ?: @""] preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:entry[@"param"] ?: entry[@"hex"] message:[NSString stringWithFormat:@"%@\nkey %@\n%@", entry[@"config"] ?: @"", entry[@"hex"] ?: @"", FBTNativeMobileConfigStatus() ?: @""] preferredStyle:UIAlertControllerStyleActionSheet];
     if ([type isEqualToString:@"bool"]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Force TRUE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTMobileConfigSetOverride(key, @"bool", @YES); [self reloadSnapshot]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force FALSE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTMobileConfigSetOverride(key, @"bool", @NO); [self reloadSnapshot]; }]];
@@ -495,7 +500,8 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     NSArray *vars = [item[@"variables"] isKindOfClass:[NSArray class]] ? item[@"variables"] : @[];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = item[@"name"] ?: @"";
-    cfg.secondaryText = [NSString stringWithFormat:@"id %@ · %@\nvars: %@", item[@"id"] ?: @"—", item[@"file"] ?: @"", [vars componentsJoinedByString:@", "]];
+    NSString *varsText = vars.count ? [vars componentsJoinedByString:@", "] : (item[@"value"] ?: @"—");
+    cfg.secondaryText = [NSString stringWithFormat:@"id %@ · %@\nvars/value: %@", item[@"id"] ?: @"—", item[@"file"] ?: @"", varsText];
     cfg.secondaryTextProperties.numberOfLines = 4;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;

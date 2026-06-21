@@ -2,6 +2,14 @@
 
 Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.3. Abertura por long-press na tab bar.
 
+## v3.2 — runtime correto
+
+- MobileConfig: fishhook nos imports + OverridesTable nativo via contextos ObjC capturados.
+- Sem `MSHookFunction` em símbolos C do `FBSharedFramework` assinado.
+- Runtime BOOL Browser agora busca por `main-exec`, `FBSharedFramework`, `framework` e path real do image.
+- QueryConfigs atualizados no bundle.
+
+
 ## O que esta versão entrega
 
 - **UI UIKit pura**, sem Swift, sem bridging header, sem modulemap. O painel usa `UITableViewStyleInsetGrouped`, `UISearchController`, `UINavigationController` e `UINavigationBarAppearance configureWithDefaultBackground`, deixando o iOS aplicar o Liquid Glass/default background nativo.
@@ -48,3 +56,7 @@ export THEOS=~/theos
 ```
 
 O CI usa `iPhoneOS26.2.sdk`, rootless, arm64, `FINALPACKAGE=1`.
+
+## v3.3 buildfix
+
+Correção de build: remove restos `orig_*` não usados de Dating/LiquidGlass que quebravam CI com `-Werror,-Wunused-variable`. Não reintroduz hook C direto em `__TEXT` assinado.

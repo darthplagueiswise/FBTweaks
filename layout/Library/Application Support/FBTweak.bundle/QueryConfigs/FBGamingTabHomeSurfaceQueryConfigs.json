@@ -1,0 +1,13 @@
+{
+  "$generated": "@generated SignedSource<<2a9295965007dc5d68b2a20b34cacfb2>>",
+  "FBGamingTabHomeSurfaceQuery": {
+    "id": "36515197824760375",
+    "variables": [
+      "GamingTabHomeSurface_ACTION_HUB_INITIAL_PAGE_SIZE",
+      "GamingTabHomeSurface_FRIENDS_SECTION_INITIAL_PAGE_SIZE",
+      "GamingTabHomeSurface_INITIAL_SECTION_PAGE_SIZE",
+      "scale"
+    ],
+    "requiredVariables": []
+  }
+}

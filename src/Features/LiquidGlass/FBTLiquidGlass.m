@@ -13,24 +13,14 @@
 
 static BOOL sFBTForceLiquidGlass = NO;
 static BOOL (*orig_METAIsLiquidGlassEnabled)(void) = NULL;
-static BOOL (*orig_IGLiquidGlassNavigationExperiment_isEnabled)(void) = NULL;
-static BOOL (*orig_IGThrowbackChromeExperiment_isEnabled)(void) = NULL;
 
 static BOOL fbt_METAIsLiquidGlassEnabled(void) {
     if (sFBTForceLiquidGlass) return YES;
     return orig_METAIsLiquidGlassEnabled ? orig_METAIsLiquidGlassEnabled() : NO;
 }
 
-static BOOL fbt_AlwaysYES(void) { return YES; }
-
-static BOOL FBTHookDirectBoolIfExists(const char *name, void *replacement, void **orig) {
-    // v3.1: disabled for sideload safety. Direct C function patching in
-    // FBSharedFramework __TEXT caused CODESIGNING / Invalid Page. LiquidGlass
-    // now uses fishhook for imported C symbols plus Runtime BOOL Browser for
-    // ObjC/Swift-dispatch getters.
-    (void)name; (void)replacement; (void)orig;
-    return NO;
-}
+// Direct C helper patching intentionally absent. LiquidGlass uses fishhook for
+// imported C symbols plus Runtime BOOL Browser for ObjC/Swift-dispatch getters.
 
 static void FBTInstallLiquidGlassRuntimeBoolHooks(void) {
     NSArray<NSString *> *queries = @[

@@ -88,8 +88,15 @@
             for (NSString *name in [(NSDictionary *)root allKeys]) {
                 if ([name hasPrefix:@"$"]) continue;
                 id q = root[name];
-                if (![q isKindOfClass:[NSDictionary class]]) continue;
-                NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:q];
+                NSMutableDictionary *entry = nil;
+                if ([q isKindOfClass:[NSDictionary class]]) {
+                    entry = [NSMutableDictionary dictionaryWithDictionary:q];
+                } else {
+                    entry = [NSMutableDictionary dictionary];
+                    entry[@"id"] = @"computed";
+                    entry[@"value"] = [q description] ?: @"";
+                    entry[@"variables"] = @[];
+                }
                 entry[@"name"] = name;
                 entry[@"file"] = url.lastPathComponent ?: @"";
                 [out addObject:entry];

@@ -4,6 +4,7 @@
 #import "FBTUtils.h"
 #import "Runtime/FBTMobileConfigRuntime.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
+#import "Runtime/FBTNativeMobileConfigOverrides.h"
 
 // =====================================================================
 // FBTweak — entrypoint
@@ -92,6 +93,7 @@ extern void FBTInitDatingGroup(void);
         }
 
         if ([FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled]) {
+            FBTInstallNativeMobileConfigContextCapture();
             FBTInstallMobileConfigRuntime();
         }
 

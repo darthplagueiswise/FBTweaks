@@ -172,13 +172,16 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         method_getReturnType(m, ret, sizeof(ret));
         if (!(ret[0] == 'B' || ret[0] == 'c')) continue;
         NSString *sel = NSStringFromSelector(method_getName(m));
-        if (!FBTSelectorLooksUseful(sel) && !FBTClassLooksUseful(className)) continue;
-        NSString *hay = [[NSString stringWithFormat:@"%@ %@", className, sel] lowercaseString];
-        if (q.length && [hay rangeOfString:q].location == NSNotFound) continue;
-        NSString *key = FBTBoolKey(className, sel, classMethods);
-        NSDictionary *ov = FBTBoolOverrideForKey(key);
         NSString *imagePath = FBTImagePathForMethod(m);
         NSString *imageKind = FBTImageKindForPath(imagePath);
+        NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", className, sel, imageKind ?: @"", imagePath ?: @""] lowercaseString];
+        if (q.length) {
+            if ([hay rangeOfString:q].location == NSNotFound) continue;
+        } else {
+            if (!FBTSelectorLooksUseful(sel) && !FBTClassLooksUseful(className)) continue;
+        }
+        NSString *key = FBTBoolKey(className, sel, classMethods);
+        NSDictionary *ov = FBTBoolOverrideForKey(key);
         [out addObject:@{
             @"class": className ?: @"",
             @"selector": sel ?: @"",

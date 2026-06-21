@@ -28,26 +28,13 @@
 // nada é instalado.
 // =====================================================================
 
-static BOOL (*orig_GemstoneMsysEnabled)(void) = NULL;
-static BOOL (*orig_GemstoneMsysThreadViewEnabled)(void) = NULL;
-static BOOL (*orig_GemstoneMsysThreadListEnabled)(void) = NULL;
-static BOOL (*orig_GemstoneMsysInactivatedThreadListEnabled)(void) = NULL;
-
-static BOOL fbt_GemstoneMsysEnabled(void) { return YES; }
-static BOOL fbt_GemstoneMsysThreadViewEnabled(void) { return YES; }
-static BOOL fbt_GemstoneMsysThreadListEnabled(void) { return YES; }
-static BOOL fbt_GemstoneMsysInactivatedThreadListEnabled(void) { return YES; }
-
-static void fbt_hookGemstone(const char *name, void *repl, void **orig) {
-    // v3.1: no direct C hook. On this sideload/iOS build, MSHookFunction on
-    // FBSharedFramework __TEXT can invalidate code-signing pages at launch.
-    // Dating now relies on Employee/Internal mode and Runtime BOOL Browser
-    // for ObjC-dispatch gates.
-    (void)name; (void)repl; (void)orig;
-}
+// Direct C hooks intentionally absent. The valid paths for Dating are:
+// 1) Employee/Internal gating hooks;
+// 2) Runtime BOOL Browser for ObjC/Swift-dispatch gates;
+// 3) MobileConfig native override/fishhook path for captured params.
+// Keeping dummy orig/replacement symbols here breaks CI with -Werror.
 
 // Chamado pelo Tweak.x apenas se a pref estiver on no launch.
 void FBTInitDatingGroup(void) {
-    fbt_hookGemstone("GemstoneMsysEnabled", (void *)fbt_GemstoneMsysEnabled, (void **)&orig_GemstoneMsysEnabled);
     FBTLog(@"dating: direct C hooks disabled; use Employee/Internal + Runtime BOOL Browser");
 }
