@@ -6,6 +6,7 @@
 #include "../../modules/fishhook/fishhook.h"
 #import <pthread.h>
 #import <dlfcn.h>
+#include <stdlib.h>
 
 NSString * const FBTMobileConfigDidUpdateNotification = @"FBTMobileConfigDidUpdateNotification";
 
@@ -34,6 +35,15 @@ static NSString *FBTMCKeyString(uint64_t key) {
 
 static NSString *FBTMCHexKey(uint64_t key) {
     return [NSString stringWithFormat:@"0x%016llx", (unsigned long long)key];
+}
+
+static uint64_t FBTMCParseUInt64String(NSString *string) {
+    if (![string isKindOfClass:[NSString class]] || !string.length) return 0;
+    const char *cstr = [string UTF8String];
+    if (!cstr) return 0;
+    char *end = NULL;
+    unsigned long long value = strtoull(cstr, &end, 0);
+    return (uint64_t)value;
 }
 
 static NSString *FBTMCObjectDescription(id obj) {
@@ -136,7 +146,7 @@ void FBTMobileConfigClearOverride(uint64_t key) {
 void FBTMobileConfigClearAllOverrides(void) {
     NSDictionary *all = [FBTDefaults dictForKey:FBTKeyMobileConfigOverrides];
     for (NSString *ks in all) {
-        FBTNativeMobileConfigRemoveOverride((uint64_t)[ks unsignedLongLongValue]);
+        FBTNativeMobileConfigRemoveOverride(FBTMCParseUInt64String(ks));
     }
     [FBTDefaults setDict:@{} forKey:FBTKeyMobileConfigOverrides];
     FBTMobileConfigReloadPrefs();

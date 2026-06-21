@@ -214,7 +214,7 @@ static void FBTHookContextMethodsForClass(Class cls, BOOL classMethods) {
         FBTContextHookDescriptor *desc = (FBTContextHookDescriptor *)calloc(1, sizeof(FBTContextHookDescriptor));
         if (!desc) continue;
         desc->sel = sel;
-        desc->key = CFBridgingRetain(key);
+        desc->key = (CFStringRef)CFBridgingRetain(key);
 
         __block FBTContextHookDescriptor *captured = desc;
         IMP replacement = imp_implementationWithBlock(^id(id receiver) {

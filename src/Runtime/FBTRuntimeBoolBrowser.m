@@ -103,7 +103,7 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     FBTBoolHookDescriptor *desc = calloc(1, sizeof(FBTBoolHookDescriptor));
     if (!desc) return NO;
     desc->sel = sel;
-    desc->key = CFBridgingRetain(key);
+    desc->key = (CFStringRef)CFBridgingRetain(key);
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {

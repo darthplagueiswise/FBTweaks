@@ -5,11 +5,28 @@
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
+#include <stdlib.h>
 
 extern void FBTInstallLiquidGlassHooks(void);
 
 static NSString * const FBTCellID = @"FBTCell";
 static NSString * const FBTSwitchCellID = @"FBTSwitchCell";
+
+static uint64_t FBTParseUInt64String(NSString *string) {
+    if (![string isKindOfClass:[NSString class]] || !string.length) return 0;
+    const char *cstr = [string UTF8String];
+    if (!cstr) return 0;
+    char *end = NULL;
+    return (uint64_t)strtoull(cstr, &end, 0);
+}
+
+static long long FBTParseLongLongString(NSString *string) {
+    if (![string isKindOfClass:[NSString class]] || !string.length) return 0;
+    const char *cstr = [string UTF8String];
+    if (!cstr) return 0;
+    char *end = NULL;
+    return strtoll(cstr, &end, 0);
+}
 
 static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
     if (!vc.navigationController) return;
@@ -308,7 +325,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (!self.filtered.count) return;
     NSDictionary *entry = self.filtered[indexPath.row];
-    uint64_t key = (uint64_t)[entry[@"key"] unsignedLongLongValue];
+    uint64_t key = FBTParseUInt64String(entry[@"key"]);
     NSString *type = entry[@"type"] ?: @"bool";
     UIAlertController *a = [UIAlertController alertControllerWithTitle:entry[@"param"] ?: entry[@"hex"] message:[NSString stringWithFormat:@"%@\nkey %@\n%@", entry[@"config"] ?: @"", entry[@"hex"] ?: @"", FBTNativeMobileConfigStatus() ?: @""] preferredStyle:UIAlertControllerStyleActionSheet];
     if ([type isEqualToString:@"bool"]) {
@@ -332,7 +349,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     [a addAction:[UIAlertAction actionWithTitle:@"Aplicar" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
         NSString *s = a.textFields.firstObject.text ?: @"";
         id value = s;
-        if ([type isEqualToString:@"int64"]) value = @((long long)[s longLongValue]);
+        if ([type isEqualToString:@"int64"]) value = @(FBTParseLongLongString(s));
         else if ([type isEqualToString:@"double"]) value = @([s doubleValue]);
         FBTMobileConfigSetOverride(key, type, value);
         [self reloadSnapshot];
