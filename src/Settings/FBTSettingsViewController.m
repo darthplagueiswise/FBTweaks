@@ -106,12 +106,12 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook/dlsym + Runtime BOOL em getters LiquidGlass.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook import + Runtime BOOL; sem patch direto em __TEXT assinado.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"dlsym+MSHookFunction nos readers MSGCSessioned*; fishhook fallback.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook-only nos readers MSGCSessioned*; não suja __TEXT assinado.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Força por chave capturada no accessor hookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/framework e salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled, @"restart": @YES },

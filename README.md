@@ -9,7 +9,7 @@ Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.
   - Employee/Internal por Logos em getters ObjC conhecidos + `MSHookMessageEx` para classe Swift conhecida.
   - Floating Tab Bar por Logos em getters conhecidos.
   - Liquid Glass por fishhook em `METAIsLiquidGlassEnabled`.
-  - Dating/Gemstone por `MSHookFunction` apenas nos gates exportados resolvidos por `dlsym`, instalado só se a pref estiver ON no launch.
+  - Dating/Gemstone: sem direct C hook em __TEXT assinado; use Employee/Internal + Runtime BOOL Browser para gates ObjC hookáveis.
   - Internal Settings nativo por ação manual: `FBInternalSettingsViewControllerFromSession(session)`.
 - **MobileConfig Live**:
   - fishhook nos readers importados `MSGCSessionedMobileConfigGetBoolean`, `GetInt64`, `GetDouble`, `GetString`;

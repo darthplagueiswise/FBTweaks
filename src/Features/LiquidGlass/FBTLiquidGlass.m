@@ -24,11 +24,12 @@ static BOOL fbt_METAIsLiquidGlassEnabled(void) {
 static BOOL fbt_AlwaysYES(void) { return YES; }
 
 static BOOL FBTHookDirectBoolIfExists(const char *name, void *replacement, void **orig) {
-    void *sym = dlsym(RTLD_DEFAULT, name);
-    if (!sym) return NO;
-    MSHookFunction(sym, replacement, orig);
-    FBTLog(@"LiquidGlass direct hook instalado: %s", name);
-    return YES;
+    // v3.1: disabled for sideload safety. Direct C function patching in
+    // FBSharedFramework __TEXT caused CODESIGNING / Invalid Page. LiquidGlass
+    // now uses fishhook for imported C symbols plus Runtime BOOL Browser for
+    // ObjC/Swift-dispatch getters.
+    (void)name; (void)replacement; (void)orig;
+    return NO;
 }
 
 static void FBTInstallLiquidGlassRuntimeBoolHooks(void) {
@@ -56,8 +57,8 @@ static void FBTInstallLiquidGlassRuntimeBoolHooks(void) {
 
 // Chamado pelo Tweak.x quando a pref estiver on. v3 tenta três caminhos:
 // 1) C importado por fishhook, se existir nesse build;
-// 2) Swift/C exports diretos conhecidos via MSHookFunction;
-// 3) runtime BOOL ObjC/Swift-dispatch em classes LiquidGlass carregadas.
+// 2) runtime BOOL ObjC/Swift-dispatch em classes LiquidGlass carregadas.
+// Direct C/Swift symbol patching is disabled on sideload because it dirties signed __TEXT.
 void FBTInstallLiquidGlassHooks(void) {
     sFBTForceLiquidGlass = YES;
 
@@ -67,19 +68,6 @@ void FBTInstallLiquidGlassHooks(void) {
         (void **)&orig_METAIsLiquidGlassEnabled
     };
     rebind_symbols(&r, 1);
-
-    FBTHookDirectBoolIfExists("METAIsLiquidGlassEnabled",
-                              (void *)fbt_METAIsLiquidGlassEnabled,
-                              (void **)&orig_METAIsLiquidGlassEnabled);
-
-    // Símbolos vistos no FBSharedFramework/IGLiquidGlass. São retornos BOOL;
-    // a replacement ignora self/args e só devolve YES em w0.
-    FBTHookDirectBoolIfExists("$s29IGLiquidGlassExperimentHelper0ab10NavigationcD0C9isEnabledSbyF",
-                              (void *)fbt_AlwaysYES,
-                              (void **)&orig_IGLiquidGlassNavigationExperiment_isEnabled);
-    FBTHookDirectBoolIfExists("$s29IGLiquidGlassExperimentHelper017IGThrowbackChromecD0C9isEnabledSbyF",
-                              (void *)fbt_AlwaysYES,
-                              (void **)&orig_IGThrowbackChromeExperiment_isEnabled);
 
     FBTInstallLiquidGlassRuntimeBoolHooks();
     FBTLog(@"LiquidGlass hooks instalados");

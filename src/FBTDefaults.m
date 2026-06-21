@@ -30,9 +30,8 @@ static NSDictionary *gRegistered = nil;
         FBTKeyDatingEnabled:                    @(NO),
         FBTKeyOpenLongPress:                    @(YES),
 
-        // Runtime browsers ficam ON por padrão para permitir captura/hook real
-        // sem depender de recompilar. O custo no launch é só ler dicionários
-        // pequenos e instalar hooks persistidos; varredura pesada é on-demand.
+        // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
+        // para não tocar __TEXT assinado; varredura pesada é on-demand.
         FBTKeyMobileConfigRuntimeEnabled:       @(YES),
         FBTKeyMobileConfigCaptureEnabled:       @(YES),
         FBTKeyMobileConfigOverridesEnabled:     @(YES),

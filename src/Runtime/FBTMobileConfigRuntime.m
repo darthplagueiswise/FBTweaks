@@ -212,14 +212,12 @@ static id fbt_MSGCSessionedMobileConfigGetString(void *ctx, uint64_t key, id def
 }
 
 static BOOL FBTMCHookDirect(const char *name, void *replacement, void **orig) {
-    void *sym = dlsym(RTLD_DEFAULT, name);
-    if (!sym) {
-        FBTLog(@"MobileConfig direct: %s nao resolvido", name);
-        return NO;
-    }
-    MSHookFunction(sym, replacement, orig);
-    FBTLog(@"MobileConfig direct hook instalado: %s", name);
-    return YES;
+    // v3.1: intentionally disabled. The v3 crash log proves that
+    // MSHookFunction on FBSharedFramework __TEXT produces CODESIGNING
+    // Invalid Page on this sideload/iOS build. Keep the signature for older
+    // call sites, but never patch executable pages here. Use fishhook only.
+    (void)name; (void)replacement; (void)orig;
+    return NO;
 }
 
 void FBTInstallMobileConfigRuntime(void) {
@@ -227,34 +225,18 @@ void FBTInstallMobileConfigRuntime(void) {
     sInstalled = YES;
     FBTMobileConfigReloadPrefs();
 
-    // v3: hook direto no símbolo exportado do FBSharedFramework.
-    // Isso pega chamadas internas do framework e chamadas do executable que
-    // saltam para o símbolo exportado. O fishhook antigo pegava só GOT/imports
-    // de outros images, então o browser parecia morto quando a leitura vinha
-    // de dentro do próprio framework.
-    BOOL b = FBTMCHookDirect("MSGCSessionedMobileConfigGetBoolean",
-                             (void *)fbt_MSGCSessionedMobileConfigGetBoolean,
-                             (void **)&orig_MSGCSessionedMobileConfigGetBoolean);
-    BOOL i = FBTMCHookDirect("MSGCSessionedMobileConfigGetInt64",
-                             (void *)fbt_MSGCSessionedMobileConfigGetInt64,
-                             (void **)&orig_MSGCSessionedMobileConfigGetInt64);
-    BOOL d = FBTMCHookDirect("MSGCSessionedMobileConfigGetDouble",
-                             (void *)fbt_MSGCSessionedMobileConfigGetDouble,
-                             (void **)&orig_MSGCSessionedMobileConfigGetDouble);
-    BOOL s = FBTMCHookDirect("MSGCSessionedMobileConfigGetString",
-                             (void *)fbt_MSGCSessionedMobileConfigGetString,
-                             (void **)&orig_MSGCSessionedMobileConfigGetString);
-
-    // Fallback: se algum símbolo não estiver exportado nesse build, ainda
-    // tenta o caminho import/GOT. Não roda para símbolos já hookados direto.
-    struct rebinding rbs[4];
-    size_t n = 0;
-    if (!b) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetBoolean", (void *)fbt_MSGCSessionedMobileConfigGetBoolean, (void **)&orig_MSGCSessionedMobileConfigGetBoolean };
-    if (!i) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetInt64",   (void *)fbt_MSGCSessionedMobileConfigGetInt64,   (void **)&orig_MSGCSessionedMobileConfigGetInt64 };
-    if (!d) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetDouble",  (void *)fbt_MSGCSessionedMobileConfigGetDouble,  (void **)&orig_MSGCSessionedMobileConfigGetDouble };
-    if (!s) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString };
-    if (n) {
-        rebind_symbols(rbs, n);
-        FBTLog(@"MobileConfig fallback fishhook instalado: %lu", (unsigned long)n);
-    }
+    // v3.1: fishhook-only. The v3 crash was CODESIGNING / Invalid Page
+    // inside FBSharedFramework at MSGCSessionedMobileConfigGetString+796,
+    // caused by direct MSHookFunction on signed __TEXT. fishhook only rewrites
+    // import pointers/GOT and does not dirty executable pages. It captures
+    // calls that cross image boundaries; internal same-image C calls are not
+    // safe to patch in this environment.
+    struct rebinding rbs[4] = {
+        { "MSGCSessionedMobileConfigGetBoolean", (void *)fbt_MSGCSessionedMobileConfigGetBoolean, (void **)&orig_MSGCSessionedMobileConfigGetBoolean },
+        { "MSGCSessionedMobileConfigGetInt64",   (void *)fbt_MSGCSessionedMobileConfigGetInt64,   (void **)&orig_MSGCSessionedMobileConfigGetInt64 },
+        { "MSGCSessionedMobileConfigGetDouble",  (void *)fbt_MSGCSessionedMobileConfigGetDouble,  (void **)&orig_MSGCSessionedMobileConfigGetDouble },
+        { "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString },
+    };
+    rebind_symbols(rbs, 4);
+    FBTLog(@"MobileConfig fishhook-only instalado");
 }

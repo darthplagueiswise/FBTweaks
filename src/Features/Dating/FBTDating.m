@@ -17,9 +17,10 @@
 //   _GemstoneMsysThreadViewEnabled      @ 0x2dee6f8
 //   _GemstoneMsysThreadListEnabled      @ 0x2dee734
 //   _GemstoneMsysInactivatedThreadList… @ 0x2dee770
-// São EXPORTADAS mas NÃO importadas pelo exec -> fishhook não serve
-// (só reescreve GOT do importador). Usamos MSHookFunction no endereço
-// resolvido por dlsym. Flag latched: alternar exige restart.
+// São EXPORTADAS mas NÃO importadas pelo exec -> fishhook não alcança
+// chamadas internas do mesmo image. v3 tentou patch direto por dlsym, mas
+// o crash real provou que isso suja __TEXT assinado nessa instalação.
+// Portanto v3.1 não instala hook C direto aqui.
 //
 // Segurança de ABI: quando a pref está on, instalamos e SEMPRE retornamos
 // YES sem chamar orig — logo a assinatura/args originais nunca são
@@ -38,24 +39,15 @@ static BOOL fbt_GemstoneMsysThreadListEnabled(void) { return YES; }
 static BOOL fbt_GemstoneMsysInactivatedThreadListEnabled(void) { return YES; }
 
 static void fbt_hookGemstone(const char *name, void *repl, void **orig) {
-    void *sym = dlsym(RTLD_DEFAULT, name);
-    if (!sym) { FBTLog(@"dating: %s não resolvido", name); return; }
-    MSHookFunction(sym, repl, orig);
-    FBTLog(@"dating: hook %s instalado", name);
+    // v3.1: no direct C hook. On this sideload/iOS build, MSHookFunction on
+    // FBSharedFramework __TEXT can invalidate code-signing pages at launch.
+    // Dating now relies on Employee/Internal mode and Runtime BOOL Browser
+    // for ObjC-dispatch gates.
+    (void)name; (void)repl; (void)orig;
 }
 
 // Chamado pelo Tweak.x apenas se a pref estiver on no launch.
 void FBTInitDatingGroup(void) {
-    fbt_hookGemstone("GemstoneMsysEnabled",
-                     (void *)fbt_GemstoneMsysEnabled,
-                     (void **)&orig_GemstoneMsysEnabled);
-    fbt_hookGemstone("GemstoneMsysThreadViewEnabled",
-                     (void *)fbt_GemstoneMsysThreadViewEnabled,
-                     (void **)&orig_GemstoneMsysThreadViewEnabled);
-    fbt_hookGemstone("GemstoneMsysThreadListEnabled",
-                     (void *)fbt_GemstoneMsysThreadListEnabled,
-                     (void **)&orig_GemstoneMsysThreadListEnabled);
-    fbt_hookGemstone("GemstoneMsysInactivatedThreadListEnabled",
-                     (void *)fbt_GemstoneMsysInactivatedThreadListEnabled,
-                     (void **)&orig_GemstoneMsysInactivatedThreadListEnabled);
+    fbt_hookGemstone("GemstoneMsysEnabled", (void *)fbt_GemstoneMsysEnabled, (void **)&orig_GemstoneMsysEnabled);
+    FBTLog(@"dating: direct C hooks disabled; use Employee/Internal + Runtime BOOL Browser");
 }
