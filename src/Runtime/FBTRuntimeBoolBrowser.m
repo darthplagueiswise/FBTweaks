@@ -3,6 +3,8 @@
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <pthread.h>
+#import <dlfcn.h>
+#import <string.h>
 
 // Runtime browser arbitrário: exceção controlada ao padrão Logos.
 // Varredura só on-demand na tela; no launch reinstala apenas hooks persistidos.
@@ -19,6 +21,28 @@ static NSMutableDictionary<NSString *, NSValue *> *sInstalled; // key -> descrip
 static NSDictionary *sOverrides;                                // key -> {force,class,selector,classMethod}
 static BOOL sBoolBrowserEnabled = NO;
 static pthread_mutex_t sBoolLock = PTHREAD_MUTEX_INITIALIZER;
+
+
+static NSString *FBTImageKindForPath(NSString *path) {
+    NSString *p = path ?: @"";
+    NSString *last = p.lastPathComponent ?: @"";
+    if ([last isEqualToString:@"Facebook"] || [last isEqualToString:@"Instagram"]) return @"main-exec";
+    if ([last containsString:@"FBSharedFramework"]) return @"FBSharedFramework";
+    if ([p containsString:@"/Frameworks/"]) return @"framework";
+    if ([p containsString:@"/System/Library/"]) return @"system";
+    return last.length ? last : @"unknown";
+}
+
+static NSString *FBTImagePathForMethod(Method m) {
+    if (!m) return @"";
+    IMP imp = method_getImplementation(m);
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (imp && dladdr((const void *)imp, &info) && info.dli_fname) {
+        return [NSString stringWithUTF8String:info.dli_fname] ?: @"";
+    }
+    return @"";
+}
 
 static NSString *FBTBoolKey(NSString *className, NSString *selectorName, BOOL isClassMethod) {
     return [NSString stringWithFormat:@"%@%@#%@", isClassMethod ? @"+" : @"", className ?: @"", selectorName ?: @""];
@@ -153,11 +177,15 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         if (q.length && [hay rangeOfString:q].location == NSNotFound) continue;
         NSString *key = FBTBoolKey(className, sel, classMethods);
         NSDictionary *ov = FBTBoolOverrideForKey(key);
+        NSString *imagePath = FBTImagePathForMethod(m);
+        NSString *imageKind = FBTImageKindForPath(imagePath);
         [out addObject:@{
             @"class": className ?: @"",
             @"selector": sel ?: @"",
             @"classMethod": @(classMethods),
             @"key": key ?: @"",
+            @"image": imagePath ?: @"",
+            @"imageKind": imageKind ?: @"unknown",
             @"forced": ov ? @YES : @NO,
             @"force": ov[@"force"] ?: [NSNull null],
         }];

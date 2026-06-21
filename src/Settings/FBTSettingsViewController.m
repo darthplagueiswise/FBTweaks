@@ -5,6 +5,8 @@
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "../Runtime/FBTFlagCatalog.h"
 
+extern void FBTInstallLiquidGlassHooks(void);
+
 static NSString * const FBTCellID = @"FBTCell";
 static NSString * const FBTSwitchCellID = @"FBTSwitchCell";
 
@@ -104,19 +106,19 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook em METAIsLiquidGlassEnabled; exige restart.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook/dlsym + Runtime BOOL em getters LiquidGlass.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Instala fishhook nos readers MSGCSessioned* no launch.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"dlsym+MSHookFunction nos readers MSGCSessioned*; fishhook fallback.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Força por chave capturada no accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
-            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Reinstala hooks persistidos; varredura só na tela.", @"key": FBTKeyRuntimeBoolBrowserEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Força por chave capturada no accessor hookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
+            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/framework e salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled, @"restart": @YES },
         ],
         @[
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
-            @{ @"kind": @"nav", @"title": @"ObjC BOOL Runtime Browser", @"subtitle": @"Busca selectors BOOL e salva Force ON/OFF.", @"dest": @"bool" },
+            @{ @"kind": @"nav", @"title": @"ObjC BOOL Runtime Browser", @"subtitle": @"Busca selectors BOOL por classe/selector/image e salva Force ON/OFF.", @"dest": @"bool" },
             @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
             @{ @"kind": @"nav", @"title": @"Dump completo de flags", @"subtitle": @"FBTFlags.json empacotado.", @"dest": @"flags" },
             @{ @"kind": @"nav", @"title": @"Query configs enviados", @"subtitle": @"GraphQL IDs/variáveis empacotados no bundle.", @"dest": @"queries" },
@@ -181,12 +183,20 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
+    if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
+        if (sender.isOn) FBTInstallMobileConfigRuntime();
+        FBTMobileConfigReloadPrefs();
+    }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigCaptureEnabled] ||
         [sender.prefKey isEqualToString:FBTKeyMobileConfigOverridesEnabled]) {
         FBTMobileConfigReloadPrefs();
     }
     if ([sender.prefKey isEqualToString:FBTKeyRuntimeBoolBrowserEnabled]) {
         FBTRuntimeBoolReloadPrefs();
+        if (sender.isOn) FBTRuntimeBoolReinstallPersistedHooks();
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyLiquidGlassEnabled] && sender.isOn) {
+        FBTInstallLiquidGlassHooks();
     }
 }
 
@@ -337,7 +347,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Classe/selector: dogfood, internal…";
+    self.searchController.searchBar.placeholder = @"Classe/selector/image: dogfood, FBShared, main-exec…";
     self.navigationItem.searchController = self.searchController;
     [self runSearch];
 }
@@ -347,7 +357,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     NSString *q = searchController.searchBar.text.lowercaseString ?: @"";
     if (!q.length) self.filtered = self.entries ?: @[];
     else self.filtered = [self.entries filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, __unused NSDictionary *b) {
-        NSString *hay = [[NSString stringWithFormat:@"%@ %@", e[@"class"] ?: @"", e[@"selector"] ?: @""] lowercaseString];
+        NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", e[@"class"] ?: @"", e[@"selector"] ?: @"", e[@"imageKind"] ?: @"", e[@"image"] ?: @""] lowercaseString];
         return [hay containsString:q];
     }]];
     [self.tableView reloadData];
@@ -382,8 +392,8 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = [NSString stringWithFormat:@"%@%@", [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"selector"] ?: @""];
     NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : @"";
-    cfg.secondaryText = [NSString stringWithFormat:@"%@%@", e[@"class"] ?: @"", force];
-    cfg.secondaryTextProperties.numberOfLines = 2;
+    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@%@", e[@"class"] ?: @"", e[@"imageKind"] ?: @"unknown", force];
+    cfg.secondaryTextProperties.numberOfLines = 3;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
     cell.accessoryType = [e[@"forced"] boolValue] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
@@ -394,7 +404,8 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (!self.filtered.count) return;
     NSDictionary *e = self.filtered[indexPath.row];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:e[@"selector"] message:e[@"class"] preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *msg = [NSString stringWithFormat:@"%@\n%@", e[@"class"] ?: @"", e[@"image"] ?: @""];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:e[@"selector"] message:msg preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Desfazer override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolClearOverride(e); [self runSearch]; }]];

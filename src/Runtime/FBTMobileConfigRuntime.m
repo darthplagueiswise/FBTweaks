@@ -4,6 +4,7 @@
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
 #import <pthread.h>
+#import <dlfcn.h>
 
 NSString * const FBTMobileConfigDidUpdateNotification = @"FBTMobileConfigDidUpdateNotification";
 
@@ -210,16 +211,50 @@ static id fbt_MSGCSessionedMobileConfigGetString(void *ctx, uint64_t key, id def
     return original;
 }
 
+static BOOL FBTMCHookDirect(const char *name, void *replacement, void **orig) {
+    void *sym = dlsym(RTLD_DEFAULT, name);
+    if (!sym) {
+        FBTLog(@"MobileConfig direct: %s nao resolvido", name);
+        return NO;
+    }
+    MSHookFunction(sym, replacement, orig);
+    FBTLog(@"MobileConfig direct hook instalado: %s", name);
+    return YES;
+}
+
 void FBTInstallMobileConfigRuntime(void) {
     if (sInstalled) return;
     sInstalled = YES;
     FBTMobileConfigReloadPrefs();
-    struct rebinding rbs[] = {
-        { "MSGCSessionedMobileConfigGetBoolean", (void *)fbt_MSGCSessionedMobileConfigGetBoolean, (void **)&orig_MSGCSessionedMobileConfigGetBoolean },
-        { "MSGCSessionedMobileConfigGetInt64",   (void *)fbt_MSGCSessionedMobileConfigGetInt64,   (void **)&orig_MSGCSessionedMobileConfigGetInt64 },
-        { "MSGCSessionedMobileConfigGetDouble",  (void *)fbt_MSGCSessionedMobileConfigGetDouble,  (void **)&orig_MSGCSessionedMobileConfigGetDouble },
-        { "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString },
-    };
-    rebind_symbols(rbs, sizeof(rbs) / sizeof(rbs[0]));
-    FBTLog(@"MobileConfig runtime fishhook instalado");
+
+    // v3: hook direto no símbolo exportado do FBSharedFramework.
+    // Isso pega chamadas internas do framework e chamadas do executable que
+    // saltam para o símbolo exportado. O fishhook antigo pegava só GOT/imports
+    // de outros images, então o browser parecia morto quando a leitura vinha
+    // de dentro do próprio framework.
+    BOOL b = FBTMCHookDirect("MSGCSessionedMobileConfigGetBoolean",
+                             (void *)fbt_MSGCSessionedMobileConfigGetBoolean,
+                             (void **)&orig_MSGCSessionedMobileConfigGetBoolean);
+    BOOL i = FBTMCHookDirect("MSGCSessionedMobileConfigGetInt64",
+                             (void *)fbt_MSGCSessionedMobileConfigGetInt64,
+                             (void **)&orig_MSGCSessionedMobileConfigGetInt64);
+    BOOL d = FBTMCHookDirect("MSGCSessionedMobileConfigGetDouble",
+                             (void *)fbt_MSGCSessionedMobileConfigGetDouble,
+                             (void **)&orig_MSGCSessionedMobileConfigGetDouble);
+    BOOL s = FBTMCHookDirect("MSGCSessionedMobileConfigGetString",
+                             (void *)fbt_MSGCSessionedMobileConfigGetString,
+                             (void **)&orig_MSGCSessionedMobileConfigGetString);
+
+    // Fallback: se algum símbolo não estiver exportado nesse build, ainda
+    // tenta o caminho import/GOT. Não roda para símbolos já hookados direto.
+    struct rebinding rbs[4];
+    size_t n = 0;
+    if (!b) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetBoolean", (void *)fbt_MSGCSessionedMobileConfigGetBoolean, (void **)&orig_MSGCSessionedMobileConfigGetBoolean };
+    if (!i) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetInt64",   (void *)fbt_MSGCSessionedMobileConfigGetInt64,   (void **)&orig_MSGCSessionedMobileConfigGetInt64 };
+    if (!d) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetDouble",  (void *)fbt_MSGCSessionedMobileConfigGetDouble,  (void **)&orig_MSGCSessionedMobileConfigGetDouble };
+    if (!s) rbs[n++] = (struct rebinding){ "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString };
+    if (n) {
+        rebind_symbols(rbs, n);
+        FBTLog(@"MobileConfig fallback fishhook instalado: %lu", (unsigned long)n);
+    }
 }
