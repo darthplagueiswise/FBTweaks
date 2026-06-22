@@ -42,7 +42,7 @@ static NSDictionary *gRegistered = nil;
 
         // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
         // para não tocar __TEXT assinado; varredura pesada é on-demand.
-        FBTKeyMobileConfigRuntimeEnabled:       @(YES),
+        FBTKeyMobileConfigRuntimeEnabled:       @(NO),
         FBTKeyMobileConfigCaptureEnabled:       @(YES),
         FBTKeyMobileConfigOverridesEnabled:     @(YES),
         FBTKeyMobileConfigOverrides:            @{},

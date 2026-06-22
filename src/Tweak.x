@@ -92,13 +92,13 @@ extern void FBTInitDatingGroup(void);
         }
 
         if ([FBTDefaults boolForKey:FBTKeyEmployeeSweepEnabled]) {
-            FBTRuntimeBoolInstallSweep(@"employee", YES, 160);
+            // disabled at launch: employee sweep is manual post-launch
         }
         if ([FBTDefaults boolForKey:FBTKeyDogfoodSweepEnabled]) {
-            FBTRuntimeBoolInstallSweep(@"dogfood", YES, 160);
+            // disabled at launch: dogfood sweep is manual post-launch
         }
         if ([FBTDefaults boolForKey:FBTKeyInternalDebugSweepEnabled]) {
-            FBTRuntimeBoolInstallSweep(@"internaldebug", YES, 160);
+            // disabled at launch: internaldebug sweep is manual post-launch
         }
 
         // Runtime browsers. Não varrem classes no launch: só reinstalam hooks
@@ -109,8 +109,8 @@ extern void FBTInitDatingGroup(void);
         }
 
         if ([FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled]) {
-            FBTInstallNativeMobileConfigContextCapture();
-            FBTInstallMobileConfigRuntime();
+            // disabled at launch: native MC context capture is manual post-launch
+            // disabled at launch: MC runtime is manual post-launch
         }
 
         [[NSNotificationCenter defaultCenter]

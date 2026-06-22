@@ -23,6 +23,7 @@ static BOOL fbt_METAIsLiquidGlassEnabled(void) {
 // imported C symbols plus Runtime BOOL Browser for ObjC/Swift-dispatch getters.
 
 static void FBTInstallLiquidGlassRuntimeBoolHooks(void) {
+    return; // disabled at launch: avoids dyld/dladdr watchdog
     NSArray<NSString *> *queries = @[
         @"LiquidGlass",
         @"isLiquidGlassEnabled",
