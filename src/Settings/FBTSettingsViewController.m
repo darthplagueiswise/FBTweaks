@@ -143,6 +143,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
         ],
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
+            @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
         ],
     ];
@@ -238,6 +239,12 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
         NSString *action = item[@"action"];
         if ([action isEqualToString:@"native"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
+        } else if ([action isEqualToString:@"ensure_mc_file"]) {
+            BOOL ok = FBTNativeMobileConfigEnsureOverridesFile();
+            NSString *path = FBTNativeMobileConfigOverridesFilePath() ?: @"path ainda não capturado";
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"Arquivo pronto" : @"Sem path nativo" message:[NSString stringWithFormat:@"%@\n%@", path, FBTNativeMobileConfigStatus() ?: @""] preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
         } else if ([action isEqualToString:@"clear"]) {
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Limpar overrides?" message:@"Remove overrides MobileConfig e Runtime BOOL salvos. Hooks já instalados continuam chamando orig quando não houver override." preferredStyle:UIAlertControllerStyleActionSheet];
             [a addAction:[UIAlertAction actionWithTitle:@"Limpar" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) {

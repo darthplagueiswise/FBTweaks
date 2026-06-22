@@ -13,6 +13,9 @@ void FBTInstallNativeMobileConfigContextCapture(void);
 
 // Recebe apenas objetos retornados por dispatch ObjC já validado.
 void FBTNativeMobileConfigRegisterContext(id context);
+void FBTNativeMobileConfigRegisterOverrideObject(id object);
+NSString *FBTNativeMobileConfigOverridesFilePath(void);
+BOOL FBTNativeMobileConfigEnsureOverridesFile(void);
 
 NSUInteger FBTNativeMobileConfigContextCount(void);
 NSString *FBTNativeMobileConfigStatus(void);

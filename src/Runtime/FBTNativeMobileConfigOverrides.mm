@@ -1,4 +1,5 @@
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMobileConfigRuntime.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <pthread.h>
@@ -38,6 +39,7 @@ static BOOL sSymbolsResolved = NO;
 static BOOL sContextHooksInstalled = NO;
 
 static NSHashTable *sContexts = nil; // weak objects
+static NSHashTable *sOverrideObjects = nil; // weak objects that implement native ObjC debug/override API
 static NSMutableSet<NSString *> *sHookedMethods = nil;
 static pthread_mutex_t sNativeLock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -98,9 +100,102 @@ NSUInteger FBTNativeMobileConfigContextCount(void) {
     return count;
 }
 
+static NSUInteger FBTNativeOverrideObjectCount(void) {
+    pthread_mutex_lock(&sNativeLock);
+    NSUInteger count = sOverrideObjects ? sOverrideObjects.allObjects.count : 0;
+    pthread_mutex_unlock(&sNativeLock);
+    return count;
+}
+
+static BOOL FBTOverrideObjectSetUsesScalarKey(id object) {
+    if (!object) return NO;
+    SEL sel = NSSelectorFromString(@"setOverrideForParam:andValue:");
+    Method m = class_getInstanceMethod([object class], sel);
+    if (!m) return NO;
+    const char *types = method_getTypeEncoding(m);
+    if (!types) return NO;
+    NSString *t = [NSString stringWithUTF8String:types] ?: @"";
+    return ([t containsString:@"Q16"] || [t containsString:@"{mc_"]);
+}
+
+static BOOL FBTOverrideObjectRemoveUsesScalarKey(id object) {
+    if (!object) return NO;
+    SEL sel = NSSelectorFromString(@"removeOverrideForParam:");
+    Method m = class_getInstanceMethod([object class], sel);
+    if (!m) return NO;
+    const char *types = method_getTypeEncoding(m);
+    if (!types) return NO;
+    NSString *t = [NSString stringWithUTF8String:types] ?: @"";
+    return ([t containsString:@"Q16"] || [t containsString:@"{mc_"]);
+}
+
+void FBTNativeMobileConfigRegisterOverrideObject(id object) {
+    if (!object) return;
+    @try {
+        SEL setSel = NSSelectorFromString(@"setOverrideForParam:andValue:");
+        SEL removeSel = NSSelectorFromString(@"removeOverrideForParam:");
+        SEL pathSel = NSSelectorFromString(@"getOverridesTablePath");
+        if (![object respondsToSelector:setSel] && ![object respondsToSelector:removeSel] && ![object respondsToSelector:pathSel]) return;
+        pthread_mutex_lock(&sNativeLock);
+        if (!sOverrideObjects) sOverrideObjects = [NSHashTable weakObjectsHashTable];
+        [sOverrideObjects addObject:object];
+        pthread_mutex_unlock(&sNativeLock);
+    } @catch (__unused NSException *e) {
+    }
+}
+
+static NSArray *FBTNativeOverrideObjectsSnapshot(void) {
+    pthread_mutex_lock(&sNativeLock);
+    NSArray *items = sOverrideObjects ? [sOverrideObjects.allObjects copy] : @[];
+    pthread_mutex_unlock(&sNativeLock);
+    return items ?: @[];
+}
+
+NSString *FBTNativeMobileConfigOverridesFilePath(void) {
+    SEL pathSel = NSSelectorFromString(@"getOverridesTablePath");
+    for (id obj in FBTNativeOverrideObjectsSnapshot()) {
+        if (![obj respondsToSelector:pathSel]) continue;
+        @try {
+            NSString *(*msg)(id, SEL) = (NSString *(*)(id, SEL))objc_msgSend;
+            id path = msg(obj, pathSel);
+            if ([path isKindOfClass:[NSString class]] && [path length]) return path;
+        } @catch (__unused NSException *e) {
+        }
+    }
+    NSArray<NSString *> *groups = @[
+        @"group.com.facebook.dogfood.internal",
+        @"group.com.facebook.Facebook",
+        @"group.com.facebook.family"
+    ];
+    for (NSString *group in groups) {
+        NSURL *url = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:group];
+        if (url.path.length) {
+            return [[url URLByAppendingPathComponent:@"mobileconfig/mc_overrides.json"] path];
+        }
+    }
+    return nil;
+}
+
+BOOL FBTNativeMobileConfigEnsureOverridesFile(void) {
+    NSString *path = FBTNativeMobileConfigOverridesFilePath();
+    if (!path.length) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [path stringByDeletingLastPathComponent];
+    if (dir.length) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+    }
+    if (![fm fileExistsAtPath:path]) {
+        NSData *empty = [@"{}" dataUsingEncoding:NSUTF8StringEncoding];
+        return [fm createFileAtPath:path contents:empty attributes:nil];
+    }
+    return YES;
+}
+
 NSString *FBTNativeMobileConfigStatus(void) {
     BOOL symbols = FBTResolveNativeSymbols();
-    return [NSString stringWithFormat:@"native %@ · contexts %lu", symbols ? @"OK" : @"missing", (unsigned long)FBTNativeMobileConfigContextCount()];
+    NSString *path = FBTNativeMobileConfigOverridesFilePath();
+    BOOL fileExists = path.length ? [[NSFileManager defaultManager] fileExistsAtPath:path] : NO;
+    return [NSString stringWithFormat:@"native %@ · contexts %lu · objc %lu · file %@", symbols ? @"OK" : @"missing", (unsigned long)FBTNativeMobileConfigContextCount(), (unsigned long)FBTNativeOverrideObjectCount(), path.length ? (fileExists ? @"exists" : @"missing") : @"unknown"];
 }
 
 static NSArray *FBTNativeContextsSnapshot(void) {
@@ -108,6 +203,34 @@ static NSArray *FBTNativeContextsSnapshot(void) {
     NSArray *items = sContexts ? [sContexts.allObjects copy] : @[];
     pthread_mutex_unlock(&sNativeLock);
     return items ?: @[];
+}
+
+static BOOL FBTApplyWithObjCOverrideObject(id object, uint64_t key, NSString *type, id value, BOOL remove) {
+    if (!object) return NO;
+    @try {
+        if (remove) {
+            SEL sel = NSSelectorFromString(@"removeOverrideForParam:");
+            if (![object respondsToSelector:sel] || !FBTOverrideObjectRemoveUsesScalarKey(object)) return NO;
+            void (*msg)(id, SEL, uint64_t) = (void (*)(id, SEL, uint64_t))objc_msgSend;
+            msg(object, sel, key);
+            FBTNativeMobileConfigEnsureOverridesFile();
+            return YES;
+        }
+
+        SEL sel = NSSelectorFromString(@"setOverrideForParam:andValue:");
+        if (![object respondsToSelector:sel] || !FBTOverrideObjectSetUsesScalarKey(object)) return NO;
+        id boxed = value;
+        if ([type isEqualToString:@"bool"]) boxed = @([value boolValue]);
+        else if ([type isEqualToString:@"int64"]) boxed = @([value longLongValue]);
+        else if ([type isEqualToString:@"double"]) boxed = @([value doubleValue]);
+        else if ([type isEqualToString:@"string"]) boxed = [value isKindOfClass:[NSString class]] ? value : [value description];
+        void (*msg)(id, SEL, uint64_t, id) = (void (*)(id, SEL, uint64_t, id))objc_msgSend;
+        msg(object, sel, key, boxed);
+        FBTNativeMobileConfigEnsureOverridesFile();
+        return YES;
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
 }
 
 static BOOL FBTApplyWithTable(id context, uint64_t key, NSString *type, id value, BOOL remove) {
@@ -150,6 +273,9 @@ static BOOL FBTApplyWithTable(id context, uint64_t key, NSString *type, id value
 BOOL FBTNativeMobileConfigApplyOverride(uint64_t key, NSString *type, id value) {
     if (!type.length || !value) return NO;
     BOOL ok = NO;
+    for (id obj in FBTNativeOverrideObjectsSnapshot()) {
+        if (FBTApplyWithObjCOverrideObject(obj, key, type, value, NO)) ok = YES;
+    }
     for (id ctx in FBTNativeContextsSnapshot()) {
         if (FBTApplyWithTable(ctx, key, type, value, NO)) ok = YES;
     }
@@ -158,6 +284,9 @@ BOOL FBTNativeMobileConfigApplyOverride(uint64_t key, NSString *type, id value) 
 
 BOOL FBTNativeMobileConfigRemoveOverride(uint64_t key) {
     BOOL ok = NO;
+    for (id obj in FBTNativeOverrideObjectsSnapshot()) {
+        if (FBTApplyWithObjCOverrideObject(obj, key, nil, nil, YES)) ok = YES;
+    }
     for (id ctx in FBTNativeContextsSnapshot()) {
         if (FBTApplyWithTable(ctx, key, nil, nil, YES)) ok = YES;
     }
@@ -222,7 +351,9 @@ static void FBTHookContextMethodsForClass(Class cls, BOOL classMethods) {
             if (captured->orig) {
                 result = ((FBTObjectGetterOrig)captured->orig)(receiver, captured->sel);
             }
+            FBTNativeMobileConfigRegisterOverrideObject(receiver);
             FBTNativeMobileConfigRegisterContext(result);
+            FBTNativeMobileConfigRegisterOverrideObject(result);
             return result;
         });
         MSHookMessageEx(methodClass, sel, replacement, (IMP *)&desc->orig);
@@ -231,10 +362,354 @@ static void FBTHookContextMethodsForClass(Class cls, BOOL classMethods) {
     if (methods) free(methods);
 }
 
+
+// ---------------------------------------------------------------------
+// ObjC reader hooks for MobileConfig context managers.
+// This is the safe replacement for the failed direct C export hook:
+// dispatch ObjC is hookable via MSHookMessageEx without dirtying signed
+// executable pages, and it catches the native framework/user-session
+// readers that the Dogfood menu itself uses.
+// ---------------------------------------------------------------------
+typedef BOOL    (*FBTBool3Orig)(id, SEL, uint64_t, void *);
+typedef BOOL    (*FBTBool4Orig)(id, SEL, uint64_t, void *, BOOL);
+typedef int64_t (*FBTInt3Orig)(id, SEL, uint64_t, void *);
+typedef int64_t (*FBTInt4Orig)(id, SEL, uint64_t, void *, int64_t);
+typedef double  (*FBTDouble3Orig)(id, SEL, uint64_t, void *);
+typedef double  (*FBTDouble4Orig)(id, SEL, uint64_t, void *, double);
+typedef id      (*FBTString3Orig)(id, SEL, uint64_t, void *);
+typedef id      (*FBTString4Orig)(id, SEL, uint64_t, void *, id);
+typedef id      (*FBTObject0Orig)(id, SEL);
+typedef id      (*FBTInitMappingOrig)(id, SEL, id, id);
+
+typedef struct {
+    SEL sel;
+    IMP orig;
+    CFStringRef key;
+} FBTObjCReaderHookDescriptor;
+
+static NSMutableSet<NSString *> *sObjCReaderHooks = nil;
+
+static BOOL FBTOvBool(uint64_t key, BOOL *outForced) {
+    NSDictionary *ov = FBTMobileConfigOverrideForKey(key);
+    if (![ov isKindOfClass:[NSDictionary class]] || ![ov[@"t"] isEqualToString:@"bool"]) return NO;
+    BOOL forced = [ov[@"v"] boolValue];
+    if (outForced) *outForced = forced;
+    return YES;
+}
+
+static BOOL FBTOvInt64(uint64_t key, int64_t *outForced) {
+    NSDictionary *ov = FBTMobileConfigOverrideForKey(key);
+    if (![ov isKindOfClass:[NSDictionary class]] || ![ov[@"t"] isEqualToString:@"int64"]) return NO;
+    int64_t forced = (int64_t)[ov[@"v"] longLongValue];
+    if (outForced) *outForced = forced;
+    return YES;
+}
+
+static BOOL FBTOvDouble(uint64_t key, double *outForced) {
+    NSDictionary *ov = FBTMobileConfigOverrideForKey(key);
+    if (![ov isKindOfClass:[NSDictionary class]] || ![ov[@"t"] isEqualToString:@"double"]) return NO;
+    double forced = [ov[@"v"] doubleValue];
+    if (outForced) *outForced = forced;
+    return YES;
+}
+
+static BOOL FBTOvString(uint64_t key, id *outForced) {
+    NSDictionary *ov = FBTMobileConfigOverrideForKey(key);
+    if (![ov isKindOfClass:[NSDictionary class]] || ![ov[@"t"] isEqualToString:@"string"]) return NO;
+    id forced = [ov[@"v"] isKindOfClass:[NSString class]] ? ov[@"v"] : [ov[@"v"] description];
+    if (outForced) *outForced = forced ?: @"";
+    return YES;
+}
+
+static NSString *FBTHookKeyForClassSel(Class cls, SEL sel, NSString *suffix) {
+    return [NSString stringWithFormat:@"%@#%@#%@", NSStringFromClass(cls) ?: @"?", NSStringFromSelector(sel) ?: @"?", suffix ?: @""];
+}
+
+static BOOL FBTMarkHookInstalled(Class cls, SEL sel, NSString *suffix) {
+    NSString *key = FBTHookKeyForClassSel(cls, sel, suffix);
+    pthread_mutex_lock(&sNativeLock);
+    if (!sObjCReaderHooks) sObjCReaderHooks = [NSMutableSet set];
+    BOOL exists = [sObjCReaderHooks containsObject:key];
+    if (!exists) [sObjCReaderHooks addObject:key];
+    pthread_mutex_unlock(&sNativeLock);
+    return !exists;
+}
+
+static void FBTHookBool3(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"b3")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^BOOL(id receiver, uint64_t key, void *options) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        BOOL original = captured->orig ? ((FBTBool3Orig)captured->orig)(receiver, captured->sel, key, options) : NO;
+        BOOL forced = NO;
+        if (FBTOvBool(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"bool", @(original), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"bool", @(original), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookBool4(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"b4")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^BOOL(id receiver, uint64_t key, void *options, BOOL defaultValue) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        BOOL original = captured->orig ? ((FBTBool4Orig)captured->orig)(receiver, captured->sel, key, options, defaultValue) : defaultValue;
+        BOOL forced = NO;
+        if (FBTOvBool(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"bool", @(defaultValue), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"bool", @(defaultValue), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookInt3(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"i3")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^int64_t(id receiver, uint64_t key, void *options) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        int64_t original = captured->orig ? ((FBTInt3Orig)captured->orig)(receiver, captured->sel, key, options) : 0;
+        int64_t forced = 0;
+        if (FBTOvInt64(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"int64", @(original), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"int64", @(original), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookInt4(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"i4")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^int64_t(id receiver, uint64_t key, void *options, int64_t defaultValue) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        int64_t original = captured->orig ? ((FBTInt4Orig)captured->orig)(receiver, captured->sel, key, options, defaultValue) : defaultValue;
+        int64_t forced = 0;
+        if (FBTOvInt64(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"int64", @(defaultValue), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"int64", @(defaultValue), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookDouble3(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"d3")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^double(id receiver, uint64_t key, void *options) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        double original = captured->orig ? ((FBTDouble3Orig)captured->orig)(receiver, captured->sel, key, options) : 0.0;
+        double forced = 0.0;
+        if (FBTOvDouble(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"double", @(original), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"double", @(original), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookDouble4(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"d4")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^double(id receiver, uint64_t key, void *options, double defaultValue) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        double original = captured->orig ? ((FBTDouble4Orig)captured->orig)(receiver, captured->sel, key, options, defaultValue) : defaultValue;
+        double forced = 0.0;
+        if (FBTOvDouble(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"double", @(defaultValue), @(forced), YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"double", @(defaultValue), @(original), NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookString3(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"s3")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^id(id receiver, uint64_t key, void *options) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        id original = captured->orig ? ((FBTString3Orig)captured->orig)(receiver, captured->sel, key, options) : nil;
+        id forced = nil;
+        if (FBTOvString(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"string", original, forced, YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"string", original, original, NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookString4(Class cls, SEL sel) {
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"s4")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^id(id receiver, uint64_t key, void *options, id defaultValue) {
+        FBTNativeMobileConfigRegisterContext(receiver);
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        id original = captured->orig ? ((FBTString4Orig)captured->orig)(receiver, captured->sel, key, options, defaultValue) : defaultValue;
+        id forced = nil;
+        if (FBTOvString(key, &forced)) {
+            FBTMobileConfigRecordAccess(key, @"string", defaultValue, forced, YES);
+            return forced;
+        }
+        FBTMobileConfigRecordAccess(key, @"string", defaultValue, original, NO);
+        return original;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookOverridesPath(Class cls) {
+    SEL sel = NSSelectorFromString(@"getOverridesTablePath");
+    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"path")) return;
+    FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+    desc->sel = sel;
+    __block FBTObjCReaderHookDescriptor *captured = desc;
+    IMP replacement = imp_implementationWithBlock(^id(id receiver) {
+        FBTNativeMobileConfigRegisterOverrideObject(receiver);
+        id path = captured->orig ? ((FBTObject0Orig)captured->orig)(receiver, captured->sel) : nil;
+        return path;
+    });
+    MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
+}
+
+static void FBTHookNativeSetRemove(Class cls) {
+    if (!cls) return;
+    SEL setSel = NSSelectorFromString(@"setOverrideForParam:andValue:");
+    Method setMethod = class_getInstanceMethod(cls, setSel);
+    const char *setTypes = setMethod ? method_getTypeEncoding(setMethod) : NULL;
+    NSString *setTypeString = setTypes ? [NSString stringWithUTF8String:setTypes] : @"";
+    BOOL scalarSet = ([setTypeString containsString:@"Q16"] || [setTypeString containsString:@"{mc_"]);
+    if (setMethod && scalarSet && FBTMarkHookInstalled(cls, setSel, @"set")) {
+        FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+        desc->sel = setSel;
+        __block FBTObjCReaderHookDescriptor *captured = desc;
+        IMP replacement = imp_implementationWithBlock(^void(id receiver, uint64_t key, id value) {
+            FBTNativeMobileConfigRegisterOverrideObject(receiver);
+            if (captured->orig) ((void (*)(id, SEL, uint64_t, id))captured->orig)(receiver, captured->sel, key, value);
+            FBTNativeMobileConfigEnsureOverridesFile();
+        });
+        MSHookMessageEx(cls, setSel, replacement, (IMP *)&desc->orig);
+    }
+    SEL removeSel = NSSelectorFromString(@"removeOverrideForParam:");
+    Method removeMethod = class_getInstanceMethod(cls, removeSel);
+    const char *removeTypes = removeMethod ? method_getTypeEncoding(removeMethod) : NULL;
+    NSString *removeTypeString = removeTypes ? [NSString stringWithUTF8String:removeTypes] : @"";
+    BOOL scalarRemove = ([removeTypeString containsString:@"Q16"] || [removeTypeString containsString:@"{mc_"]);
+    if (removeMethod && scalarRemove && FBTMarkHookInstalled(cls, removeSel, @"remove")) {
+        FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+        desc->sel = removeSel;
+        __block FBTObjCReaderHookDescriptor *captured = desc;
+        IMP replacement = imp_implementationWithBlock(^void(id receiver, uint64_t key) {
+            FBTNativeMobileConfigRegisterOverrideObject(receiver);
+            if (captured->orig) ((void (*)(id, SEL, uint64_t))captured->orig)(receiver, captured->sel, key);
+            FBTNativeMobileConfigEnsureOverridesFile();
+        });
+        MSHookMessageEx(cls, removeSel, replacement, (IMP *)&desc->orig);
+    }
+}
+
+static void FBTHookFBTContextManagerBridge(void) {
+    Class cls = objc_getClass("FBMobileConfigFBTContextManager");
+    if (!cls) return;
+    SEL initSel = NSSelectorFromString(@"initWithFbtToMCIdMapping:mobileconfig:");
+    if (class_getInstanceMethod(cls, initSel) && FBTMarkHookInstalled(cls, initSel, @"initDebugAPI")) {
+        FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+        desc->sel = initSel;
+        __block FBTObjCReaderHookDescriptor *captured = desc;
+        IMP replacement = imp_implementationWithBlock(^id(id receiver, id mapping, id mobileconfig) {
+            FBTNativeMobileConfigRegisterOverrideObject(mobileconfig);
+            id obj = captured->orig ? ((FBTInitMappingOrig)captured->orig)(receiver, captured->sel, mapping, mobileconfig) : receiver;
+            FBTNativeMobileConfigRegisterOverrideObject(obj);
+            return obj;
+        });
+        MSHookMessageEx(cls, initSel, replacement, (IMP *)&desc->orig);
+    }
+    SEL getterSel = NSSelectorFromString(@"mobileconfig");
+    if (class_getInstanceMethod(cls, getterSel) && FBTMarkHookInstalled(cls, getterSel, @"debugAPIGetter")) {
+        FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
+        desc->sel = getterSel;
+        __block FBTObjCReaderHookDescriptor *captured = desc;
+        IMP replacement = imp_implementationWithBlock(^id(id receiver) {
+            id obj = captured->orig ? ((FBTObject0Orig)captured->orig)(receiver, captured->sel) : nil;
+            FBTNativeMobileConfigRegisterOverrideObject(obj);
+            return obj;
+        });
+        MSHookMessageEx(cls, getterSel, replacement, (IMP *)&desc->orig);
+    }
+}
+
+static void FBTHookMobileConfigReadersForClassName(const char *name, BOOL withDefaultAlso) {
+    Class cls = objc_getClass(name);
+    if (!cls) return;
+    FBTHookBool3(cls, NSSelectorFromString(@"getBool:withOptions:"));
+    FBTHookInt3(cls, NSSelectorFromString(@"getInt64:withOptions:"));
+    FBTHookDouble3(cls, NSSelectorFromString(@"getDouble:withOptions:"));
+    FBTHookString3(cls, NSSelectorFromString(@"getString:withOptions:"));
+    if (withDefaultAlso) {
+        FBTHookBool4(cls, NSSelectorFromString(@"getBool:withOptions:withDefault:"));
+        FBTHookInt4(cls, NSSelectorFromString(@"getInt64:withOptions:withDefault:"));
+        FBTHookDouble4(cls, NSSelectorFromString(@"getDouble:withOptions:withDefault:"));
+        FBTHookString4(cls, NSSelectorFromString(@"getString:withOptions:withDefault:"));
+    }
+    FBTHookOverridesPath(cls);
+    FBTHookNativeSetRemove(cls);
+}
+
+static void FBTInstallKnownObjCMobileConfigHooks(void) {
+    FBTHookFBTContextManagerBridge();
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigStartupConfigs", YES);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigSessionlessContextManager", NO);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigUserSessionContextManager", NO);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigContextObjcImpl", YES);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigContextManager", YES);
+    FBTHookMobileConfigReadersForClassName("IGMobileConfigContextManager", YES);
+    FBTHookMobileConfigReadersForClassName("IGMobileConfigSessionlessContextManager", NO);
+    FBTHookMobileConfigReadersForClassName("IGMobileConfigUserSessionContextManager", NO);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigEmptyImpl", YES);
+}
+
 void FBTInstallNativeMobileConfigContextCapture(void) {
     if (sContextHooksInstalled) return;
     sContextHooksInstalled = YES;
     FBTResolveNativeSymbols();
+    FBTInstallKnownObjCMobileConfigHooks();
 
     int classCount = objc_getClassList(NULL, 0);
     if (classCount <= 0) return;

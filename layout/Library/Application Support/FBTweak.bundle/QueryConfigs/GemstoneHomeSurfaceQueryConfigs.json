@@ -1,0 +1,18 @@
+{
+  "$generated": "@generated SignedSource<<ed3dcab55a1dd0ba6a3a6ecae0a0ca7c>>",
+  "GemstoneHomeSurfaceQuery": {
+    "id": "26935631196118092",
+    "variables": [
+      "entry_point",
+      "GemstoneHomeSurface_HEIGHT_MEASUREMENT_UNIT",
+      "GemstoneHomeSurface_PROFILE_PICTURE_WIDTH",
+      "GemstoneHomeSurface_PROFILE_PICTURE_HEIGHT",
+      "GemstoneHomeSurface_SCALE",
+      "matching_candidate_pagination_session_id",
+      "mutualitiesQueryType",
+      "GemstoneHomeSurface_REQUEST_SOURCE",
+      "matchmaker_user_id"
+    ],
+    "requiredVariables": []
+  }
+}

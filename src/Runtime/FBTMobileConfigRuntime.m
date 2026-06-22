@@ -104,6 +104,10 @@ static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSS
     FBTMCPostUpdateThrottled();
 }
 
+void FBTMobileConfigRecordAccess(uint64_t key, NSString *type, id defaultValue, id resultValue, BOOL overridden) {
+    FBTMCRecord(key, type ?: @"?", FBTMCObjectDescription(defaultValue), FBTMCObjectDescription(resultValue), overridden);
+}
+
 void FBTMobileConfigReloadPrefs(void) {
     @autoreleasepool {
         sCaptureEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigCaptureEnabled];

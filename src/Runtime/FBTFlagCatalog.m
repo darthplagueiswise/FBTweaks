@@ -1,6 +1,14 @@
 #import "FBTFlagCatalog.h"
+#include <stdlib.h>
 
 @implementation FBTFlagCatalog
+
+static uint64_t FBTFlagUInt64FromNumber(NSNumber *n) {
+    if (![n isKindOfClass:[NSNumber class]]) return 0;
+    const char *cstr = [[n stringValue] UTF8String];
+    if (!cstr) return 0;
+    return (uint64_t)strtoull(cstr, NULL, 0);
+}
 
 + (NSURL *)bundleBaseURL {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -31,7 +39,7 @@
     if (!url) return nil;
     NSData *data = [NSData dataWithContentsOfURL:url];
     if (!data.length) return nil;
-    return [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
 }
 
 + (NSArray<NSDictionary *> *)flagsNamed:(NSString *)name {
@@ -62,11 +70,11 @@
         NSNumber *sidN = f[@"sid"];
         NSNumber *pidN = f[@"pid"];
         if (![sidN isKindOfClass:[NSNumber class]]) continue;
-        uint64_t sid = sidN.unsignedLongLongValue;
+        uint64_t sid = FBTFlagUInt64FromNumber(sidN);
         if (sid == key || sid == low48 || sid == low32) return f;
         // Fallback fraco: alguns dumps antigos expõem só paramId. Não usamos
         // para aplicar override, só para rotular a linha capturada.
-        if ([pidN isKindOfClass:[NSNumber class]] && pidN.unsignedLongLongValue == low32) {
+        if ([pidN isKindOfClass:[NSNumber class]] && FBTFlagUInt64FromNumber(pidN) == low32) {
             return f;
         }
     }
@@ -80,7 +88,7 @@
         NSURL *base = [self bundleBaseURL];
         NSURL *dir = [base URLByAppendingPathComponent:@"QueryConfigs" isDirectory:YES];
         NSMutableArray *out = [NSMutableArray array];
-        NSArray<NSURL *> *files = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:dir includingPropertiesForKeys:nil options:0 error:nil] ?: @[];
+        NSArray<NSURL *> *files = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:dir includingPropertiesForKeys:nil options:0 error:NULL] ?: @[];
         for (NSURL *url in files) {
             if (![url.pathExtension.lowercaseString isEqualToString:@"json"]) continue;
             id root = [self jsonFromURL:url];
