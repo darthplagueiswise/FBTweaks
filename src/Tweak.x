@@ -5,6 +5,7 @@
 #import "Runtime/FBTMobileConfigRuntime.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
 #import "Runtime/FBTNativeMobileConfigOverrides.h"
+#import "Features/Employee/FBTInternalImports.h"
 
 // =====================================================================
 // FBTweak — entrypoint
@@ -85,6 +86,21 @@ extern void FBTInitDatingGroup(void);
         if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) FBTInitFloatingTabBarGroup();
         if ([FBTDefaults boolForKey:FBTKeyDatingEnabled])         FBTInitDatingGroup();
 
+        if ([FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
+            [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled]) {
+            FBTInstallInternalImportHooks();
+        }
+
+        if ([FBTDefaults boolForKey:FBTKeyEmployeeSweepEnabled]) {
+            FBTRuntimeBoolInstallSweep(@"employee", YES, 160);
+        }
+        if ([FBTDefaults boolForKey:FBTKeyDogfoodSweepEnabled]) {
+            FBTRuntimeBoolInstallSweep(@"dogfood", YES, 160);
+        }
+        if ([FBTDefaults boolForKey:FBTKeyInternalDebugSweepEnabled]) {
+            FBTRuntimeBoolInstallSweep(@"internaldebug", YES, 160);
+        }
+
         // Runtime browsers. Não varrem classes no launch: só reinstalam hooks
         // persistidos e, no MobileConfig, fishhookam readers conhecidos se a
         // flag runtime já estava on.
@@ -104,6 +120,7 @@ extern void FBTInitDatingGroup(void);
                     usingBlock:^(__unused NSNotification *note) {
                         FBTMobileConfigReloadPrefs();
                         FBTRuntimeBoolReloadPrefs();
+                        FBTInternalImportReloadPrefs();
                     }];
 
         // Hook C (fishhook) — flag latched no ctor; precisa restart p/ alternar.

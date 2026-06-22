@@ -5,6 +5,7 @@
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
+#import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
 
 extern void FBTInstallLiquidGlassHooks(void);
@@ -124,6 +125,11 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Employee sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo employee/test/internalTestUser.", @"key": FBTKeyEmployeeSweepEnabled },
+            @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
+            @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
+            @{ @"kind": @"switch", @"title": @"C import: Internal Settings", @"subtitle": @"fishhook em FBShouldEnableInternalSettings importado pelo executable; toggle runtime após instalar.", @"key": FBTKeyInternalCImportsEnabled },
+            @{ @"kind": @"switch", @"title": @"C import: EasyGating internal", @"subtitle": @"fishhook de teste em EasyGatingGetBoolean_Internal_DoNotUseOrMock; pode ser amplo, use isolado.", @"key": FBTKeyEasyGatingInternalEnabled },
             @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook import + Runtime BOOL; sem patch direto em __TEXT assinado.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
@@ -200,6 +206,12 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     return cell;
 }
 
+- (void)showInfoTitle:(NSString *)title message:(NSString *)message {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
@@ -216,6 +228,23 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if ([sender.prefKey isEqualToString:FBTKeyRuntimeBoolBrowserEnabled]) {
         FBTRuntimeBoolReloadPrefs();
         if (sender.isOn) FBTRuntimeBoolReinstallPersistedHooks();
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyEmployeeSweepEnabled] && sender.isOn) {
+        NSUInteger n = FBTRuntimeBoolInstallSweep(@"employee", YES, 160);
+        [self showInfoTitle:@"Employee sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyDogfoodSweepEnabled] && sender.isOn) {
+        NSUInteger n = FBTRuntimeBoolInstallSweep(@"dogfood", YES, 160);
+        [self showInfoTitle:@"Dogfood sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyInternalDebugSweepEnabled] && sender.isOn) {
+        NSUInteger n = FBTRuntimeBoolInstallSweep(@"internaldebug", YES, 160);
+        [self showInfoTitle:@"Internal/debug sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyInternalCImportsEnabled] ||
+        [sender.prefKey isEqualToString:FBTKeyEasyGatingInternalEnabled]) {
+        FBTInstallInternalImportHooks();
+        FBTInternalImportReloadPrefs();
     }
     if ([sender.prefKey isEqualToString:FBTKeyLiquidGlassEnabled] && sender.isOn) {
         FBTInstallLiquidGlassHooks();

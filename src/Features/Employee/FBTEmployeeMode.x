@@ -23,6 +23,26 @@
     if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) return YES;
     return %orig;
 }
+- (void)setEnableInternalSettingsOption:(BOOL)value {
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) { %orig(YES); return; }
+    %orig(value);
+}
+- (void)setEnableInternalToolsSubmenu:(BOOL)value {
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) { %orig(YES); return; }
+    %orig(value);
+}
+- (void)setForceShowingInternalTools:(BOOL)value {
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) { %orig(YES); return; }
+    %orig(value);
+}
+- (void)setShowTriageToDogfoodingAssistantSession:(BOOL)value {
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) { %orig(YES); return; }
+    %orig(value);
+}
+- (void)setDisableEmployeeProductionReports:(BOOL)value {
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) { %orig(NO); return; }
+    %orig(value);
+}
 %end
 
 %hook FBProductTagCreationLogger

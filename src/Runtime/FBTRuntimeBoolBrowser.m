@@ -219,6 +219,84 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
     return out;
 }
 
+
+static NSMutableDictionary *sSweepStats;
+
+static BOOL FBTStringContainsAny(NSString *hay, NSArray<NSString *> *needles) {
+    NSString *h = hay.lowercaseString ?: @"";
+    for (NSString *n in needles) {
+        if ([h rangeOfString:n.lowercaseString].location != NSNotFound) return YES;
+    }
+    return NO;
+}
+
+static BOOL FBTSweepCandidateMatches(NSDictionary *hit, NSString *mode) {
+    NSString *cls = hit[@"class"] ?: @"";
+    NSString *sel = hit[@"selector"] ?: @"";
+    NSString *imageKind = hit[@"imageKind"] ?: @"";
+    NSString *image = hit[@"image"] ?: @"";
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@", cls, sel, imageKind, image];
+    NSString *m = mode.lowercaseString ?: @"";
+
+    if ([m isEqualToString:@"employee"]) {
+        return FBTStringContainsAny(hay, @[
+            @"employee", @"vieweremployee", @"testuser", @"internaltestuser", @"is_employee", @"employeeortest"
+        ]);
+    }
+    if ([m isEqualToString:@"dogfood"]) {
+        return FBTStringContainsAny(hay, @[
+            @"dogfood", @"dogfooding", @"dogfooder", @"fbt", @"metaconfig"
+        ]);
+    }
+    if ([m isEqualToString:@"internaldebug"]) {
+        return FBTStringContainsAny(hay, @[
+            @"internalsettings", @"internaltool", @"debugmenu", @"debug menu", @"debugcontroller", @"debugview", @"developer", @"devmenu"
+        ]);
+    }
+    return NO;
+}
+
+NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit) {
+    if (limit == 0) limit = 120;
+    FBTRuntimeBoolReloadPrefs();
+    sBoolBrowserEnabled = YES;
+
+    NSDictionary<NSString *, NSArray<NSString *> *> *queriesByMode = @{
+        @"employee": @[@"employee", @"viewerEmployee", @"internalTestUser", @"testUser", @"is_employee"],
+        @"dogfood": @[@"dogfood", @"dogfooding", @"dogfooder", @"FBDogFood", @"DogFood"],
+        @"internaldebug": @[@"internalSettings", @"internalTools", @"debugMenu", @"DebugMenu", @"developer"]
+    };
+    NSArray<NSString *> *queries = queriesByMode[mode.lowercaseString ?: @""] ?: @[];
+    NSMutableDictionary *seen = [NSMutableDictionary dictionary];
+    NSUInteger installed = 0;
+    for (NSString *q in queries) {
+        NSArray<NSDictionary *> *hits = FBTRuntimeBoolSearch(q, 600);
+        for (NSDictionary *hit in hits) {
+            NSString *key = hit[@"key"] ?: @"";
+            if (!key.length || seen[key]) continue;
+            seen[key] = @YES;
+            if (!FBTSweepCandidateMatches(hit, mode)) continue;
+            FBTRuntimeBoolSetOverride(hit, forcedValue);
+            installed++;
+            if (installed >= limit) break;
+        }
+        if (installed >= limit) break;
+    }
+    if (!sSweepStats) sSweepStats = [NSMutableDictionary dictionary];
+    sSweepStats[mode ?: @"unknown"] = @{
+        @"installed": @(installed),
+        @"force": @(forcedValue),
+        @"limit": @(limit),
+        @"timestamp": @([[NSDate date] timeIntervalSince1970])
+    };
+    FBTLog(@"runtime bool sweep %@ installed=%lu", mode, (unsigned long)installed);
+    return installed;
+}
+
+NSDictionary *FBTRuntimeBoolSweepStats(void) {
+    return [sSweepStats copy] ?: @{};
+}
+
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue) {
     NSString *className = candidate[@"class"];
     NSString *selectorName = candidate[@"selector"];

@@ -6,6 +6,11 @@
 // Preferências registradas. Qualquer key nova entra aqui para backup/export.
 extern NSString * const FBTKeyMasterEnabled;
 extern NSString * const FBTKeyEmployeeEnabled;
+extern NSString * const FBTKeyEmployeeSweepEnabled;
+extern NSString * const FBTKeyDogfoodSweepEnabled;
+extern NSString * const FBTKeyInternalDebugSweepEnabled;
+extern NSString * const FBTKeyInternalCImportsEnabled;
+extern NSString * const FBTKeyEasyGatingInternalEnabled;
 extern NSString * const FBTKeyLiquidGlassEnabled;
 extern NSString * const FBTKeyFloatingTabBarEnabled;
 extern NSString * const FBTKeyDatingEnabled;

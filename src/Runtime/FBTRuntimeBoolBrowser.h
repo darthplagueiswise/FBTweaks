@@ -10,5 +10,7 @@ NSDictionary *FBTRuntimeBoolOverridesSnapshot(void);
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue);
 void FBTRuntimeBoolClearOverride(NSDictionary *candidate);
 void FBTRuntimeBoolClearAllOverrides(void);
+NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit);
+NSDictionary *FBTRuntimeBoolSweepStats(void);
 
 #endif /* FBT_RUNTIME_BOOL_BROWSER_H */
