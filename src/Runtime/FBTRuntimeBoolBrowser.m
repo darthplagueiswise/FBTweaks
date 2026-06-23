@@ -28,9 +28,23 @@ static NSString *FBTImageKindForPath(NSString *path) {
     NSString *last = p.lastPathComponent ?: @"";
     if ([last isEqualToString:@"Facebook"] || [last isEqualToString:@"Instagram"]) return @"main-exec";
     if ([last containsString:@"FBSharedFramework"]) return @"FBSharedFramework";
+    if ([last containsString:@"FBReactNativeProductsFramework"]) return @"FBReactNativeProductsFramework";
+    if ([last containsString:@"FBDogFoodUI"]) return @"FBDogFoodUI";
     if ([p containsString:@"/Frameworks/"]) return @"framework";
     if ([p containsString:@"/System/Library/"]) return @"system";
     return last.length ? last : @"unknown";
+}
+
+static BOOL FBTQueryMatchesHaystack(NSString *query, NSString *haystack) {
+    NSString *q = [query.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    if (!q.length) return YES;
+    NSString *h = haystack.lowercaseString ?: @"";
+    NSArray<NSString *> *tokens = [q componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString *token in tokens) {
+        if (!token.length) continue;
+        if ([h rangeOfString:token].location == NSNotFound) return NO;
+    }
+    return YES;
 }
 
 static NSString *FBTImagePathForMethod(Method m) {
@@ -147,14 +161,14 @@ void FBTRuntimeBoolReinstallPersistedHooks(void) {
 
 static BOOL FBTSelectorLooksUseful(NSString *sel) {
     NSString *s = sel.lowercaseString;
-    NSArray *needles = @[@"enabled", @"enable", @"is", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"debug", @"test", @"beta", @"force", @"gate", @"eligible"];
+    NSArray *needles = @[@"enabled", @"enable", @"is", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"dogfooding", @"dogfooder", @"debug", @"test", @"beta", @"force", @"gate", @"gating", @"eligible", @"fbtemployee", @"isfbemployee", @"isinternal", @"isdebug", @"isdebugoptions", @"isdebugoverlay"];
     for (NSString *n in needles) if ([s containsString:n]) return YES;
     return NO;
 }
 
 static BOOL FBTClassLooksUseful(NSString *cls) {
     NSString *c = cls.lowercaseString;
-    NSArray *needles = @[@"fb", @"meta", @"dogfood", @"mobileconfig", @"gating", @"gate", @"internal", @"employee", @"settings", @"tabbar", @"gemstone", @"dating", @"debug"];
+    NSArray *needles = @[@"fb", @"meta", @"dogfood", @"dogfooding", @"mobileconfig", @"metaconfig", @"gating", @"gate", @"internal", @"internalsettings", @"employee", @"settings", @"tabbar", @"gemstone", @"dating", @"debug", @"debugoverlay", @"bugreport", @"userpreferences", @"react", @"rct", @"rn", @"bloks", @"xplat", @"mobileconfigfbt"];
     for (NSString *n in needles) if ([c containsString:n]) return YES;
     return NO;
 }
@@ -176,7 +190,7 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         NSString *imageKind = FBTImageKindForPath(imagePath);
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", className, sel, imageKind ?: @"", imagePath ?: @""] lowercaseString];
         if (q.length) {
-            if ([hay rangeOfString:q].location == NSNotFound) continue;
+            if (!FBTQueryMatchesHaystack(q, hay)) continue;
         } else {
             if (!FBTSelectorLooksUseful(sel) && !FBTClassLooksUseful(className)) continue;
         }
@@ -208,9 +222,15 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
         Class cls = classes[i];
         if (!cls) continue;
         NSString *className = NSStringFromClass(cls);
-        if (query.length == 0 && !FBTClassLooksUseful(className)) continue;
+        // Não pré-filtra por nome de classe quando a query está vazia.
+        // O bug real do browser era este: classes com selector útil (-isEmployee,
+        // -isDebugOptionsEnabled etc.) sumiam se o nome da classe não continha
+        // FB/Dogfood/MobileConfig. A filtragem correta acontece por método.
+        (void)className;
+        @autoreleasepool {
         FBTAppendMethodsForClass(out, cls, NO, query ?: @"", limit);
         FBTAppendMethodsForClass(out, cls, YES, query ?: @"", limit);
+        }
     }
     free(classes);
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {

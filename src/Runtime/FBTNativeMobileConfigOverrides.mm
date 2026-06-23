@@ -27,6 +27,7 @@ typedef void (*FBTUpdateInt64Fn)(mobileconfig::FBMobileConfigOverridesTable *tab
 typedef void (*FBTUpdateDoubleFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, double value, bool persist);
 typedef void (*FBTUpdateStringFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, const std::string &value, bool persist);
 typedef void (*FBTRemoveFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, bool persist);
+typedef void (*FBTSetSkipOverrideCheckEnabledFn)(BOOL enabled);
 
 static FBTGetManagerFn sGetManager = NULL;
 static FBTGetOrCreateTableFn sGetOrCreateTable = NULL;
@@ -35,6 +36,7 @@ static FBTUpdateInt64Fn sUpdateInt64 = NULL;
 static FBTUpdateDoubleFn sUpdateDouble = NULL;
 static FBTUpdateStringFn sUpdateString = NULL;
 static FBTRemoveFn sRemove = NULL;
+static FBTSetSkipOverrideCheckEnabledFn sSetSkipOverrideCheckEnabled = NULL;
 static BOOL sSymbolsResolved = NO;
 static BOOL sContextHooksInstalled = NO;
 
@@ -64,6 +66,11 @@ static BOOL FBTResolveNativeSymbols(void) {
     sUpdateDouble = (FBTUpdateDoubleFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb");
     sUpdateString = (FBTUpdateStringFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb");
     sRemove = (FBTRemoveFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb");
+    // Novo executable importa FBMobileConfigSetSkipOverrideCheckEnabled. Não é
+    // usado como hook/patch: quando existir no processo, chamamos a API normal
+    // antes de aplicar/remover override nativo para deixar o próprio MC aceitar
+    // o arquivo/tabela de override.
+    sSetSkipOverrideCheckEnabled = (FBTSetSkipOverrideCheckEnabledFn)dlsym(RTLD_DEFAULT, "FBMobileConfigSetSkipOverrideCheckEnabled");
 
     BOOL ok = sGetManager && sGetOrCreateTable && sUpdateBool && sUpdateInt64 && sUpdateDouble && sUpdateString && sRemove;
     FBTLog(@"native MC symbols: %@", ok ? @"OK" : @"missing");
@@ -176,7 +183,18 @@ NSString *FBTNativeMobileConfigOverridesFilePath(void) {
     return nil;
 }
 
+
+static void FBTSetSkipOverrideCheckIfAvailable(BOOL enabled) {
+    FBTResolveNativeSymbols();
+    if (!sSetSkipOverrideCheckEnabled) return;
+    @try {
+        sSetSkipOverrideCheckEnabled(enabled);
+    } @catch (__unused NSException *e) {
+    }
+}
+
 BOOL FBTNativeMobileConfigEnsureOverridesFile(void) {
+    FBTSetSkipOverrideCheckIfAvailable(YES);
     NSString *path = FBTNativeMobileConfigOverridesFilePath();
     if (!path.length) return NO;
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -195,8 +213,9 @@ NSString *FBTNativeMobileConfigStatus(void) {
     BOOL symbols = FBTResolveNativeSymbols();
     NSString *path = FBTNativeMobileConfigOverridesFilePath();
     BOOL fileExists = path.length ? [[NSFileManager defaultManager] fileExistsAtPath:path] : NO;
-    return [NSString stringWithFormat:@"native %@ · contexts %lu · objc %lu · file %@", symbols ? @"OK" : @"missing", (unsigned long)FBTNativeMobileConfigContextCount(), (unsigned long)FBTNativeOverrideObjectCount(), path.length ? (fileExists ? @"exists" : @"missing") : @"unknown"];
+    return [NSString stringWithFormat:@"native %@ · skip %@ · contexts %lu · objc %lu · file %@", symbols ? @"OK" : @"missing", sSetSkipOverrideCheckEnabled ? @"OK" : @"missing", (unsigned long)FBTNativeMobileConfigContextCount(), (unsigned long)FBTNativeOverrideObjectCount(), path.length ? (fileExists ? @"exists" : @"missing") : @"unknown"];
 }
+
 
 static NSArray *FBTNativeContextsSnapshot(void) {
     pthread_mutex_lock(&sNativeLock);
@@ -272,6 +291,8 @@ static BOOL FBTApplyWithTable(id context, uint64_t key, NSString *type, id value
 
 BOOL FBTNativeMobileConfigApplyOverride(uint64_t key, NSString *type, id value) {
     if (!type.length || !value) return NO;
+    FBTSetSkipOverrideCheckIfAvailable(YES);
+    FBTNativeMobileConfigEnsureOverridesFile();
     BOOL ok = NO;
     for (id obj in FBTNativeOverrideObjectsSnapshot()) {
         if (FBTApplyWithObjCOverrideObject(obj, key, type, value, NO)) ok = YES;
@@ -283,6 +304,7 @@ BOOL FBTNativeMobileConfigApplyOverride(uint64_t key, NSString *type, id value) 
 }
 
 BOOL FBTNativeMobileConfigRemoveOverride(uint64_t key) {
+    FBTSetSkipOverrideCheckIfAvailable(YES);
     BOOL ok = NO;
     for (id obj in FBTNativeOverrideObjectsSnapshot()) {
         if (FBTApplyWithObjCOverrideObject(obj, key, nil, nil, YES)) ok = YES;
@@ -695,6 +717,8 @@ static void FBTHookMobileConfigReadersForClassName(const char *name, BOOL withDe
 static void FBTInstallKnownObjCMobileConfigHooks(void) {
     FBTHookFBTContextManagerBridge();
     FBTHookMobileConfigReadersForClassName("FBMobileConfigStartupConfigs", YES);
+    FBTHookMobileConfigReadersForClassName("FBMobileConfigStartupConfigsDeprecated", YES);
+    FBTHookMobileConfigReadersForClassName("RCTMobileConfigNative", YES);
     FBTHookMobileConfigReadersForClassName("FBMobileConfigSessionlessContextManager", NO);
     FBTHookMobileConfigReadersForClassName("FBMobileConfigUserSessionContextManager", NO);
     FBTHookMobileConfigReadersForClassName("FBMobileConfigContextObjcImpl", YES);
@@ -703,6 +727,36 @@ static void FBTInstallKnownObjCMobileConfigHooks(void) {
     FBTHookMobileConfigReadersForClassName("IGMobileConfigSessionlessContextManager", NO);
     FBTHookMobileConfigReadersForClassName("IGMobileConfigUserSessionContextManager", NO);
     FBTHookMobileConfigReadersForClassName("FBMobileConfigEmptyImpl", YES);
+}
+
+static BOOL FBTClassLooksLikeGenericMobileConfigReader(NSString *className) {
+    NSString *c = className.lowercaseString ?: @"";
+    if ([c containsString:@"mobileconfig"]) return YES;
+    if ([c containsString:@"metaconfig"]) return YES;
+    if ([c containsString:@"rctmobileconfig"]) return YES;
+    if ([c containsString:@"mci"] && [c containsString:@"config"]) return YES;
+    return NO;
+}
+
+static void FBTInstallGenericObjCMobileConfigReaderHooks(Class cls) {
+    if (!cls) return;
+    NSString *className = NSStringFromClass(cls);
+    if (!FBTClassLooksLikeGenericMobileConfigReader(className)) return;
+    // O novo FBReactNativeProductsFramework usa RCTMobileConfigNative, e builds
+    // recentes movem readers entre classes. Em vez de depender só de nomes
+    // hardcoded, quando o usuário liga MobileConfig pós-launch instalamos nos
+    // readers ObjC que existirem na classe. class_getInstanceMethod protege as
+    // assinaturas ausentes; não há varredura no ctor.
+    FBTHookBool3(cls, NSSelectorFromString(@"getBool:withOptions:"));
+    FBTHookInt3(cls, NSSelectorFromString(@"getInt64:withOptions:"));
+    FBTHookDouble3(cls, NSSelectorFromString(@"getDouble:withOptions:"));
+    FBTHookString3(cls, NSSelectorFromString(@"getString:withOptions:"));
+    FBTHookBool4(cls, NSSelectorFromString(@"getBool:withOptions:withDefault:"));
+    FBTHookInt4(cls, NSSelectorFromString(@"getInt64:withOptions:withDefault:"));
+    FBTHookDouble4(cls, NSSelectorFromString(@"getDouble:withOptions:withDefault:"));
+    FBTHookString4(cls, NSSelectorFromString(@"getString:withOptions:withDefault:"));
+    FBTHookOverridesPath(cls);
+    FBTHookNativeSetRemove(cls);
 }
 
 void FBTInstallNativeMobileConfigContextCapture(void) {
@@ -720,6 +774,7 @@ void FBTInstallNativeMobileConfigContextCapture(void) {
         Class cls = classes[i];
         if (!cls) continue;
         NSString *className = NSStringFromClass(cls);
+        FBTInstallGenericObjCMobileConfigReaderHooks(cls);
         if (!FBTClassCanHostContextGetter(className)) continue;
         FBTHookContextMethodsForClass(cls, NO);
         FBTHookContextMethodsForClass(cls, YES);

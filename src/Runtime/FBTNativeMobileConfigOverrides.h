@@ -2,6 +2,7 @@
 #define FBT_NATIVE_MOBILECONFIG_OVERRIDES_H
 
 #import <Foundation/Foundation.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {

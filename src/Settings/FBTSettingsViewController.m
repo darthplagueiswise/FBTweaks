@@ -50,6 +50,18 @@ static UILabel *FBTSecondaryLabel(NSString *text) {
 
 static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 
+static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack) {
+    NSString *q = [query.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    if (!q.length) return YES;
+    NSString *h = haystack.lowercaseString ?: @"";
+    NSArray<NSString *> *tokens = [q componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString *token in tokens) {
+        if (!token.length) continue;
+        if ([h rangeOfString:token].location == NSNotFound) return NO;
+    }
+    return YES;
+}
+
 @interface FBTSettingsSwitch : UISwitch
 @property (nonatomic, copy) NSString *prefKey;
 @end
@@ -135,10 +147,10 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura de contexto ObjC para OverridesTable nativo; sem patch em __TEXT assinado.", @"key": FBTKeyMobileConfigRuntimeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura ObjC/RCT MobileConfig pós-launch. Abrir MobileConfig Live também instala manualmente na sessão.", @"key": FBTKeyMobileConfigRuntimeEnabled },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
-            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/framework e salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
         @[
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
@@ -167,8 +179,8 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"MobileConfig runtime instala fishhook nos imports e hooks ObjC leves para capturar FBMobileConfigContext. Override nativo aplica quando a tela já gerou contexto vivo.";
-    if (section == 3) return @"O browser ObjC não varre classes no launch. Hook novo criado na UI fica salvo e também reinstala no próximo launch.";
+    if (section == 2) return @"MobileConfig runtime instala fishhook nos imports e hooks ObjC/RCT leves pós-launch. O novo build importa FBMobileConfigSetSkipOverrideCheckEnabled; quando presente a tweak chama essa API antes de aplicar override nativo.";
+    if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
     return nil;
 }
 
@@ -302,6 +314,12 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Buscar key, config ou param";
     self.navigationItem.searchController = self.searchController;
+    // Ação manual pós-launch: evita o watchdog do ctor, mas faz o browser
+    // funcionar quando o usuário abre a tela. Inclui RCTMobileConfigNative e
+    // readers ObjC genéricos do novo FBReactNativeProductsFramework.
+    FBTInstallMobileConfigRuntime();
+    FBTInstallNativeMobileConfigContextCapture();
+    FBTMobileConfigReloadPrefs();
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadSnapshot) name:FBTMobileConfigDidUpdateNotification object:nil];
     [self reloadSnapshot];
 }
@@ -323,7 +341,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     else {
         NSPredicate *p = [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, __unused NSDictionary *bindings) {
             NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@ %@", e[@"key"] ?: @"", e[@"hex"] ?: @"", e[@"config"] ?: @"", e[@"param"] ?: @"", e[@"type"] ?: @""] lowercaseString];
-            return [hay containsString:q];
+            return FBTSettingsQueryMatchesHaystack(q, hay);
         }];
         self.filtered = [self.entries filteredArrayUsingPredicate:p];
     }
@@ -416,7 +434,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if (!q.length) self.filtered = self.entries ?: @[];
     else self.filtered = [self.entries filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, __unused NSDictionary *b) {
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", e[@"class"] ?: @"", e[@"selector"] ?: @"", e[@"imageKind"] ?: @"", e[@"image"] ?: @""] lowercaseString];
-        return [hay containsString:q];
+        return FBTSettingsQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }
@@ -440,7 +458,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
         cfg.text = @"Nenhum getter BOOL encontrado";
-        cfg.secondaryText = @"Busca por termos como dogfood, internal, employee, enabled, debug, gate ou nome de classe.";
+        cfg.secondaryText = @"Busca por termos como dogfood, internal, employee, debug, RCT, React, FBShared ou main-exec. A busca aceita múltiplas palavras e roda só pós-launch.";
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
         cell.accessoryType = UITableViewCellAccessoryNone;
@@ -495,7 +513,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if (!q.length) self.filtered = self.flags ?: @[];
     else self.filtered = [self.flags filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *f, __unused NSDictionary *b) {
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@", f[@"c"] ?: @"", f[@"p"] ?: @"", f[@"tag"] ?: @""] lowercaseString];
-        return [hay containsString:q];
+        return FBTSettingsQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }
@@ -534,7 +552,7 @@ static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
     if (!q.length) self.filtered = self.items ?: @[];
     else self.filtered = [self.items filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *item, __unused NSDictionary *b) {
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@", item[@"name"] ?: @"", item[@"id"] ?: @"", item[@"file"] ?: @""] lowercaseString];
-        return [hay containsString:q];
+        return FBTSettingsQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }
