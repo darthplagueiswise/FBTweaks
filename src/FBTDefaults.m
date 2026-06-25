@@ -2,6 +2,11 @@
 
 NSString * const FBTKeyMasterEnabled         = @"fbt_master_enabled";
 NSString * const FBTKeyEmployeeEnabled       = @"fbt_employee_enabled";
+NSString * const FBTKeyEmployeeSweepEnabled  = @"fbt_employee_sweep_enabled";
+NSString * const FBTKeyDogfoodSweepEnabled   = @"fbt_dogfood_sweep_enabled";
+NSString * const FBTKeyInternalDebugSweepEnabled = @"fbt_internal_debug_sweep_enabled";
+NSString * const FBTKeyInternalCImportsEnabled = @"fbt_internal_c_imports_enabled";
+NSString * const FBTKeyEasyGatingInternalEnabled = @"fbt_easygating_internal_enabled";
 NSString * const FBTKeyLiquidGlassEnabled    = @"fbt_liquidglass_enabled";
 NSString * const FBTKeyFloatingTabBarEnabled = @"fbt_floating_tabbar_enabled";
 NSString * const FBTKeyDatingEnabled         = @"fbt_dating_enabled";
@@ -25,22 +30,25 @@ static NSDictionary *gRegistered = nil;
     return @{
         FBTKeyMasterEnabled:                    @(YES),
         FBTKeyEmployeeEnabled:                  @(NO),
+        FBTKeyEmployeeSweepEnabled:             @(NO),
+        FBTKeyDogfoodSweepEnabled:              @(NO),
+        FBTKeyInternalDebugSweepEnabled:        @(NO),
+        FBTKeyInternalCImportsEnabled:          @(NO),
+        FBTKeyEasyGatingInternalEnabled:        @(NO),
         FBTKeyLiquidGlassEnabled:               @(NO),
         FBTKeyFloatingTabBarEnabled:            @(NO),
         FBTKeyDatingEnabled:                    @(NO),
         FBTKeyOpenLongPress:                    @(YES),
 
-        // Runtime browsers ficam ON por padrão para permitir captura/hook real
-        // sem depender de recompilar. O custo no launch é só ler dicionários
-        // pequenos e instalar hooks persistidos; varredura pesada é on-demand.
-        FBTKeyMobileConfigRuntimeEnabled:       @(YES),
+        // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
+        // para não tocar __TEXT assinado; varredura pesada é on-demand.
+        FBTKeyMobileConfigRuntimeEnabled:       @(NO),
         FBTKeyMobileConfigCaptureEnabled:       @(YES),
         FBTKeyMobileConfigOverridesEnabled:     @(YES),
         FBTKeyMobileConfigOverrides:            @{},
 
         FBTKeyRuntimeBoolBrowserEnabled:        @(YES),
         FBTKeyRuntimeBoolOverrides:             @{},
-        @"fbt_symbol_overrides":                @{},
     };
 }
 
