@@ -6,8 +6,8 @@
 // lets the user persist a force override.
 //
 // Runtime-force timing model:
-//   • Persistence: one NSUserDefaults dict (fbt_symbol_overrides) via SCIUtils,
-//     registered in SCIDefaults so backup/export includes it.
+//   • Persistence: one NSUserDefaults dict (fbt_symbol_overrides) via NSUserDefaults,
+//     registered in FBTDefaults so backup/export includes it.
 //   • Hooking: persisted overrides are installed once from Logos bootstrap.
 //     A newly selected getter is saved and installed live immediately; the
 //     replacement reads the in-memory cache, not NSUserDefaults.

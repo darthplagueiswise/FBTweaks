@@ -536,7 +536,7 @@ static UIVisualEffectView *FBTUIKit26EnsureGlassBackground(UIView *view, CGFloat
 - (instancetype)initWithRadius:(CGFloat)radius {
     self = [super initWithEffect:FBTUIKit26GlassEffect(NO, NO, nil)];
     if (self) {
-        _sciCornerRadius = radius;
+        _fbtCornerRadius = radius;
         [self applyLiquidGlassStyle];
     }
     return self;
@@ -545,7 +545,7 @@ static UIVisualEffectView *FBTUIKit26EnsureGlassBackground(UIView *view, CGFloat
 - (instancetype)initWithEffect:(UIVisualEffect *)effect {
     self = [super initWithEffect:effect ?: FBTUIKit26GlassEffect(NO, NO, nil)];
     if (self) {
-        _sciCornerRadius = 22.0;
+        _fbtCornerRadius = 22.0;
         [self applyLiquidGlassStyle];
     }
     return self;
@@ -556,18 +556,18 @@ static UIVisualEffectView *FBTUIKit26EnsureGlassBackground(UIView *view, CGFloat
     [self applyLiquidGlassStyle];
 }
 
-- (void)setSciGlassInteractive:(BOOL)fbtGlassInteractive {
-    _sciGlassInteractive = fbtGlassInteractive;
+- (void)setFbtGlassInteractive:(BOOL)fbtGlassInteractive {
+    _fbtGlassInteractive = fbtGlassInteractive;
     [self applyLiquidGlassStyle];
 }
 
-- (void)setSciGlassClearStyle:(BOOL)fbtGlassClearStyle {
-    _sciGlassClearStyle = fbtGlassClearStyle;
+- (void)setFbtGlassClearStyle:(BOOL)fbtGlassClearStyle {
+    _fbtGlassClearStyle = fbtGlassClearStyle;
     [self applyLiquidGlassStyle];
 }
 
-- (void)setSciGlassTintColor:(UIColor *)fbtGlassTintColor {
-    _sciGlassTintColor = fbtGlassTintColor;
+- (void)setFbtGlassTintColor:(UIColor *)fbtGlassTintColor {
+    _fbtGlassTintColor = fbtGlassTintColor;
     [self applyLiquidGlassStyle];
 }
 
