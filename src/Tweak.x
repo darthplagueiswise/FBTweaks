@@ -1,6 +1,7 @@
 #import "FBTPrefix.h"
 #import "FacebookHeaders.h"
 #import "FBTDefaults.h"
+#import "Runtime/FBTSymbolBrowserEngine.h"
 #import "FBTUtils.h"
 #import "Runtime/FBTMobileConfigRuntime.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
@@ -106,6 +107,7 @@ extern void FBTInitDatingGroup(void);
         // flag runtime já estava on.
         if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
             FBTRuntimeBoolReinstallPersistedHooks();
+            [FBTSymbolBrowserEngine reinstallPersistedHooks];
         }
 
         if ([FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled]) {

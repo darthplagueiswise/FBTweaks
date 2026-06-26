@@ -5,7 +5,7 @@
 #import <substrate.h>
 
 static NSString *const kOverridesKey = @"fbt_symbol_overrides";
-static const char *kImageSuffix[3] = { "/Facebook", "/FBSharedFramework", "/FBReactNativeProductsFramework" };
+static const char *kImageSuffix[4] = { "/Facebook", "/FBSharedFramework", "/FBReactNativeProductsFramework", "/FBSharedDynamicFramework" };
 
 static NSDictionary<NSString *, NSNumber *> *sRuntimeOverrideCache;
 static NSMutableSet<NSString *> *sInstalledOverrideKeys;

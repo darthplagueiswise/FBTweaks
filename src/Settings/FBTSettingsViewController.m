@@ -3,6 +3,8 @@
 #import "../FBTUtils.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
+#import "FBTSymbolsBrowserViewController.h"
+#import "FBTFeatureParamsViewController.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
 #import "../Features/Employee/FBTInternalImports.h"
@@ -145,6 +147,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook import + Runtime BOOL; sem patch direto em __TEXT assinado.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
+            @{ @"kind": @"nav", @"title": @"Liquid Glass — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:LiquidGlass" },
+            @{ @"kind": @"nav", @"title": @"Floating Tab Bar — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:FloatingTab" },
+            @{ @"kind": @"nav", @"title": @"Dating / Gemstone — gates", @"subtitle": @"Gates employee/test-user/internal via mc_overrides.json nativo.", @"dest": @"feat:DatingGemstone" },
         ],
         @[
             @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura ObjC/RCT MobileConfig pós-launch. Abrir MobileConfig Live também instala manualmente na sessão.", @"key": FBTKeyMobileConfigRuntimeEnabled },
@@ -154,7 +159,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
-            @{ @"kind": @"nav", @"title": @"ObjC BOOL Runtime Browser", @"subtitle": @"Busca selectors BOOL por classe/selector/image e salva Force ON/OFF.", @"dest": @"bool" },
+            @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
             @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
             @{ @"kind": @"nav", @"title": @"Dump completo de flags", @"subtitle": @"FBTFlags.json empacotado.", @"dest": @"flags" },
             @{ @"kind": @"nav", @"title": @"Query configs enviados", @"subtitle": @"GraphQL IDs/variáveis empacotados no bundle.", @"dest": @"queries" },
@@ -271,7 +276,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         NSString *dest = item[@"dest"];
         UIViewController *vc = nil;
         if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
-        else if ([dest isEqualToString:@"bool"]) vc = [[FBTRuntimeBoolViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
+        else if ([dest hasPrefix:@"feat:"]) vc = [[FBTFeatureParamsViewController alloc] initWithFeatureId:[dest substringFromIndex:5]];
         else if ([dest isEqualToString:@"headline"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = YES; vc = f; }
         else if ([dest isEqualToString:@"flags"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = NO; vc = f; }
         else if ([dest isEqualToString:@"queries"]) vc = [[FBTQueryConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];

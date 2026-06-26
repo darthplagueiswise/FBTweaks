@@ -24,6 +24,7 @@ typedef NS_ENUM(NSInteger, FBTSymbolImage) {
 	FBTSymbolImageFacebook = 0,
 	FBTSymbolImageFBShared = 1,
 	FBTSymbolImageReactNative = 2,
+	FBTSymbolImageFBSharedDynamic = 3,
 };
 
 @interface FBTSymbolGetter : NSObject
