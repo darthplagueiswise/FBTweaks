@@ -6,7 +6,7 @@
 + (NSString *)path { return FBTNativeMobileConfigOverridesFilePath(); }
 + (BOOL)fileExists { NSString *p = [self path]; return p && [[NSFileManager defaultManager] fileExistsAtPath:p]; }
 
-+ (NSMutableDictionary *)load {
++ (NSMutableDictionary *)loadOverrides {
     NSString *p = [self path];
     if (!p) return [NSMutableDictionary dictionary];
     NSData *d = [NSData dataWithContentsOfFile:p];
@@ -33,7 +33,7 @@
 }
 
 + (FBTMCState)stateForConfig:(NSString *)configKey paramIdx:(NSInteger)idx {
-    NSDictionary *all = [self load];
+    NSDictionary *all = [self loadOverrides];
     NSArray *arr = all[configKey];
     if (![arr isKindOfClass:NSArray.class]) return FBTMCStateSys;
     for (NSString *e in arr) {
@@ -48,7 +48,7 @@
 }
 
 + (void)setState:(FBTMCState)state forConfig:(NSString *)configKey paramIdx:(NSInteger)idx name:(NSString *)name {
-    NSMutableDictionary *all = [self load];
+    NSMutableDictionary *all = [self loadOverrides];
     NSMutableArray *arr = [(all[configKey] ?: @[]) mutableCopy];
     // remove qualquer entrada desse idx
     NSMutableArray *kept = [NSMutableArray array];
