@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "../FBTUtils.h"
 @interface FBTUtils (FBTBrowserCompat)
 + (NSDictionary *)getDictPref:(NSString *)key;
 + (void)setPref:(id)value forKey:(NSString *)key;
