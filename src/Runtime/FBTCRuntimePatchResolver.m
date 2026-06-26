@@ -1,9 +1,9 @@
 // FBTCRuntimePatchResolver.m
 #import "FBTCRuntimePatchResolver.h"
 #import "FBTCSymbolStub.h"
-#import "../../Features/Dogfooding/FBTSymbolBrowserEngine.h"
+#import "FBTSymbolBrowserEngine.h"
 #import "../FBTUtils.h"
-#import "../../../modules/fishhook/fishhook.h"
+#import "../../modules/fishhook/fishhook.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <dlfcn.h>
 #import <mach/mach.h>

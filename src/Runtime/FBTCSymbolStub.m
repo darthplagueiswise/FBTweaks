@@ -1,6 +1,6 @@
 #import "FBTCSymbolStub.h"
 #import "../FBTUtils.h"
-#import "../../../modules/fishhook/fishhook.h"
+#import "../../modules/fishhook/fishhook.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <dlfcn.h>
 #import <os/log.h>
