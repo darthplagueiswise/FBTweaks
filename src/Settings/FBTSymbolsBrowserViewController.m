@@ -626,7 +626,7 @@ static FBTCPatchStrategy FBTCPatchStrategyFromRuntime(FBTCRuntimePatchStrategy s
         tf.placeholder = @"01 or 0000000000000001";
         id cur = [FBTCRuntimePatchResolver currentForcedValueForPlan:plan];
         tf.text = [cur isKindOfClass:NSString.class] ? cur : @"";
-        tf.keyboardType = UIKeyboardTypeAFBTICapable;
+        tf.keyboardType = UIKeyboardTypeASCIICapable;
     }];
     __weak typeof(self) ws = self;
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
