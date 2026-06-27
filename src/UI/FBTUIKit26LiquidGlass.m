@@ -827,3 +827,9 @@ static UIButton *FBTUIKit26ToolbarButton(NSString *title, NSString *symbol, id t
 }
 
 @end
+
+void FBTUIKit26ConfigureSearchNavigationItem(UINavigationItem *navigationItem) {
+    if (!navigationItem) return;
+    UISearchBar *searchBar = navigationItem.searchController.searchBar;
+    if (searchBar) FBTUIKit26ConfigureSearchBar(searchBar);
+}
