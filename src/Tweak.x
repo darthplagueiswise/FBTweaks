@@ -6,6 +6,7 @@
 #import "Runtime/FBTMobileConfigRuntime.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
 #import "Runtime/FBTNativeMobileConfigOverrides.h"
+#import "Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "Features/Employee/FBTInternalImports.h"
 #import "Features/ReactNative/FBTReactNativeInternal.h"
 
@@ -23,6 +24,7 @@ extern void FBTInstallLiquidGlassHooks(void);   // Features/LiquidGlass
 extern void FBTInstallDogfoodObserver(void);     // Features/Dogfood (notif observer)
 extern void FBTInitEmployeeGroup(void);
 extern void FBTInstallKnownGateRuntimeHooks(void);
+extern void FBTInitTestUserInternalConfigGroup(void);
 extern void FBTInitFloatingTabBarGroup(void);
 extern void FBTInitDatingGroup(void);
 
@@ -49,6 +51,9 @@ extern void FBTInitDatingGroup(void);
         [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
         [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
         FBTInstallKnownGateRuntimeHooks();
+    }
+    if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+        FBTInstallMobileConfigDebugUIHooks();
     }
 
     // Anexa o gesto uma única vez por instância.
@@ -101,12 +106,13 @@ extern void FBTInitDatingGroup(void);
         BOOL betaBuildOn = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
 
         if (employeeOn || testUserOn || dogfoodOn) FBTInitEmployeeGroup();
-        if (employeeOn || rnInternalOn) FBTInitReactNativeInternalGroup();
-        if (employeeOn || rnInternalOn || betaBuildOn) FBTInstallReactNativeAndBuildImportHooks();
+        if (testUserOn) FBTInitTestUserInternalConfigGroup();
+        if (employeeOn || testUserOn || rnInternalOn) FBTInitReactNativeInternalGroup();
+        if (employeeOn || testUserOn || rnInternalOn || betaBuildOn) FBTInstallReactNativeAndBuildImportHooks();
         if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) FBTInitFloatingTabBarGroup();
         if ([FBTDefaults boolForKey:FBTKeyDatingEnabled]) FBTInitDatingGroup();
 
-        if (employeeOn ||
+        if (employeeOn || testUserOn ||
             [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
             [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled]) {
             FBTInstallInternalImportHooks();
@@ -120,6 +126,10 @@ extern void FBTInitDatingGroup(void);
         }
         if ([FBTDefaults boolForKey:FBTKeyInternalDebugSweepEnabled]) {
             // disabled at launch: internaldebug sweep is manual post-launch
+        }
+
+        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+            FBTInstallMobileConfigDebugUIBootstrap();
         }
 
         // Runtime browsers. Não varrem classes no launch: só reinstalam hooks
@@ -147,6 +157,9 @@ extern void FBTInitDatingGroup(void);
                             [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
                             [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
                             FBTInstallKnownGateRuntimeHooks();
+                        }
+                        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+                            FBTInstallMobileConfigDebugUIHooks();
                         }
                     }];
 
