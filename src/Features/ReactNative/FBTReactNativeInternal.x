@@ -36,7 +36,8 @@ static inline BOOL FBTEmployeeOn(void) {
 %hook FBInspirationMediaCompositionViewController
 - (BOOL)isEligibleForDebugIndicatorWithEmployeeCondition:(BOOL)condition {
     // Preserve all non-employee eligibility checks and force only the input.
-    return FBTEmployeeOn() ? %orig(YES) : %orig(condition);
+    BOOL forcedCondition = FBTEmployeeOn() ? YES : condition;
+    return %orig(forcedCondition);
 }
 %end
 
@@ -132,8 +133,8 @@ static BOOL fbt_METAOSBuildIsBeta(void) {
 void FBTInitReactNativeInternalGroup(void) {
     if (sRNGroupInitialized) return;
 
-    // Do not consume Logos initialization before the RN framework actually
-    // registered at least one target class. The function remains retryable.
+    // Do not consume the one-time Logos initialization before the RN framework
+    // actually registered at least one target class. The function remains retryable.
     if (!objc_getClass("RCTCurrentViewer") &&
         !objc_getClass("RCTDevMenu") &&
         !objc_getClass("RCTDevSettings")) {
