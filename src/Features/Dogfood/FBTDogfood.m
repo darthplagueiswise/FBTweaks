@@ -1,8 +1,7 @@
 #import "FBTPrefix.h"
 #import "FBTUtils.h"
 #import "FBTDefaults.h"
-#import "Runtime/FBTMobileConfigRuntime.h"
-#import "Runtime/FBTNativeMobileConfigOverrides.h"
+#import "Runtime/FBTMobileConfigDebugUIHooks.h"
 #import <dlfcn.h>
 
 // Categoria utilitária p/ o seletor de fechar do painel nativo.
@@ -30,13 +29,11 @@ typedef UIViewController *(*FBTInternalSettingsFn)(id session);
 extern void FBTInstallKnownGateRuntimeHooks(void);
 
 static void fbt_openNativeInternalSettings(void) {
-    // Install the light post-launch capture before the native MobileConfig UI
-    // is reached. This reduces the context-manager race seen when opening a
-    // param immediately after entering Internal Settings. It does not fake a
-    // failed server QE-info response.
-    FBTInstallMobileConfigRuntime();
-    FBTInstallNativeMobileConfigContextCapture();
-    FBTMobileConfigReloadPrefs();
+    // Register the late native-UI bootstrap before creating the Internal
+    // Settings surface. Context/readers are warmed when the actual
+    // FBMobileConfigDebugViewController enters, avoiding the old one-shot scan
+    // before FBRarelyUsedFramework was loaded. Server QE failures remain native.
+    FBTInstallMobileConfigDebugUIBootstrap();
     FBTInstallKnownGateRuntimeHooks();
 
     id session = [FBTUtils storedSession];
@@ -60,6 +57,9 @@ static void fbt_openNativeInternalSettings(void) {
         return;
     }
     if (![vc isKindOfClass:[UIViewController class]]) return;
+
+    // The function above may load additional internal bundles synchronously.
+    FBTInstallMobileConfigDebugUIHooks();
 
     dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *presenter = [FBTUtils topMostController];
