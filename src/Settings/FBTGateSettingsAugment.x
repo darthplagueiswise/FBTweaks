@@ -114,7 +114,7 @@ static void FBTInstallGateFamiliesForKey(NSString *key, BOOL enabled) {
            @"key": FBTKeyKnownDogfoodEnabled },
         @{ @"kind": @"switch",
            @"title": @"React Native Internal Settings",
-           @"subtitle": @"RCT DevMenu/DevSettings, shake, hotkeys, profiling, hot loading, sampling profiler, perf monitor e DevLoadingView.",
+           @"subtitle": @"RCT DevMenu/DevSettings, disponibilidade de debug, shake, hotkeys, menu items e DevLoadingView. Profiler, hot reload e perf monitor continuam controlados pelo usuário.",
            @"key": FBTKeyReactNativeInternalEnabled,
            @"restart": @YES },
         @{ @"kind": @"switch",
