@@ -98,7 +98,7 @@ static BOOL FBTMCUIEncodingEquals(Class cls, SEL sel, const char *expected) {
 
 static void FBTMobileConfigDebugWarmup(void) {
     // Post-launch/user-triggered only. Installing the fishhooks is safe here;
-    // capture/override behavior remains controlled by the live prefs.
+    // capture/override behavior remains controlled by live preferences.
     FBTInstallMobileConfigRuntime();
     FBTInstallNativeMobileConfigContextCapture();
     FBTMobileConfigReloadPrefs();
@@ -116,11 +116,9 @@ static void FBTCallOriginalSelection(id controller, SEL selector, FBTMCSelection
 }
 
 static void FBTOpenLocalMobileConfigFallback(UIViewController *presenter) {
-    Class cls = NSClassFromString(@"FBTMobileConfigViewController");
-    if (!cls) return;
-
-    UIViewController *local = [[cls alloc] initWithStyle:UITableViewStyleInsetGrouped];
-    if (![local isKindOfClass:[UIViewController class]]) return;
+    FBTMobileConfigViewController *local =
+        [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    if (!local) return;
 
     if (presenter.navigationController) {
         [presenter.navigationController pushViewController:local animated:YES];
@@ -226,7 +224,8 @@ static void fbt_FBMobileConfigDebug_present(id self,
 
         // Preserve the native second failure and add a local path that does not
         // depend on the employee-only QE names/info endpoint.
-        FBTAddLocalFallbackAction((UIAlertController *)controller, self);
+        FBTAddLocalFallbackAction((UIAlertController *)controller,
+                                  (UIViewController *)self);
     }
 
     if (orig_FBMobileConfigDebug_present) {
