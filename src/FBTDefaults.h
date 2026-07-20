@@ -21,6 +21,7 @@ extern NSString * const FBTKeyDatingEnabled;
 extern NSString * const FBTKeyOpenLongPress;
 
 extern NSString * const FBTKeyMobileConfigRuntimeEnabled;
+extern NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled;
 extern NSString * const FBTKeyMobileConfigCaptureEnabled;
 extern NSString * const FBTKeyMobileConfigOverridesEnabled;
 extern NSString * const FBTKeyMobileConfigOverrides;
