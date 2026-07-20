@@ -22,7 +22,6 @@ static NSDictionary *sOverrides;                                // key -> {force
 static BOOL sBoolBrowserEnabled = NO;
 static pthread_mutex_t sBoolLock = PTHREAD_MUTEX_INITIALIZER;
 
-
 static NSString *FBTImageKindForPath(NSString *path) {
     NSString *p = path ?: @"";
     NSString *last = p.lastPathComponent ?: @"";
@@ -121,17 +120,20 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
-        BOOL original = NO;
-        if (captured->orig) {
-            original = ((FBTBoolOrigImp)captured->orig)(receiver, captured->sel);
-        }
         NSString *capturedKey = (__bridge NSString *)captured->key;
-        FBTBoolRememberObserved(capturedKey, original);
         NSDictionary *ov = FBTBoolOverrideForKey(capturedKey);
+        // Force is decided before the original. A forced getter must not run
+        // side effects, slow paths or crashes from the original implementation.
         if (ov && sBoolBrowserEnabled) {
             id v = ov[@"force"];
             if ([v respondsToSelector:@selector(boolValue)]) return [v boolValue];
         }
+
+        BOOL original = NO;
+        if (captured->orig) {
+            original = ((FBTBoolOrigImp)captured->orig)(receiver, captured->sel);
+        }
+        FBTBoolRememberObserved(capturedKey, original);
         return original;
     });
 
@@ -228,8 +230,8 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
         // FB/Dogfood/MobileConfig. A filtragem correta acontece por método.
         (void)className;
         @autoreleasepool {
-        FBTAppendMethodsForClass(out, cls, NO, query ?: @"", limit);
-        FBTAppendMethodsForClass(out, cls, YES, query ?: @"", limit);
+            FBTAppendMethodsForClass(out, cls, NO, query ?: @"", limit);
+            FBTAppendMethodsForClass(out, cls, YES, query ?: @"", limit);
         }
     }
     free(classes);
@@ -239,41 +241,51 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
     return out;
 }
 
-
 static NSMutableDictionary *sSweepStats;
 
-static BOOL FBTStringContainsAny(NSString *hay, NSArray<NSString *> *needles) {
-    NSString *h = hay.lowercaseString ?: @"";
-    for (NSString *n in needles) {
-        if ([h rangeOfString:n.lowercaseString].location != NSNotFound) return YES;
-    }
-    return NO;
-}
-
 static BOOL FBTSweepCandidateMatches(NSDictionary *hit, NSString *mode) {
-    NSString *cls = hit[@"class"] ?: @"";
-    NSString *sel = hit[@"selector"] ?: @"";
-    NSString *imageKind = hit[@"imageKind"] ?: @"";
-    NSString *image = hit[@"image"] ?: @"";
-    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@", cls, sel, imageKind, image];
+    NSString *selector = hit[@"selector"] ?: @"";
     NSString *m = mode.lowercaseString ?: @"";
 
-    if ([m isEqualToString:@"employee"]) {
-        return FBTStringContainsAny(hay, @[
-            @"employee", @"vieweremployee", @"testuser", @"internaltestuser", @"is_employee", @"employeeortest"
-        ]);
-    }
-    if ([m isEqualToString:@"dogfood"]) {
-        return FBTStringContainsAny(hay, @[
-            @"dogfood", @"dogfooding", @"dogfooder", @"fbt", @"metaconfig"
-        ]);
-    }
-    if ([m isEqualToString:@"internaldebug"]) {
-        return FBTStringContainsAny(hay, @[
-            @"internalsettings", @"internaltool", @"debugmenu", @"debug menu", @"debugcontroller", @"debugview", @"developer", @"devmenu"
-        ]);
-    }
-    return NO;
+    NSDictionary<NSString *, NSSet<NSString *> *> *allowlists = @{
+        @"employee": [NSSet setWithArray:@[
+            @"isEmployee", @"isViewerEmployee", @"isFbEmployee", @"isFBUserEmployee"
+        ]],
+        @"dogfood": [NSSet setWithArray:@[
+            @"enableDogfoodingView", @"triageToDogfoodingAssistantSession",
+            @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"
+        ]],
+        @"internaldebug": [NSSet setWithArray:@[
+            @"devMenuEnabled", @"isDeviceDebuggingAvailable",
+            @"isShakeToShowDevMenuEnabled", @"isShakeGestureEnabled",
+            @"isDebugOptionsEnabled", @"isDebugOverlayEnabled",
+            @"isInternalSettingsEnabled", @"isInternalBuild"
+        ]],
+    };
+    NSSet<NSString *> *allowed = allowlists[m];
+    return allowed && [allowed containsObject:selector];
+}
+
+static void FBTRuntimeBoolSetOverrideWithSource(NSDictionary *candidate,
+                                                BOOL forcedValue,
+                                                NSString *source) {
+    NSString *className = candidate[@"class"];
+    NSString *selectorName = candidate[@"selector"];
+    BOOL isClass = [candidate[@"classMethod"] boolValue];
+    NSString *key = FBTBoolKey(className, selectorName, isClass);
+    if (!FBTRuntimeBoolInstallOne(className, selectorName, isClass)) return;
+
+    NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *entry = [@{
+        @"class": className ?: @"",
+        @"selector": selectorName ?: @"",
+        @"classMethod": @(isClass),
+        @"force": @(forcedValue),
+    } mutableCopy];
+    if (source.length) entry[@"source"] = source;
+    all[key] = entry;
+    [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
+    FBTRuntimeBoolReloadPrefs();
 }
 
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit) {
@@ -282,26 +294,31 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     sBoolBrowserEnabled = YES;
 
     NSDictionary<NSString *, NSArray<NSString *> *> *queriesByMode = @{
-        @"employee": @[@"employee", @"viewerEmployee", @"internalTestUser", @"testUser", @"is_employee"],
-        @"dogfood": @[@"dogfood", @"dogfooding", @"dogfooder", @"FBDogFood", @"DogFood"],
-        @"internaldebug": @[@"internalSettings", @"internalTools", @"debugMenu", @"DebugMenu", @"developer"]
+        @"employee": @[@"isEmployee", @"isViewerEmployee", @"isFbEmployee", @"isFBUserEmployee"],
+        @"dogfood": @[@"enableDogfoodingView", @"triageToDogfoodingAssistantSession", @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"],
+        @"internaldebug": @[@"devMenuEnabled", @"isDeviceDebuggingAvailable", @"isShakeToShowDevMenuEnabled", @"isShakeGestureEnabled", @"isDebugOptionsEnabled", @"isDebugOverlayEnabled", @"isInternalSettingsEnabled", @"isInternalBuild"],
     };
-    NSArray<NSString *> *queries = queriesByMode[mode.lowercaseString ?: @""] ?: @[];
+
+    NSString *normalizedMode = mode.lowercaseString ?: @"";
+    NSArray<NSString *> *queries = queriesByMode[normalizedMode] ?: @[];
+    NSString *source = [@"sweep:" stringByAppendingString:normalizedMode];
     NSMutableDictionary *seen = [NSMutableDictionary dictionary];
     NSUInteger installed = 0;
+
     for (NSString *q in queries) {
         NSArray<NSDictionary *> *hits = FBTRuntimeBoolSearch(q, 600);
         for (NSDictionary *hit in hits) {
             NSString *key = hit[@"key"] ?: @"";
             if (!key.length || seen[key]) continue;
             seen[key] = @YES;
-            if (!FBTSweepCandidateMatches(hit, mode)) continue;
-            FBTRuntimeBoolSetOverride(hit, forcedValue);
+            if (!FBTSweepCandidateMatches(hit, normalizedMode)) continue;
+            FBTRuntimeBoolSetOverrideWithSource(hit, forcedValue, source);
             installed++;
             if (installed >= limit) break;
         }
         if (installed >= limit) break;
     }
+
     if (!sSweepStats) sSweepStats = [NSMutableDictionary dictionary];
     sSweepStats[mode ?: @"unknown"] = @{
         @"installed": @(installed),
@@ -318,15 +335,7 @@ NSDictionary *FBTRuntimeBoolSweepStats(void) {
 }
 
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue) {
-    NSString *className = candidate[@"class"];
-    NSString *selectorName = candidate[@"selector"];
-    BOOL isClass = [candidate[@"classMethod"] boolValue];
-    NSString *key = FBTBoolKey(className, selectorName, isClass);
-    if (!FBTRuntimeBoolInstallOne(className, selectorName, isClass)) return;
-    NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
-    all[key] = @{ @"class": className ?: @"", @"selector": selectorName ?: @"", @"classMethod": @(isClass), @"force": @(forcedValue) };
-    [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
-    FBTRuntimeBoolReloadPrefs();
+    FBTRuntimeBoolSetOverrideWithSource(candidate, forcedValue, @"manual");
 }
 
 void FBTRuntimeBoolClearOverride(NSDictionary *candidate) {
@@ -334,6 +343,18 @@ void FBTRuntimeBoolClearOverride(NSDictionary *candidate) {
     if (!key.length) key = FBTBoolKey(candidate[@"class"], candidate[@"selector"], [candidate[@"classMethod"] boolValue]);
     NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
     [all removeObjectForKey:key];
+    [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
+    FBTRuntimeBoolReloadPrefs();
+}
+
+void FBTRuntimeBoolClearSweep(NSString *mode) {
+    NSString *source = [@"sweep:" stringByAppendingString:(mode.lowercaseString ?: @"")];
+    NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSArray *keys = [all allKeys];
+    for (NSString *key in keys) {
+        NSDictionary *entry = [all[key] isKindOfClass:[NSDictionary class]] ? all[key] : nil;
+        if ([entry[@"source"] isEqualToString:source]) [all removeObjectForKey:key];
+    }
     [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
     FBTRuntimeBoolReloadPrefs();
 }
