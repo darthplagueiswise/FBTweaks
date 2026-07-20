@@ -2,6 +2,10 @@
 
 NSString * const FBTKeyMasterEnabled         = @"fbt_master_enabled";
 NSString * const FBTKeyEmployeeEnabled       = @"fbt_employee_enabled";
+NSString * const FBTKeyTestUserEnabled       = @"fbt_test_user_enabled";
+NSString * const FBTKeyKnownDogfoodEnabled   = @"fbt_known_dogfood_enabled";
+NSString * const FBTKeyReactNativeInternalEnabled = @"fbt_react_native_internal_enabled";
+NSString * const FBTKeyBetaBuildEnabled      = @"fbt_beta_build_enabled";
 NSString * const FBTKeyEmployeeSweepEnabled  = @"fbt_employee_sweep_enabled";
 NSString * const FBTKeyDogfoodSweepEnabled   = @"fbt_dogfood_sweep_enabled";
 NSString * const FBTKeyInternalDebugSweepEnabled = @"fbt_internal_debug_sweep_enabled";
@@ -30,6 +34,10 @@ static NSDictionary *gRegistered = nil;
     return @{
         FBTKeyMasterEnabled:                    @(YES),
         FBTKeyEmployeeEnabled:                  @(NO),
+        FBTKeyTestUserEnabled:                  @(NO),
+        FBTKeyKnownDogfoodEnabled:              @(NO),
+        FBTKeyReactNativeInternalEnabled:       @(NO),
+        FBTKeyBetaBuildEnabled:                 @(NO),
         FBTKeyEmployeeSweepEnabled:             @(NO),
         FBTKeyDogfoodSweepEnabled:              @(NO),
         FBTKeyInternalDebugSweepEnabled:        @(NO),
