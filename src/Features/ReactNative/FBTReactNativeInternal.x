@@ -9,9 +9,9 @@
 // - RCTDevMenu/RCTDevSettings are the concrete RN internal/dev surfaces.
 // - RCTDevLoadingViewGet/SetEnabled are imported C functions with verified
 //   BOOL(void) / void(BOOL) ABI.
-// - METAOSBuildIsBeta is imported by Facebook and has BOOL(void) ABI.
-// There is no callable TestFlight predicate in this framework; buildFlavor and
-// deviceBuildType entries here are telemetry, not gates.
+// - METAOSBuildIsBeta is imported by Facebook and has verified BOOL(void) ABI.
+// There is no callable TestFlight-receipt predicate in this framework;
+// deviceBuildType/buildFlavor are product telemetry, not global gates.
 
 static inline BOOL FBTRNInternalOn(void) {
     return [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
@@ -33,8 +33,9 @@ static inline BOOL FBTEmployeeOn(void) {
 
 %hook FBInspirationMediaCompositionViewController
 - (BOOL)isEligibleForDebugIndicatorWithEmployeeCondition:(BOOL)condition {
-    if (FBTEmployeeOn()) return YES;
-    return %orig(condition);
+    // The original combines employeeCondition with other eligibility checks.
+    // Preserve those checks and only force the employee input.
+    return FBTEmployeeOn() ? %orig(YES) : %orig(condition);
 }
 %end
 
@@ -104,6 +105,8 @@ static BOOL sRNInternalLatched = NO;
 static BOOL sBetaBuildLatched = NO;
 static BOOL sRNImportHooksInstalled = NO;
 static BOOL sBetaImportHookInstalled = NO;
+static BOOL sRNGroupInitialized = NO;
+static BOOL sRNBundleObserverInstalled = NO;
 
 static FBTBoolVoidCFunction orig_RCTDevLoadingViewGetEnabled = NULL;
 static FBTVoidBoolCFunction orig_RCTDevLoadingViewSetEnabled = NULL;
@@ -125,13 +128,52 @@ static BOOL fbt_METAOSBuildIsBeta(void) {
     return orig_METAOSBuildIsBeta ? orig_METAOSBuildIsBeta() : NO;
 }
 
+void FBTInitReactNativeInternalGroup(void) {
+    if (sRNGroupInitialized) return;
+
+    // Do not consume the one-time Logos initialization before the RN framework
+    // has actually registered a target class. This function is retryable.
+    if (!objc_getClass("RCTCurrentViewer") &&
+        !objc_getClass("RCTDevMenu") &&
+        !objc_getClass("RCTDevSettings")) {
+        return;
+    }
+
+    %init(FBTReactNativeInternal);
+    sRNGroupInitialized = YES;
+    FBTLog(@"React Native employee/internal group installed");
+}
+
+static void FBTInstallRNBundleObserver(void) {
+    if (sRNBundleObserverInstalled) return;
+    sRNBundleObserverInstalled = YES;
+
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSBundleDidLoadNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *note) {
+        NSBundle *bundle = [note.object isKindOfClass:[NSBundle class]] ? note.object : nil;
+        NSString *last = bundle.bundlePath.lastPathComponent ?: @"";
+        if ([last containsString:@"FBReactNativeProductsFramework"] ||
+            [last containsString:@"FBSharedDynamicFramework"] ||
+            [last containsString:@"FBRarelyUsedFramework"]) {
+            FBTInitReactNativeInternalGroup();
+        }
+    }];
+}
+
 void FBTInstallReactNativeAndBuildImportHooks(void) {
     BOOL wantsRN = FBTRNInternalOn();
     BOOL wantsBeta = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
 
-    // C-import gates are latched when installed and therefore require restart
-    // to turn back off. RN and beta are installed independently so enabling one
-    // family first does not prevent the other from being added later.
+    if (wantsRN) {
+        FBTInstallRNBundleObserver();
+        FBTInitReactNativeInternalGroup();
+    }
+
+    // Imported C gates are latched when installed. Turning these families back
+    // off requires a process restart; signed __TEXT pages are never patched.
     if (wantsRN && !sRNImportHooksInstalled) {
         sRNInternalLatched = YES;
         struct rebinding rnBindings[] = {
@@ -164,9 +206,16 @@ void FBTInstallReactNativeAndBuildImportHooks(void) {
     }
 }
 
-void FBTInitReactNativeInternalGroup(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        %init(FBTReactNativeInternal);
+void FBTOpenReactNativeInternalSettings(void) {
+    NSURL *url = [NSURL URLWithString:@"fb://rninternalsettings"];
+    if (!url) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[UIApplication sharedApplication]
+            openURL:url
+            options:@{}
+            completionHandler:^(BOOL success) {
+                FBTLog(@"RN Internal Settings route opened=%d", success);
+            }];
     });
 }
