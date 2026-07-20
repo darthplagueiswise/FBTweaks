@@ -32,7 +32,10 @@ static BOOL fbt_EasyGatingGetBoolean_Internal_DoNotUseOrMock(void *a0, void *a1,
 }
 
 void FBTInternalImportReloadPrefs(void) {
-    sInternalImportsEnabled    = [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled];
+    // Employee/Internal includes the concrete native Internal Settings gate.
+    // EasyGating remains opt-in because it is broad and affects unrelated products.
+    sInternalImportsEnabled = [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
+                              [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled];
     sEasyGatingInternalEnabled = [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled];
 }
 
