@@ -17,6 +17,7 @@ NSString * const FBTKeyDatingEnabled         = @"fbt_dating_enabled";
 NSString * const FBTKeyOpenLongPress         = @"fbt_open_longpress_enabled";
 
 NSString * const FBTKeyMobileConfigRuntimeEnabled   = @"fbt_mobileconfig_runtime_enabled";
+NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled = @"fbt_mobileconfig_native_ui_warmup_enabled";
 NSString * const FBTKeyMobileConfigCaptureEnabled   = @"fbt_mobileconfig_capture_enabled";
 NSString * const FBTKeyMobileConfigOverridesEnabled = @"fbt_mobileconfig_overrides_enabled";
 NSString * const FBTKeyMobileConfigOverrides        = @"fbt_mobileconfig_overrides";
@@ -51,6 +52,7 @@ static NSDictionary *gRegistered = nil;
         // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
         // para não tocar __TEXT assinado; varredura pesada é on-demand.
         FBTKeyMobileConfigRuntimeEnabled:       @(NO),
+        FBTKeyMobileConfigNativeUIWarmupEnabled:@(YES),
         FBTKeyMobileConfigCaptureEnabled:       @(YES),
         FBTKeyMobileConfigOverridesEnabled:     @(YES),
         FBTKeyMobileConfigOverrides:            @{},
