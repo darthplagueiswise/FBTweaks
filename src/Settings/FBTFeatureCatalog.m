@@ -60,7 +60,7 @@
         @{ @"idx": @0, @"name": @"enable_floating_tab_bar_infra" },
       ] },
     ] },
-    @{ @"id": @"DatingGemstone", @"title": @"Dating / Gemstone (gates)", @"configs": @[
+    @{ @"id": @"DatingGemstone", @"title": @"Employee / Test User / Dogfood (gates)", @"configs": @[
       @{ @"config": @"70946:fb_ford", @"params": @[
         @{ @"idx": @124, @"name": @"is_messenger_enabled" },
         @{ @"idx": @15, @"name": @"work_user" },
