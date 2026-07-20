@@ -33,9 +33,9 @@ static inline BOOL FBTEmployeeOn(void) {
 
 %hook FBInspirationMediaCompositionViewController
 - (BOOL)isEligibleForDebugIndicatorWithEmployeeCondition:(BOOL)condition {
-    // The original combines employeeCondition with other eligibility checks.
-    // Preserve those checks and only force the employee input.
-    return FBTEmployeeOn() ? %orig(YES) : %orig(condition);
+    // Preserve all non-employee requirements calculated by the original.
+    if (FBTEmployeeOn()) return %orig(YES);
+    return %orig(condition);
 }
 %end
 
@@ -50,18 +50,6 @@ static inline BOOL FBTEmployeeOn(void) {
     return FBTRNInternalOn() ? YES : %orig;
 }
 - (void)setShakeToShow:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)profilingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setProfilingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)hotLoadingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setHotLoadingEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
 - (BOOL)hotkeysEnabled {
@@ -106,30 +94,6 @@ static inline BOOL FBTEmployeeOn(void) {
 - (void)setIsShakeGestureEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
-- (BOOL)isProfilingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setProfilingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)isHotLoadingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setHotLoadingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)startSamplingProfilerOnLaunch {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setStartSamplingProfilerOnLaunch:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)isPerfMonitorShown {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setIsPerfMonitorShown:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
 %end
 
 %end // FBTReactNativeInternal
@@ -167,8 +131,8 @@ static BOOL fbt_METAOSBuildIsBeta(void) {
 void FBTInitReactNativeInternalGroup(void) {
     if (sRNGroupInitialized) return;
 
-    // Do not consume the one-time Logos initialization before the RN framework
-    // has actually registered a target class. This function is retryable.
+    // Do not consume Logos initialization before the RN framework registered a
+    // target class. Bundle and tab-host retries call this again after loading.
     if (!objc_getClass("RCTCurrentViewer") &&
         !objc_getClass("RCTDevMenu") &&
         !objc_getClass("RCTDevSettings")) {
