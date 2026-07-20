@@ -1,6 +1,7 @@
 #import "FBTPrefix.h"
 #import "FBTDefaults.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
+#import "Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "Features/Employee/FBTInternalImports.h"
 #import "Features/ReactNative/FBTReactNativeInternal.h"
 
@@ -22,13 +23,14 @@
 
 extern void FBTInitEmployeeGroup(void);
 extern void FBTInstallKnownGateRuntimeHooks(void);
+extern void FBTInitTestUserInternalConfigGroup(void);
 
 static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
     return @[
         @{
             @"kind": @"switch",
             @"title": @"Internal / Test User",
-            @"subtitle": @"IdentitySwitcher isInternalTestUser:, tagging e employee-or-test-user gates confirmados.",
+            @"subtitle": @"IdentitySwitcher, native Internal Settings e employee-or-test-user gates confirmados.",
             @"key": FBTKeyTestUserEnabled
         },
         @{
@@ -45,10 +47,16 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
         },
         @{
             @"kind": @"switch",
-            @"title": @"Beta build channel",
-            @"subtitle": @"Força o import METAOSBuildIsBeta. Não finge TestFlight receipt; desligar exige restart.",
+            @"title": @"OS beta gate",
+            @"subtitle": @"Força METAOSBuildIsBeta. Não finge TestFlight receipt nem internal build.",
             @"key": FBTKeyBetaBuildEnabled,
             @"restart": @YES
+        },
+        @{
+            @"kind": @"switch",
+            @"title": @"Preparar UI MobileConfig nativa",
+            @"subtitle": @"Instala readers/contexts quando FBRarelyUsedFramework e a tela de parâmetro entram.",
+            @"key": FBTKeyMobileConfigNativeUIWarmupEnabled
         },
         @{
             @"kind": @"action",
@@ -95,7 +103,7 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == (NSInteger)self.sections.count - 1) {
-        return @"Employee/Test User/Dogfood use live Objective-C/Swift gates. RN dev-loading and METAOSBuildIsBeta are C imports: once installed, turning them off requires restarting Facebook.";
+        return @"Employee/Test User/Dogfood use live Objective-C/Swift gates. RN dev-loading and METAOSBuildIsBeta are C imports: once installed, turning them off requires restarting Facebook. MobileConfig warmup does not fake a server QE response.";
     }
     return %orig;
 }
@@ -114,8 +122,17 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
             FBTInstallInternalImportHooks();
         }
         FBTInternalImportReloadPrefs();
-    } else if ([key isEqualToString:FBTKeyTestUserEnabled] ||
-               [key isEqualToString:FBTKeyKnownDogfoodEnabled]) {
+    } else if ([key isEqualToString:FBTKeyTestUserEnabled]) {
+        if (sender.isOn) {
+            FBTInitEmployeeGroup();
+            FBTInitTestUserInternalConfigGroup();
+            FBTInitReactNativeInternalGroup();
+            FBTInstallKnownGateRuntimeHooks();
+            FBTInstallReactNativeAndBuildImportHooks();
+            FBTInstallInternalImportHooks();
+        }
+        FBTInternalImportReloadPrefs();
+    } else if ([key isEqualToString:FBTKeyKnownDogfoodEnabled]) {
         if (sender.isOn) FBTInitEmployeeGroup();
         FBTInstallKnownGateRuntimeHooks();
     } else if ([key isEqualToString:FBTKeyReactNativeInternalEnabled]) {
@@ -125,6 +142,8 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
         }
     } else if ([key isEqualToString:FBTKeyBetaBuildEnabled]) {
         if (sender.isOn) FBTInstallReactNativeAndBuildImportHooks();
+    } else if ([key isEqualToString:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+        if (sender.isOn) FBTInstallMobileConfigDebugUIBootstrap();
     }
 
     // Sweeps are no longer one-shot. Turning a family off removes only the
