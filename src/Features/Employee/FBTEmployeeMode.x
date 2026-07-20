@@ -39,14 +39,15 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 - (void)setIsEmployee:(BOOL)value {
     %orig(FBTEmployeeIdentityOn() ? YES : value);
 }
+// Native Internal Settings explicitly accepts employees OR test accounts.
 - (void)setEnableInternalSettingsOption:(BOOL)value {
-    %orig(FBTEmployeeIdentityOn() ? YES : value);
+    %orig(FBTTestUserOn() ? YES : value);
 }
 - (void)setEnableInternalToolsSubmenu:(BOOL)value {
-    %orig(FBTEmployeeIdentityOn() ? YES : value);
+    %orig(FBTTestUserOn() ? YES : value);
 }
 - (void)setForceShowingInternalTools:(BOOL)value {
-    %orig(FBTEmployeeIdentityOn() ? YES : value);
+    %orig(FBTTestUserOn() ? YES : value);
 }
 - (void)setShowTriageToDogfoodingAssistantSession:(BOOL)value {
     %orig(FBTKnownDogfoodOn() ? YES : value);
@@ -103,14 +104,14 @@ static inline BOOL FBTKnownDogfoodOn(void) {
     return FBTEmployeeIdentityOn() ? YES : %orig;
 }
 - (id)initWithClassesString:(id)classesString
-     trackNSObjectBaseClass:(BOOL)trackNSObjectBaseClass
-        isEventBasedTrigger:(BOOL)isEventBasedTrigger
-                maxCycleLen:(long long)maxCycleLen
- ignoreAppleClassesWithPrefix:(id)ignoreAppleClassesWithPrefix
-             peopleSampling:(long long)peopleSampling
-                  isEmployee:(BOOL)isEmployee
-         isEnabledProduction:(BOOL)isEnabledProduction
-  shouldUseSwiftABITraversal:(BOOL)shouldUseSwiftABITraversal {
+      trackNSObjectBaseClass:(BOOL)trackNSObjectBaseClass
+         isEventBasedTrigger:(BOOL)isEventBasedTrigger
+                 maxCycleLen:(long long)maxCycleLen
+  ignoreAppleClassesWithPrefix:(id)ignoreAppleClassesWithPrefix
+              peopleSampling:(long long)peopleSampling
+                   isEmployee:(BOOL)isEmployee
+          isEnabledProduction:(BOOL)isEnabledProduction
+   shouldUseSwiftABITraversal:(BOOL)shouldUseSwiftABITraversal {
     return %orig(classesString,
                  trackNSObjectBaseClass,
                  isEventBasedTrigger,
@@ -125,10 +126,10 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBLoom
 - (void)userSessionDidUpdateWithValidUser:(BOOL)validUser
-                              isEmployee:(BOOL)isEmployee
-                       networkDispatcher:(id)networkDispatcher
-                     mobileConfigManager:(id)mobileConfigManager
-                              qplSession:(long long)qplSession {
+                               isEmployee:(BOOL)isEmployee
+                        networkDispatcher:(id)networkDispatcher
+                      mobileConfigManager:(id)mobileConfigManager
+                               qplSession:(long long)qplSession {
     %orig(validUser,
           FBTEmployeeIdentityOn() ? YES : isEmployee,
           networkDispatcher,
@@ -171,6 +172,7 @@ static FBTBoolVoidFn orig_MBUISimpleParticipantModel_isEmployee = NULL;
 static FBTBoolVoidFn orig_RageState_triage = NULL;
 static FBTBoolVoidFn orig_RageModel_triage = NULL;
 static FBTVoidBoolFn orig_RageView_updatedTriage = NULL;
+static FBTBoolVoidFn orig_FFDB_isInternLoggedIn = NULL;
 
 static BOOL fbt_isInternalTestUser(id self, SEL _cmd, id arg1) {
     return FBTTestUserOn() ? YES : (orig_isInternalTestUser ? orig_isInternalTestUser(self, _cmd, arg1) : NO);
@@ -202,6 +204,12 @@ static void fbt_RageView_updatedTriage(id self, SEL _cmd, BOOL value) {
     }
 }
 
+static BOOL fbt_FFDB_isInternLoggedIn(id self, SEL _cmd) {
+    // Local FFDB UI gate only. This does not mint/replace an internal token.
+    return FBTEmployeeIdentityOn() ? YES :
+        (orig_FFDB_isInternLoggedIn ? orig_FFDB_isInternLoggedIn(self, _cmd) : NO);
+}
+
 static BOOL FBTMethodHasEncoding(Class cls, SEL sel, const char *encoding) {
     Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
     const char *actual = method ? method_getTypeEncoding(method) : NULL;
@@ -216,6 +224,19 @@ static void FBTInstallBoolObjectHook(Class cls,
     SEL sel = sel_registerName(selectorName);
     if (!FBTMethodHasEncoding(cls, sel, "B24@0:8@16") &&
         !FBTMethodHasEncoding(cls, sel, "c24@0:8@16")) {
+        return;
+    }
+    MSHookMessageEx(cls, sel, replacement, original);
+}
+
+static void FBTInstallBoolVoidHook(Class cls,
+                                   const char *selectorName,
+                                   IMP replacement,
+                                   IMP *original) {
+    if (!cls || !selectorName || !replacement || !original || *original) return;
+    SEL sel = sel_registerName(selectorName);
+    if (!FBTMethodHasEncoding(cls, sel, "B16@0:8") &&
+        !FBTMethodHasEncoding(cls, sel, "c16@0:8")) {
         return;
     }
     MSHookMessageEx(cls, sel, replacement, original);
@@ -236,37 +257,20 @@ void FBTInstallKnownGateRuntimeHooks(void) {
                              (IMP)fbt_isInGroupingByACDogfooding,
                              (IMP *)&orig_isInGroupingByACDogfooding);
 
-    Class mbui = objc_getClass("MBUISimpleParticipantModel");
-    SEL employeeSel = sel_registerName("isEmployee");
-    if (mbui && !orig_MBUISimpleParticipantModel_isEmployee &&
-        (FBTMethodHasEncoding(mbui, employeeSel, "B16@0:8") ||
-         FBTMethodHasEncoding(mbui, employeeSel, "c16@0:8"))) {
-        MSHookMessageEx(mbui,
-                        employeeSel,
-                        (IMP)fbt_MBUISimpleParticipantModel_isEmployee,
-                        (IMP *)&orig_MBUISimpleParticipantModel_isEmployee);
-    }
+    FBTInstallBoolVoidHook(objc_getClass("MBUISimpleParticipantModel"),
+                           "isEmployee",
+                           (IMP)fbt_MBUISimpleParticipantModel_isEmployee,
+                           (IMP *)&orig_MBUISimpleParticipantModel_isEmployee);
 
-    Class rageState = objc_getClass("FBClientRageShakeBugReporterIssueComponentState");
-    SEL triageSel = sel_registerName("triageToDogfoodingAssistantSession");
-    if (rageState && !orig_RageState_triage &&
-        (FBTMethodHasEncoding(rageState, triageSel, "B16@0:8") ||
-         FBTMethodHasEncoding(rageState, triageSel, "c16@0:8"))) {
-        MSHookMessageEx(rageState,
-                        triageSel,
-                        (IMP)fbt_RageState_triage,
-                        (IMP *)&orig_RageState_triage);
-    }
+    FBTInstallBoolVoidHook(objc_getClass("FBClientRageShakeBugReporterIssueComponentState"),
+                           "triageToDogfoodingAssistantSession",
+                           (IMP)fbt_RageState_triage,
+                           (IMP *)&orig_RageState_triage);
 
-    Class rageModel = objc_getClass("FBClientRageShakeBugReporterIssueModel");
-    if (rageModel && !orig_RageModel_triage &&
-        (FBTMethodHasEncoding(rageModel, triageSel, "B16@0:8") ||
-         FBTMethodHasEncoding(rageModel, triageSel, "c16@0:8"))) {
-        MSHookMessageEx(rageModel,
-                        triageSel,
-                        (IMP)fbt_RageModel_triage,
-                        (IMP *)&orig_RageModel_triage);
-    }
+    FBTInstallBoolVoidHook(objc_getClass("FBClientRageShakeBugReporterIssueModel"),
+                           "triageToDogfoodingAssistantSession",
+                           (IMP)fbt_RageModel_triage,
+                           (IMP *)&orig_RageModel_triage);
 
     Class rageView = objc_getClass("FBClientRageShakeBugReporterIssueViewController");
     SEL updateSel = sel_registerName("updatedTriageToDogfoodingAssistantSession:");
@@ -277,6 +281,11 @@ void FBTInstallKnownGateRuntimeHooks(void) {
                         (IMP)fbt_RageView_updatedTriage,
                         (IMP *)&orig_RageView_updatedTriage);
     }
+
+    FBTInstallBoolVoidHook(objc_getClass("FFDBInternalSettingsWebViewController"),
+                           "isInternLoggedIn",
+                           (IMP)fbt_FFDB_isInternLoggedIn,
+                           (IMP *)&orig_FFDB_isInternLoggedIn);
 }
 
 void FBTInitEmployeeGroup(void) {
