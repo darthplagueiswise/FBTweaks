@@ -52,6 +52,18 @@ static inline BOOL FBTEmployeeOn(void) {
 - (void)setShakeToShow:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
+- (BOOL)profilingEnabled {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setProfilingEnabled:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
+- (BOOL)hotLoadingEnabled {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setHotLoadingEnabled:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
 - (BOOL)hotkeysEnabled {
     return FBTRNInternalOn() ? YES : %orig;
 }
@@ -92,6 +104,18 @@ static inline BOOL FBTEmployeeOn(void) {
     return FBTRNInternalOn() ? YES : %orig;
 }
 - (void)setIsShakeGestureEnabled:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
+- (BOOL)isProfilingEnabled {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setProfilingEnabled:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
+- (BOOL)isHotLoadingEnabled {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setHotLoadingEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
 %end
