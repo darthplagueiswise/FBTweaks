@@ -14,24 +14,48 @@
 // FBTweak — entrypoint
 //
 // Filosofia (Ryukgram): ctor é só gate barato de pref. Hooks ObjC vivem
-// em group instalados condicionalmente. Hooks C (fishhook) são instalados
-// por helpers chamados do ctor quando a flag latched está on.
-// Nenhuma chamada ObjC em hot path; nada de dispatch_after p/ instalar hook.
+// em groups instalados condicionalmente. Hooks C (fishhook) são instalados
+// por helpers chamados quando a família está ativa. Nenhum patch em __TEXT.
 // =====================================================================
 
-// Helpers de instalação implementados nos arquivos de feature:
-extern void FBTInstallLiquidGlassHooks(void);   // Features/LiquidGlass
-extern void FBTInstallDogfoodObserver(void);     // Features/Dogfood (notif observer)
+extern void FBTInstallLiquidGlassHooks(void);
+extern void FBTInstallDogfoodObserver(void);
 extern void FBTInitEmployeeGroup(void);
 extern void FBTInstallKnownGateRuntimeHooks(void);
-extern void FBTInitTestUserInternalConfigGroup(void);
 extern void FBTInitFloatingTabBarGroup(void);
 extern void FBTInitDatingGroup(void);
 
-// ---------------------------------------------------------------------
-// Host do long-press: FBTabBarViewController.
-// Confirmado: viewDidAppear:, _handleLongPress:, session.
-// ---------------------------------------------------------------------
+static void FBTInstallEnabledKnownFamilies(void) {
+    BOOL employeeOn = [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
+    BOOL testUserOn = [FBTDefaults boolForKey:FBTKeyTestUserEnabled];
+    BOOL dogfoodOn = [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled];
+    BOOL rnInternalOn = [FBTDefaults boolForKey:FBTKeyReactNativeInternalEnabled];
+    BOOL betaBuildOn = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
+
+    if (employeeOn || testUserOn || dogfoodOn) {
+        FBTInitEmployeeGroup();
+        FBTInstallKnownGateRuntimeHooks();
+    }
+
+    if (employeeOn || testUserOn || rnInternalOn) {
+        FBTInitReactNativeInternalGroup();
+    }
+
+    if (employeeOn || testUserOn || rnInternalOn || betaBuildOn) {
+        FBTInstallReactNativeAndBuildImportHooks();
+    }
+
+    if (employeeOn || testUserOn ||
+        [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
+        [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled]) {
+        FBTInstallInternalImportHooks();
+    }
+
+    if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+        FBTInstallMobileConfigDebugUIHooks();
+    }
+}
+
 %group FBTHost
 
 %hook FBTabBarViewController
@@ -39,24 +63,15 @@ extern void FBTInitDatingGroup(void);
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
 
-    // Guarda a sessão p/ o opener de internal settings nativo.
     @try {
         id session = [self session];
         if (session) [FBTUtils setStoredSession:session];
     } @catch (__unused NSException *e) {}
 
-    // Retry barato para classes Swift/dynamic que podem aparecer depois do
-    // constructor. O instalador é idempotente e não enumera todas as classes.
-    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
-        [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
-        [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
-        FBTInstallKnownGateRuntimeHooks();
-    }
-    if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
-        FBTInstallMobileConfigDebugUIHooks();
-    }
+    // Retry exato e idempotente para Swift/Dynamic/RN/RarelyUsed que podem ser
+    // carregados depois do constructor. Não enumera classes globalmente.
+    FBTInstallEnabledKnownFamilies();
 
-    // Anexa o gesto uma única vez por instância.
     static char kFBTGestureAttachedKey;
     if (objc_getAssociatedObject(self, &kFBTGestureAttachedKey)) return;
     objc_setAssociatedObject(self, &kFBTGestureAttachedKey, @(YES),
@@ -76,73 +91,38 @@ extern void FBTInitDatingGroup(void);
 
     id session = nil;
     @try { session = [self session]; } @catch (__unused NSException *e) {}
-
     [FBTUtils presentSettingsFromView:sender.view session:session];
 }
 
 %end
+%end
 
-%end // FBTHost
-
-// ---------------------------------------------------------------------
-// ctor
-// ---------------------------------------------------------------------
 %ctor {
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
 
-        // Host do painel sempre instala (gate real é dentro do gesto/pref).
         %init(FBTHost);
-
-        // Observer p/ "abrir internal settings nativo" (barato; sem hook).
         FBTInstallDogfoodObserver();
 
-        // Hooks conhecidos. Cada group só é inicializado quando uma das
-        // famílias correspondentes já estava ligada no launch.
-        BOOL employeeOn = [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
-        BOOL testUserOn = [FBTDefaults boolForKey:FBTKeyTestUserEnabled];
-        BOOL dogfoodOn = [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled];
-        BOOL rnInternalOn = [FBTDefaults boolForKey:FBTKeyReactNativeInternalEnabled];
-        BOOL betaBuildOn = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
+        FBTInstallEnabledKnownFamilies();
 
-        if (employeeOn || testUserOn || dogfoodOn) FBTInitEmployeeGroup();
-        if (testUserOn) FBTInitTestUserInternalConfigGroup();
-        if (employeeOn || testUserOn || rnInternalOn) FBTInitReactNativeInternalGroup();
-        if (employeeOn || testUserOn || rnInternalOn || betaBuildOn) FBTInstallReactNativeAndBuildImportHooks();
-        if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) FBTInitFloatingTabBarGroup();
-        if ([FBTDefaults boolForKey:FBTKeyDatingEnabled]) FBTInitDatingGroup();
-
-        if (employeeOn || testUserOn ||
-            [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
-            [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled]) {
-            FBTInstallInternalImportHooks();
+        if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) {
+            FBTInitFloatingTabBarGroup();
+        }
+        if ([FBTDefaults boolForKey:FBTKeyDatingEnabled]) {
+            FBTInitDatingGroup();
         }
 
-        if ([FBTDefaults boolForKey:FBTKeyEmployeeSweepEnabled]) {
-            // disabled at launch: employee sweep is manual post-launch
-        }
-        if ([FBTDefaults boolForKey:FBTKeyDogfoodSweepEnabled]) {
-            // disabled at launch: dogfood sweep is manual post-launch
-        }
-        if ([FBTDefaults boolForKey:FBTKeyInternalDebugSweepEnabled]) {
-            // disabled at launch: internaldebug sweep is manual post-launch
-        }
-
-        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
-            FBTInstallMobileConfigDebugUIBootstrap();
-        }
-
-        // Runtime browsers. Não varrem classes no launch: só reinstalam hooks
-        // persistidos e, no MobileConfig, fishhookam readers conhecidos se a
-        // flag runtime já estava on.
+        // Sweeps globais nunca executam no launch. Só reinstalamos alvos exatos
+        // já persistidos, sem class scan/dladdr em initializers do dyld.
         if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
             FBTRuntimeBoolReinstallPersistedHooks();
             [FBTSymbolBrowserEngine reinstallPersistedHooks];
         }
 
-        if ([FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled]) {
-            // disabled at launch: native MC context capture is manual post-launch
-            // disabled at launch: MC runtime is manual post-launch
+        // O bootstrap só registra um observer filtrado e tenta classes exatas.
+        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+            FBTInstallMobileConfigDebugUIBootstrap();
         }
 
         [[NSNotificationCenter defaultCenter]
@@ -153,21 +133,19 @@ extern void FBTInitDatingGroup(void);
                         FBTMobileConfigReloadPrefs();
                         FBTRuntimeBoolReloadPrefs();
                         FBTInternalImportReloadPrefs();
-                        if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
-                            [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
-                            [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
-                            FBTInstallKnownGateRuntimeHooks();
-                        }
+                        FBTInstallEnabledKnownFamilies();
+
                         if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
-                            FBTInstallMobileConfigDebugUIHooks();
+                            FBTInstallMobileConfigDebugUIBootstrap();
                         }
                     }];
 
-        // Hook C (fishhook) — flag latched no ctor; precisa restart p/ alternar.
+        // Liquid Glass C import remains launch-latched.
         if ([FBTDefaults boolForKey:FBTKeyLiquidGlassEnabled]) {
             FBTInstallLiquidGlassHooks();
         }
 
-        FBTLog(@"ctor done (master=%d)", [[NSUserDefaults standardUserDefaults] boolForKey:FBTKeyMasterEnabled]);
+        FBTLog(@"ctor done (master=%d)",
+               [[NSUserDefaults standardUserDefaults] boolForKey:FBTKeyMasterEnabled]);
     }
 }
