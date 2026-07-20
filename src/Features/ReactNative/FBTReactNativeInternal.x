@@ -15,6 +15,7 @@
 
 static inline BOOL FBTRNInternalOn(void) {
     return [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
+           [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
            [FBTDefaults boolForKey:FBTKeyReactNativeInternalEnabled];
 }
 
