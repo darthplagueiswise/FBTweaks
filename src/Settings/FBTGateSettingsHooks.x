@@ -23,7 +23,6 @@
 
 extern void FBTInitEmployeeGroup(void);
 extern void FBTInstallKnownGateRuntimeHooks(void);
-extern void FBTInitTestUserInternalConfigGroup(void);
 
 static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
     return @[
@@ -42,7 +41,7 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
         @{
             @"kind": @"switch",
             @"title": @"React Native Internal Settings",
-            @"subtitle": @"RCTDevMenu, RCTDevSettings, dev-loading view e propagação employee para RCTCurrentViewer.",
+            @"subtitle": @"RCTDevMenu/Settings, profiling, hot loading, sampling profiler, perf monitor e dev-loading.",
             @"key": FBTKeyReactNativeInternalEnabled
         },
         @{
@@ -74,9 +73,6 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
 
     NSMutableArray *sections = [self.sections mutableCopy] ?: [NSMutableArray array];
 
-    // Clarify the already-existing Employee master: it now covers concrete
-    // identity propagation and the native Internal Settings gate, not only a
-    // handful of getters.
     if (sections.count > 1) {
         NSMutableArray *known = [sections[1] mutableCopy];
         for (NSUInteger i = 0; i < known.count; i++) {
@@ -103,7 +99,7 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == (NSInteger)self.sections.count - 1) {
-        return @"Employee/Test User/Dogfood use live Objective-C/Swift gates. RN dev-loading and METAOSBuildIsBeta are C imports: once installed, turning them off requires restarting Facebook. MobileConfig warmup does not fake a server QE response.";
+        return @"Employee/Test User/Dogfood usam gates Objective-C/Swift ao vivo. RN dev-loading e METAOSBuildIsBeta são imports C latched e exigem restart para desligar. O warmup MobileConfig faz um retry controlado e não fabrica QE metadata.";
     }
     return %orig;
 }
@@ -125,7 +121,6 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
     } else if ([key isEqualToString:FBTKeyTestUserEnabled]) {
         if (sender.isOn) {
             FBTInitEmployeeGroup();
-            FBTInitTestUserInternalConfigGroup();
             FBTInitReactNativeInternalGroup();
             FBTInstallKnownGateRuntimeHooks();
             FBTInstallReactNativeAndBuildImportHooks();
@@ -146,8 +141,6 @@ static NSArray<NSDictionary *> *FBTMappedGateRows(void) {
         if (sender.isOn) FBTInstallMobileConfigDebugUIBootstrap();
     }
 
-    // Sweeps are no longer one-shot. Turning a family off removes only the
-    // overrides created by that sweep and preserves manual browser overrides.
     if (!sender.isOn && [key isEqualToString:FBTKeyEmployeeSweepEnabled]) {
         FBTRuntimeBoolClearSweep(@"employee");
     } else if (!sender.isOn && [key isEqualToString:FBTKeyDogfoodSweepEnabled]) {
