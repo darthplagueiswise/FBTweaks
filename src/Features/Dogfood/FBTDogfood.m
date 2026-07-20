@@ -1,5 +1,8 @@
 #import "FBTPrefix.h"
 #import "FBTUtils.h"
+#import "FBTDefaults.h"
+#import "Runtime/FBTMobileConfigRuntime.h"
+#import "Runtime/FBTNativeMobileConfigOverrides.h"
 #import <dlfcn.h>
 
 // Categoria utilitária p/ o seletor de fechar do painel nativo.
@@ -24,8 +27,18 @@
 NSString * const FBTNotifOpenNativeInternalSettings = @"FBTRequestOpenNativeInternalSettings";
 
 typedef UIViewController *(*FBTInternalSettingsFn)(id session);
+extern void FBTInstallKnownGateRuntimeHooks(void);
 
 static void fbt_openNativeInternalSettings(void) {
+    // Install the light post-launch capture before the native MobileConfig UI
+    // is reached. This reduces the context-manager race seen when opening a
+    // param immediately after entering Internal Settings. It does not fake a
+    // failed server QE-info response.
+    FBTInstallMobileConfigRuntime();
+    FBTInstallNativeMobileConfigContextCapture();
+    FBTMobileConfigReloadPrefs();
+    FBTInstallKnownGateRuntimeHooks();
+
     id session = [FBTUtils storedSession];
     if (!session) {
         FBTLog(@"internal settings: sem sessão guardada");
