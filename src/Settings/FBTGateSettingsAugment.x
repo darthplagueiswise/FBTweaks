@@ -114,11 +114,11 @@ static void FBTInstallGateFamiliesForKey(NSString *key, BOOL enabled) {
            @"key": FBTKeyKnownDogfoodEnabled },
         @{ @"kind": @"switch",
            @"title": @"React Native Internal Settings",
-           @"subtitle": @"RCT DevMenu/DevSettings, shake, hotkeys, menu items e DevLoadingView. Profiler/perf monitor não são forçados.",
+           @"subtitle": @"RCT DevMenu/DevSettings, shake, hotkeys, profiling, hot loading, sampling profiler, perf monitor e DevLoadingView.",
            @"key": FBTKeyReactNativeInternalEnabled,
            @"restart": @YES },
         @{ @"kind": @"switch",
-           @"title": @"Beta build predicate",
+           @"title": @"OS beta predicate",
            @"subtitle": @"fishhook em METAOSBuildIsBeta (BOOL(void)). Não altera recibo TestFlight nem o isInternalBuild Swift stripped.",
            @"key": FBTKeyBetaBuildEnabled,
            @"restart": @YES },
@@ -138,7 +138,7 @@ static void FBTInstallGateFamiliesForKey(NSString *key, BOOL enabled) {
         [runtime insertObject:@{
             @"kind": @"switch",
             @"title": @"Aquecer MobileConfig nativo",
-            @"subtitle": @"Instala readers/context antes de FBMobileConfigDebugViewController selecionar o parâmetro. Não falsifica QE info nem esconde erro remoto.",
+            @"subtitle": @"Instala readers/context antes da seleção, faz um retry tipado e mantém fallback local se o QE server continuar indisponível.",
             @"key": FBTKeyMobileConfigNativeUIWarmupEnabled,
         } atIndex:index];
     }
