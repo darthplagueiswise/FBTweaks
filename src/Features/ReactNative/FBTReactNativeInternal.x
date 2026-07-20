@@ -118,6 +118,18 @@ static inline BOOL FBTEmployeeOn(void) {
 - (void)setHotLoadingEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
+- (BOOL)startSamplingProfilerOnLaunch {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setStartSamplingProfilerOnLaunch:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
+- (BOOL)isPerfMonitorShown {
+    return FBTRNInternalOn() ? YES : %orig;
+}
+- (void)setIsPerfMonitorShown:(BOOL)value {
+    %orig(FBTRNInternalOn() ? YES : value);
+}
 %end
 
 %end // FBTReactNativeInternal
