@@ -3,22 +3,14 @@
 
 #import <UIKit/UIKit.h>
 
-// =====================================================================
-// Declarações de interface para classes do Facebook que vamos hookar.
-// Todos os nomes/seletores abaixo foram confirmados no binário
-// (FBSharedFramework / executável Facebook v566.1.0).
-// Apenas declarações — o app fornece as implementações em runtime.
-// =====================================================================
+// Interfaces verified in the current Facebook executable/framework set.
+// Declarations only; implementations are supplied by the app at runtime.
 
-// Host do long-press + dono da `session`.
-// inst: viewDidLoad, viewDidAppear:, _handleLongPress:, _handleDoubleTap:,
-//       session, setSession:
 @interface FBTabBarViewController : UIViewController
 - (id)session;
 - (void)setSession:(id)session;
 @end
 
-// Estado de "floating" do tab bar (VC + view).
 @interface FBTabBarAndContentViewController : UIViewController
 - (BOOL)isTabBarFloating;
 - (void)setIsTabBarFloating:(BOOL)floating animated:(BOOL)animated;
@@ -29,20 +21,24 @@
 - (void)setIsTabBarFloating:(BOOL)floating animated:(BOOL)animated;
 @end
 
-// A barra em si.
 @interface FBTabBar : UIView
 - (BOOL)isFloating;
 - (void)setIsFloating:(BOOL)floating;
 @end
 
-// Getters de employee/internal (cada um confirmado na classe indicada).
 @interface FBUserPreferences : NSObject
 - (BOOL)isEmployee;
-- (void)setIsEmployee:(BOOL)isEmployee;
+- (void)setEmployee:(BOOL)isEmployee;
 @end
 
 @interface FBBugReportConfiguration : NSObject
 - (BOOL)isEmployee;
+- (void)setIsEmployee:(BOOL)value;
+- (void)setEnableInternalSettingsOption:(BOOL)value;
+- (void)setEnableInternalToolsSubmenu:(BOOL)value;
+- (void)setForceShowingInternalTools:(BOOL)value;
+- (void)setShowTriageToDogfoodingAssistantSession:(BOOL)value;
+- (void)setDisableEmployeeProductionReports:(BOOL)value;
 @end
 
 @interface FBProductTagCreationLogger : NSObject
@@ -63,6 +59,64 @@
 
 @interface FBRichPushNotificationTypeTraits : NSObject
 + (BOOL)_isEmployeeOrTestUser:(id)arg1;
+@end
+
+@interface FBWKWebView : NSObject
+- (void)setIsEmployee:(BOOL)value;
+@end
+
+@interface FBWKWebViewDelegateAdaptor : NSObject
+- (void)setIsEmployee:(BOOL)value;
+@end
+
+@interface RCDMobileConfigParams : NSObject
+- (BOOL)isEmployee;
+@end
+
+@interface FBLoom : NSObject
+@end
+
+@interface FBBugReportInitialCoordinator : NSObject
+- (BOOL)triageToDogfoodingAssistantSession;
+- (void)updateTriageToDogfoodingAssistantSession:(BOOL)value;
+@end
+
+@interface FBSnacksAdsDeliveryConfig : NSObject
+- (BOOL)enableDogfoodingView;
+@end
+
+// FBReactNativeProductsFramework
+@interface RCTCurrentViewer : NSObject
+- (void)setIsEmployee:(BOOL)value;
+@end
+
+@interface FBInspirationMediaCompositionViewController : UIViewController
+- (BOOL)isEligibleForDebugIndicatorWithEmployeeCondition:(BOOL)condition;
+@end
+
+@interface RCTDevMenu : NSObject
+- (BOOL)devMenuEnabled;
+- (void)setDevMenuEnabled:(BOOL)value;
+- (BOOL)shakeToShow;
+- (void)setShakeToShow:(BOOL)value;
+- (BOOL)hotkeysEnabled;
+- (void)setHotkeysEnabled:(BOOL)value;
+- (BOOL)keyboardShortcutsEnabled;
+- (void)setKeyboardShortcutsEnabled:(BOOL)value;
+@end
+
+@interface RCTDevMenuItem : NSObject
+- (BOOL)isDisabled;
+- (void)setDisabled:(BOOL)value;
+@end
+
+@interface RCTDevSettings : NSObject
+- (BOOL)isDeviceDebuggingAvailable;
+- (BOOL)isHotLoadingAvailable;
+- (BOOL)isShakeToShowDevMenuEnabled;
+- (void)setIsShakeToShowDevMenuEnabled:(BOOL)value;
+- (BOOL)isShakeGestureEnabled;
+- (void)setIsShakeGestureEnabled:(BOOL)value;
 @end
 
 #endif /* FBT_FACEBOOK_HEADERS_H */
