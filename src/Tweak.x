@@ -7,6 +7,7 @@
 #import "Runtime/FBTRuntimeBoolBrowser.h"
 #import "Runtime/FBTNativeMobileConfigOverrides.h"
 #import "Features/Employee/FBTInternalImports.h"
+#import "Features/ReactNative/FBTReactNativeInternal.h"
 
 // =====================================================================
 // FBTweak — entrypoint
@@ -21,6 +22,7 @@
 extern void FBTInstallLiquidGlassHooks(void);   // Features/LiquidGlass
 extern void FBTInstallDogfoodObserver(void);     // Features/Dogfood (notif observer)
 extern void FBTInitEmployeeGroup(void);
+extern void FBTInstallKnownGateRuntimeHooks(void);
 extern void FBTInitFloatingTabBarGroup(void);
 extern void FBTInitDatingGroup(void);
 
@@ -40,6 +42,14 @@ extern void FBTInitDatingGroup(void);
         id session = [self session];
         if (session) [FBTUtils setStoredSession:session];
     } @catch (__unused NSException *e) {}
+
+    // Retry barato para classes Swift/dynamic que podem aparecer depois do
+    // constructor. O instalador é idempotente e não enumera todas as classes.
+    if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
+        [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
+        [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
+        FBTInstallKnownGateRuntimeHooks();
+    }
 
     // Anexa o gesto uma única vez por instância.
     static char kFBTGestureAttachedKey;
@@ -82,12 +92,22 @@ extern void FBTInitDatingGroup(void);
         // Observer p/ "abrir internal settings nativo" (barato; sem hook).
         FBTInstallDogfoodObserver();
 
-        // Hooks ObjC condicionais (cada grupo lê sua pref):
-        if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled])       FBTInitEmployeeGroup();
-        if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) FBTInitFloatingTabBarGroup();
-        if ([FBTDefaults boolForKey:FBTKeyDatingEnabled])         FBTInitDatingGroup();
+        // Hooks conhecidos. Cada group só é inicializado quando uma das
+        // famílias correspondentes já estava ligada no launch.
+        BOOL employeeOn = [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
+        BOOL testUserOn = [FBTDefaults boolForKey:FBTKeyTestUserEnabled];
+        BOOL dogfoodOn = [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled];
+        BOOL rnInternalOn = [FBTDefaults boolForKey:FBTKeyReactNativeInternalEnabled];
+        BOOL betaBuildOn = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
 
-        if ([FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
+        if (employeeOn || testUserOn || dogfoodOn) FBTInitEmployeeGroup();
+        if (employeeOn || rnInternalOn) FBTInitReactNativeInternalGroup();
+        if (employeeOn || rnInternalOn || betaBuildOn) FBTInstallReactNativeAndBuildImportHooks();
+        if ([FBTDefaults boolForKey:FBTKeyFloatingTabBarEnabled]) FBTInitFloatingTabBarGroup();
+        if ([FBTDefaults boolForKey:FBTKeyDatingEnabled]) FBTInitDatingGroup();
+
+        if (employeeOn ||
+            [FBTDefaults boolForKey:FBTKeyInternalCImportsEnabled] ||
             [FBTDefaults boolForKey:FBTKeyEasyGatingInternalEnabled]) {
             FBTInstallInternalImportHooks();
         }
@@ -123,6 +143,11 @@ extern void FBTInitDatingGroup(void);
                         FBTMobileConfigReloadPrefs();
                         FBTRuntimeBoolReloadPrefs();
                         FBTInternalImportReloadPrefs();
+                        if ([FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
+                            [FBTDefaults boolForKey:FBTKeyTestUserEnabled] ||
+                            [FBTDefaults boolForKey:FBTKeyKnownDogfoodEnabled]) {
+                            FBTInstallKnownGateRuntimeHooks();
+                        }
                     }];
 
         // Hook C (fishhook) — flag latched no ctor; precisa restart p/ alternar.
