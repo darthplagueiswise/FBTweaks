@@ -101,7 +101,8 @@ typedef void (*FBTVoidBoolCFunction)(BOOL);
 
 static BOOL sRNInternalLatched = NO;
 static BOOL sBetaBuildLatched = NO;
-static BOOL sImportHooksInstalled = NO;
+static BOOL sRNImportHooksInstalled = NO;
+static BOOL sBetaImportHookInstalled = NO;
 
 static FBTBoolVoidCFunction orig_RCTDevLoadingViewGetEnabled = NULL;
 static FBTVoidBoolCFunction orig_RCTDevLoadingViewSetEnabled = NULL;
@@ -124,40 +125,41 @@ static BOOL fbt_METAOSBuildIsBeta(void) {
 }
 
 void FBTInstallReactNativeAndBuildImportHooks(void) {
-    if (sImportHooksInstalled) return;
+    BOOL wantsRN = FBTRNInternalOn();
+    BOOL wantsBeta = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
 
-    sRNInternalLatched = FBTRNInternalOn();
-    sBetaBuildLatched = [FBTDefaults boolForKey:FBTKeyBetaBuildEnabled];
-    if (!sRNInternalLatched && !sBetaBuildLatched) return;
-
-    struct rebinding bindings[3];
-    size_t count = 0;
-
-    if (sRNInternalLatched) {
-        bindings[count++] = (struct rebinding){
-            "RCTDevLoadingViewGetEnabled",
-            (void *)fbt_RCTDevLoadingViewGetEnabled,
-            (void **)&orig_RCTDevLoadingViewGetEnabled
+    // C-import gates are latched when installed and therefore require restart
+    // to turn back off. RN and beta are installed independently so enabling one
+    // family first does not prevent the other from being added later.
+    if (wantsRN && !sRNImportHooksInstalled) {
+        sRNInternalLatched = YES;
+        struct rebinding rnBindings[] = {
+            {
+                "RCTDevLoadingViewGetEnabled",
+                (void *)fbt_RCTDevLoadingViewGetEnabled,
+                (void **)&orig_RCTDevLoadingViewGetEnabled
+            },
+            {
+                "RCTDevLoadingViewSetEnabled",
+                (void *)fbt_RCTDevLoadingViewSetEnabled,
+                (void **)&orig_RCTDevLoadingViewSetEnabled
+            },
         };
-        bindings[count++] = (struct rebinding){
-            "RCTDevLoadingViewSetEnabled",
-            (void *)fbt_RCTDevLoadingViewSetEnabled,
-            (void **)&orig_RCTDevLoadingViewSetEnabled
-        };
+        rebind_symbols(rnBindings, 2);
+        sRNImportHooksInstalled = YES;
+        FBTLog(@"RN dev-loading imports installed");
     }
 
-    if (sBetaBuildLatched) {
-        bindings[count++] = (struct rebinding){
+    if (wantsBeta && !sBetaImportHookInstalled) {
+        sBetaBuildLatched = YES;
+        struct rebinding betaBinding = {
             "METAOSBuildIsBeta",
             (void *)fbt_METAOSBuildIsBeta,
             (void **)&orig_METAOSBuildIsBeta
         };
-    }
-
-    if (count > 0) {
-        rebind_symbols(bindings, count);
-        sImportHooksInstalled = YES;
-        FBTLog(@"RN/build imports installed rn=%d beta=%d", sRNInternalLatched, sBetaBuildLatched);
+        rebind_symbols(&betaBinding, 1);
+        sBetaImportHookInstalled = YES;
+        FBTLog(@"METAOSBuildIsBeta import installed");
     }
 }
 
