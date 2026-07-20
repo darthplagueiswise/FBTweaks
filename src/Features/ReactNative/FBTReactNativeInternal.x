@@ -12,6 +12,8 @@
 // - METAOSBuildIsBeta is imported by Facebook and has verified BOOL(void) ABI.
 // There is no callable TestFlight-receipt predicate in this framework;
 // deviceBuildType/buildFlavor are product telemetry, not global gates.
+// Profiler/hot-loading/perf-monitor values are operational user states, not
+// availability gates, so this group deliberately does not force them.
 
 static inline BOOL FBTRNInternalOn(void) {
     return [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ||
@@ -33,9 +35,8 @@ static inline BOOL FBTEmployeeOn(void) {
 
 %hook FBInspirationMediaCompositionViewController
 - (BOOL)isEligibleForDebugIndicatorWithEmployeeCondition:(BOOL)condition {
-    // Preserve all non-employee requirements calculated by the original.
-    if (FBTEmployeeOn()) return %orig(YES);
-    return %orig(condition);
+    // Preserve all non-employee eligibility checks and force only the input.
+    return FBTEmployeeOn() ? %orig(YES) : %orig(condition);
 }
 %end
 
@@ -50,18 +51,6 @@ static inline BOOL FBTEmployeeOn(void) {
     return FBTRNInternalOn() ? YES : %orig;
 }
 - (void)setShakeToShow:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)profilingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setProfilingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)hotLoadingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setHotLoadingEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
 - (BOOL)hotkeysEnabled {
@@ -106,18 +95,6 @@ static inline BOOL FBTEmployeeOn(void) {
 - (void)setIsShakeGestureEnabled:(BOOL)value {
     %orig(FBTRNInternalOn() ? YES : value);
 }
-- (BOOL)isProfilingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setProfilingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
-- (BOOL)isHotLoadingEnabled {
-    return FBTRNInternalOn() ? YES : %orig;
-}
-- (void)setHotLoadingEnabled:(BOOL)value {
-    %orig(FBTRNInternalOn() ? YES : value);
-}
 %end
 
 %end // FBTReactNativeInternal
@@ -155,8 +132,8 @@ static BOOL fbt_METAOSBuildIsBeta(void) {
 void FBTInitReactNativeInternalGroup(void) {
     if (sRNGroupInitialized) return;
 
-    // Do not consume Logos initialization before the RN framework registered a
-    // target class. Bundle and tab-host retries call this again after loading.
+    // Do not consume Logos initialization before the RN framework actually
+    // registered at least one target class. The function remains retryable.
     if (!objc_getClass("RCTCurrentViewer") &&
         !objc_getClass("RCTDevMenu") &&
         !objc_getClass("RCTDevSettings")) {
