@@ -3,8 +3,9 @@
 
 #import <UIKit/UIKit.h>
 
-// Interfaces verified in the current Facebook executable/framework set.
-// Declarations only; implementations are supplied by the app at runtime.
+// Interfaces verificadas no conjunto atual de Facebook/FBShared/
+// FBSharedDynamic/FBReactNativeProducts/FBRarelyUsed. São apenas declarações;
+// as implementações pertencem ao aplicativo em runtime.
 
 @interface FBTabBarViewController : UIViewController
 - (id)session;
@@ -71,9 +72,23 @@
 
 @interface RCDMobileConfigParams : NSObject
 - (BOOL)isEmployee;
+- (id)initWithClassesString:(id)classesString
+      trackNSObjectBaseClass:(BOOL)trackNSObjectBaseClass
+         isEventBasedTrigger:(BOOL)isEventBasedTrigger
+                 maxCycleLen:(long long)maxCycleLen
+  ignoreAppleClassesWithPrefix:(id)ignoreAppleClassesWithPrefix
+              peopleSampling:(long long)peopleSampling
+                   isEmployee:(BOOL)isEmployee
+          isEnabledProduction:(BOOL)isEnabledProduction
+   shouldUseSwiftABITraversal:(BOOL)shouldUseSwiftABITraversal;
 @end
 
 @interface FBLoom : NSObject
+- (void)userSessionDidUpdateWithValidUser:(BOOL)validUser
+                               isEmployee:(BOOL)isEmployee
+                        networkDispatcher:(id)networkDispatcher
+                      mobileConfigManager:(id)mobileConfigManager
+                               qplSession:(long long)qplSession;
 @end
 
 @interface FBBugReportInitialCoordinator : NSObject
@@ -85,7 +100,8 @@
 - (BOOL)enableDogfoodingView;
 @end
 
-// FBReactNativeProductsFramework
+// FBReactNativeProductsFramework ------------------------------------------------
+
 @interface RCTCurrentViewer : NSObject
 - (void)setIsEmployee:(BOOL)value;
 @end
@@ -99,6 +115,10 @@
 - (void)setDevMenuEnabled:(BOOL)value;
 - (BOOL)shakeToShow;
 - (void)setShakeToShow:(BOOL)value;
+- (BOOL)profilingEnabled;
+- (void)setProfilingEnabled:(BOOL)value;
+- (BOOL)hotLoadingEnabled;
+- (void)setHotLoadingEnabled:(BOOL)value;
 - (BOOL)hotkeysEnabled;
 - (void)setHotkeysEnabled:(BOOL)value;
 - (BOOL)keyboardShortcutsEnabled;
@@ -117,6 +137,27 @@
 - (void)setIsShakeToShowDevMenuEnabled:(BOOL)value;
 - (BOOL)isShakeGestureEnabled;
 - (void)setIsShakeGestureEnabled:(BOOL)value;
+- (BOOL)isProfilingEnabled;
+- (void)setProfilingEnabled:(BOOL)value;
+- (BOOL)isHotLoadingEnabled;
+- (void)setHotLoadingEnabled:(BOOL)value;
+- (BOOL)startSamplingProfilerOnLaunch;
+- (void)setStartSamplingProfilerOnLaunch:(BOOL)value;
+- (BOOL)isPerfMonitorShown;
+- (void)setIsPerfMonitorShown:(BOOL)value;
+@end
+
+@interface FBReactNativeInternalSettingsMenuItemHandler : NSObject
+- (id)initWithSession:(id)session;
+- (UIViewController *)viewControllerForMenuItem:(id)item
+                          viewportSizeEstimate:(CGSize)size
+                             tabSwitchingType:(long long)type;
+@end
+
+// FBRarelyUsedFramework ---------------------------------------------------------
+
+@interface FFDBInternalSettingsWebViewController : UIViewController
+- (BOOL)isInternLoggedIn;
 @end
 
 #endif /* FBT_FACEBOOK_HEADERS_H */
