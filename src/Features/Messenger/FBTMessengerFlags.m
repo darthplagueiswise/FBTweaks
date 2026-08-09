@@ -6,6 +6,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <string.h>
 
 // -------------------------------------------------------------------------
@@ -261,201 +262,189 @@ static void FBTMessengerInstallClassHooks(FBTMessengerHookDescriptor *descriptor
 // to a signed __TEXT page.
 // -------------------------------------------------------------------------
 
-typedef NS_ENUM(uint8_t, FBTMessengerMCObjectVariant) {
-    FBTMessengerMCObjectVariantValue,
-    FBTMessengerMCObjectVariantValueDefault,
-    FBTMessengerMCObjectVariantValueOptions,
-    FBTMessengerMCObjectVariantValueOptionsDefault,
-};
-
 typedef struct {
     const char *className;
     const char *selectorName;
     const char *encoding;
-    FBTMessengerMCObjectVariant variant;
-    Class targetClass;
-    IMP original;
+    IMP replacement;
+    IMP *originalStorage;
+    BOOL installed;
 } FBTMessengerMCObjectHook;
+
+typedef struct { uint64_t rawValue; } FBTMessengerMCBoolParam;
+typedef struct { uint64_t rawValue; } FBTMessengerMCSessionlessBoolParam;
+typedef struct { uint64_t rawValue; } FBTMessengerMCSessionBasedBoolParam;
+
+#define FBT_MESSENGER_DEFINE_MC_VALUE_HOOK(Name, ParamType) \
+    static IMP s##Name##Original = NULL; \
+    static BOOL fbt_messenger_##Name(id self, SEL _cmd, ParamType parameter) { \
+        BOOL matched = NO; \
+        BOOL forced = FBTMessengerForceBooleanForKey(parameter.rawValue, &matched); \
+        if (matched) return forced; \
+        IMP original = s##Name##Original; \
+        return original \
+            ? ((BOOL (*)(id, SEL, ParamType))original)(self, _cmd, parameter) \
+            : NO; \
+    }
+
+#define FBT_MESSENGER_DEFINE_MC_VALUE_DEFAULT_HOOK(Name, ParamType) \
+    static IMP s##Name##Original = NULL; \
+    static BOOL fbt_messenger_##Name(id self, \
+                                      SEL _cmd, \
+                                      ParamType parameter, \
+                                      BOOL defaultValue) { \
+        BOOL matched = NO; \
+        BOOL forced = FBTMessengerForceBooleanForKey(parameter.rawValue, &matched); \
+        if (matched) return forced; \
+        IMP original = s##Name##Original; \
+        return original \
+            ? ((BOOL (*)(id, SEL, ParamType, BOOL))original)( \
+                self, _cmd, parameter, defaultValue) \
+            : defaultValue; \
+    }
+
+#define FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_HOOK(Name, ParamType) \
+    static IMP s##Name##Original = NULL; \
+    static BOOL fbt_messenger_##Name(id self, \
+                                      SEL _cmd, \
+                                      ParamType parameter, \
+                                      id options) { \
+        BOOL matched = NO; \
+        BOOL forced = FBTMessengerForceBooleanForKey(parameter.rawValue, &matched); \
+        if (matched) return forced; \
+        IMP original = s##Name##Original; \
+        return original \
+            ? ((BOOL (*)(id, SEL, ParamType, id))original)( \
+                self, _cmd, parameter, options) \
+            : NO; \
+    }
+
+#define FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_DEFAULT_HOOK(Name, ParamType) \
+    static IMP s##Name##Original = NULL; \
+    static BOOL fbt_messenger_##Name(id self, \
+                                      SEL _cmd, \
+                                      ParamType parameter, \
+                                      id options, \
+                                      BOOL defaultValue) { \
+        BOOL matched = NO; \
+        BOOL forced = FBTMessengerForceBooleanForKey(parameter.rawValue, &matched); \
+        if (matched) return forced; \
+        IMP original = s##Name##Original; \
+        return original \
+            ? ((BOOL (*)(id, SEL, ParamType, id, BOOL))original)( \
+                self, _cmd, parameter, options, defaultValue) \
+            : defaultValue; \
+    }
+
+// Each replacement owns the exact `old` stub returned for that class/method.
+// A superclass replacement can therefore run with a subclass receiver without
+// accidentally selecting the subclass trampoline again.
+FBT_MESSENGER_DEFINE_MC_VALUE_HOOK(MCContextGetBool, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_HOOK(MCContextGetBoolWithoutLogging, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_DEFAULT_HOOK(MCContextGetBoolWithDefault, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_DEFAULT_HOOK(MCContextGetBoolWithoutLoggingWithDefault, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_HOOK(MCContextGetBoolWithOptions, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_DEFAULT_HOOK(MCContextGetBoolWithOptionsDefault, FBTMessengerMCBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_HOOK(MCSessionlessGetBool, FBTMessengerMCSessionlessBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_HOOK(MCSessionlessGetBoolWithOptions, FBTMessengerMCSessionlessBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_HOOK(MCUserSessionGetBool, FBTMessengerMCSessionBasedBoolParam)
+FBT_MESSENGER_DEFINE_MC_VALUE_OPTIONS_HOOK(MCUserSessionGetBoolWithOptions, FBTMessengerMCSessionBasedBoolParam)
 
 static FBTMessengerMCObjectHook sMobileConfigObjectHooks[] = {
     {
         "FBMobileConfigContextManager",
         "getBool:",
         "B24@0:8{mc_bool_param_t=Q}16",
-        FBTMessengerMCObjectVariantValue,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBool,
+        &sMCContextGetBoolOriginal,
+        NO,
     },
     {
         "FBMobileConfigContextManager",
         "getBoolWithoutLogging:",
         "B24@0:8{mc_bool_param_t=Q}16",
-        FBTMessengerMCObjectVariantValue,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBoolWithoutLogging,
+        &sMCContextGetBoolWithoutLoggingOriginal,
+        NO,
     },
     {
         "FBMobileConfigContextManager",
         "getBool:withDefault:",
         "B28@0:8{mc_bool_param_t=Q}16B24",
-        FBTMessengerMCObjectVariantValueDefault,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBoolWithDefault,
+        &sMCContextGetBoolWithDefaultOriginal,
+        NO,
     },
     {
         "FBMobileConfigContextManager",
         "getBoolWithoutLogging:withDefault:",
         "B28@0:8{mc_bool_param_t=Q}16B24",
-        FBTMessengerMCObjectVariantValueDefault,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBoolWithoutLoggingWithDefault,
+        &sMCContextGetBoolWithoutLoggingWithDefaultOriginal,
+        NO,
     },
     {
         "FBMobileConfigContextManager",
         "getBool:withOptions:",
         "B32@0:8{mc_bool_param_t=Q}16@24",
-        FBTMessengerMCObjectVariantValueOptions,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBoolWithOptions,
+        &sMCContextGetBoolWithOptionsOriginal,
+        NO,
     },
     {
         "FBMobileConfigContextManager",
         "getBool:withOptions:withDefault:",
         "B36@0:8{mc_bool_param_t=Q}16@24B32",
-        FBTMessengerMCObjectVariantValueOptionsDefault,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCContextGetBoolWithOptionsDefault,
+        &sMCContextGetBoolWithOptionsDefaultOriginal,
+        NO,
     },
     {
         "FBMobileConfigSessionlessContextManager",
         "getBool:",
         "B24@0:8{mc_sessionless_bool_param_t=Q}16",
-        FBTMessengerMCObjectVariantValue,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCSessionlessGetBool,
+        &sMCSessionlessGetBoolOriginal,
+        NO,
     },
     {
         "FBMobileConfigSessionlessContextManager",
         "getBool:withOptions:",
         "B32@0:8{mc_sessionless_bool_param_t=Q}16@24",
-        FBTMessengerMCObjectVariantValueOptions,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCSessionlessGetBoolWithOptions,
+        &sMCSessionlessGetBoolWithOptionsOriginal,
+        NO,
     },
     {
         "FBMobileConfigUserSessionContextManager",
         "getBool:",
         "B24@0:8{mc_sessionbased_bool_param_t=Q}16",
-        FBTMessengerMCObjectVariantValue,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCUserSessionGetBool,
+        &sMCUserSessionGetBoolOriginal,
+        NO,
     },
     {
         "FBMobileConfigUserSessionContextManager",
         "getBool:withOptions:",
         "B32@0:8{mc_sessionbased_bool_param_t=Q}16@24",
-        FBTMessengerMCObjectVariantValueOptions,
-        Nil,
-        NULL,
+        (IMP)fbt_messenger_MCUserSessionGetBoolWithOptions,
+        &sMCUserSessionGetBoolWithOptionsOriginal,
+        NO,
     },
 };
 
-static FBTMessengerMCObjectHook *FBTMessengerMCObjectDescriptor(id receiver,
-                                                                SEL selector,
-                                                                FBTMessengerMCObjectVariant variant) {
-    Class receiverClass = object_getClass(receiver);
-    for (Class current = receiverClass; current; current = class_getSuperclass(current)) {
-        for (size_t index = 0;
-             index < sizeof(sMobileConfigObjectHooks) / sizeof(sMobileConfigObjectHooks[0]);
-             index++) {
-            FBTMessengerMCObjectHook *descriptor = &sMobileConfigObjectHooks[index];
-            if (descriptor->targetClass == current &&
-                descriptor->variant == variant &&
-                sel_isEqual(selector, sel_registerName(descriptor->selectorName))) {
-                return descriptor;
-            }
+static Method FBTMessengerDirectInstanceMethod(Class cls, SEL selector) {
+    unsigned int methodCount = 0;
+    Method *methods = cls ? class_copyMethodList(cls, &methodCount) : NULL;
+    Method match = NULL;
+    for (unsigned int index = 0; index < methodCount; index++) {
+        if (sel_isEqual(method_getName(methods[index]), selector)) {
+            match = methods[index];
+            break;
         }
     }
-    return NULL;
-}
-
-static BOOL FBTMessengerForcedObjectBoolean(uint64_t key, BOOL *matched) {
-    return FBTMessengerForceBooleanForKey(key, matched);
-}
-
-static BOOL fbt_messenger_mcGetBool(id self, SEL _cmd, uint64_t key) {
-    BOOL matched = NO;
-    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
-    if (matched) return forced;
-
-    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
-        self, _cmd, FBTMessengerMCObjectVariantValue);
-    return descriptor && descriptor->original
-        ? ((BOOL (*)(id, SEL, uint64_t))descriptor->original)(self, _cmd, key)
-        : NO;
-}
-
-static BOOL fbt_messenger_mcGetBoolWithDefault(id self,
-                                                SEL _cmd,
-                                                uint64_t key,
-                                                BOOL defaultValue) {
-    BOOL matched = NO;
-    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
-    if (matched) return forced;
-
-    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
-        self, _cmd, FBTMessengerMCObjectVariantValueDefault);
-    return descriptor && descriptor->original
-        ? ((BOOL (*)(id, SEL, uint64_t, BOOL))descriptor->original)(
-            self, _cmd, key, defaultValue)
-        : defaultValue;
-}
-
-static BOOL fbt_messenger_mcGetBoolWithOptions(id self,
-                                                SEL _cmd,
-                                                uint64_t key,
-                                                id options) {
-    BOOL matched = NO;
-    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
-    if (matched) return forced;
-
-    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
-        self, _cmd, FBTMessengerMCObjectVariantValueOptions);
-    return descriptor && descriptor->original
-        ? ((BOOL (*)(id, SEL, uint64_t, id))descriptor->original)(
-            self, _cmd, key, options)
-        : NO;
-}
-
-static BOOL fbt_messenger_mcGetBoolWithOptionsDefault(id self,
-                                                       SEL _cmd,
-                                                       uint64_t key,
-                                                       id options,
-                                                       BOOL defaultValue) {
-    BOOL matched = NO;
-    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
-    if (matched) return forced;
-
-    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
-        self, _cmd, FBTMessengerMCObjectVariantValueOptionsDefault);
-    return descriptor && descriptor->original
-        ? ((BOOL (*)(id, SEL, uint64_t, id, BOOL))descriptor->original)(
-            self, _cmd, key, options, defaultValue)
-        : defaultValue;
-}
-
-static IMP FBTMessengerMCReplacementForVariant(FBTMessengerMCObjectVariant variant) {
-    switch (variant) {
-        case FBTMessengerMCObjectVariantValue:
-            return (IMP)fbt_messenger_mcGetBool;
-        case FBTMessengerMCObjectVariantValueDefault:
-            return (IMP)fbt_messenger_mcGetBoolWithDefault;
-        case FBTMessengerMCObjectVariantValueOptions:
-            return (IMP)fbt_messenger_mcGetBoolWithOptions;
-        case FBTMessengerMCObjectVariantValueOptionsDefault:
-            return (IMP)fbt_messenger_mcGetBoolWithOptionsDefault;
-    }
-    return NULL;
+    free(methods);
+    return match;
 }
 
 static void FBTMessengerInstallMobileConfigObjectHooks(void) {
@@ -463,19 +452,19 @@ static void FBTMessengerInstallMobileConfigObjectHooks(void) {
          index < sizeof(sMobileConfigObjectHooks) / sizeof(sMobileConfigObjectHooks[0]);
          index++) {
         FBTMessengerMCObjectHook *descriptor = &sMobileConfigObjectHooks[index];
-        if (descriptor->original) continue;
+        if (descriptor->installed) continue;
 
         Class cls = objc_getClass(descriptor->className);
         SEL selector = sel_registerName(descriptor->selectorName);
-        Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
+        Method method = FBTMessengerDirectInstanceMethod(cls, selector);
         const char *encoding = method ? method_getTypeEncoding(method) : NULL;
         if (!encoding || strcmp(encoding, descriptor->encoding) != 0) continue;
 
-        descriptor->targetClass = cls;
         MSHookMessageEx(cls,
                         selector,
-                        FBTMessengerMCReplacementForVariant(descriptor->variant),
-                        &descriptor->original);
+                        descriptor->replacement,
+                        descriptor->originalStorage);
+        descriptor->installed = YES;
     }
 }
 

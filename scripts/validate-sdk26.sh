@@ -44,6 +44,10 @@ grep -q 'MSGCSessionedMobileConfigGetBoolean' src/Features/Messenger/FBTMessenge
 grep -q 'FBMobileConfigContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader ObjC interno do MC ausente"
 grep -q 'FBMobileConfigSessionlessContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessionless do MC ausente"
 grep -q 'FBMobileConfigUserSessionContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessioned ObjC do MC ausente"
+grep -q 'FBTMessengerDirectInstanceMethod' src/Features/Messenger/FBTMessengerFlags.m || fail "validação de método direto ausente"
+if grep -q 'FBTMessengerMCObjectDescriptor' src/Features/Messenger/FBTMessengerFlags.m; then fail "lookup de trampoline por receiver reintroduz recursão"; fi
+mc_original_slots="$(grep -o '&sMC[A-Za-z]*Original' src/Features/Messenger/FBTMessengerFlags.m | sort -u | wc -l | tr -d ' ')"
+[ "$mc_original_slots" -eq 10 ] || fail "cada reader MC precisa de um trampoline original próprio"
 if grep -q 'MSHookFunction' src/Features/Messenger/FBTMessengerFlags.m; then fail "Messenger não pode usar hook inline em __TEXT"; fi
 
 echo "[validate] Native iOS 26 context-menu morph..."

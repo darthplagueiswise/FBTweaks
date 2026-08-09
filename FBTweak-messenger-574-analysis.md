@@ -89,6 +89,35 @@ The three parameter structs are all single-`uint64_t` ABI wrappers. These are
 Objective-C method hooks (`MSHookMessageEx`), so internal Engine reads are
 covered without an inline C hook or signed `__TEXT` mutation.
 
+### 1.1.116 crash and corrected trampoline ownership
+
+The device crash report for Messenger 574.0.0 (1035554267) and the packaged
+1.1.116 dylib were checked together before changing the hook design:
+
+- the crash is a main-thread stack overflow (`EXC_BAD_ACCESS` in the stack
+  guard), with 21,315 frames and a recorded recursion depth of 10,647;
+- the report's `FBTweak.dylib` UUID is
+  `5717e1d5-741d-3024-b0d7-131e9ed3394d`, exactly matching the dylib extracted
+  from the `.deb`;
+- `FBTweak+0xB804` is the return from the indirect call through the selected
+  descriptor's `original` field, while `FBTweak+0xBA58` is inside the old
+  receiver-based descriptor lookup after `sel_registerName`;
+- `LightSpeedEngine+0x172BB0` is the directly declared
+  `-[FBMobileConfigSessionlessContextManager getBool:]`. At `+0x172BD0` it
+  finishes an `objc_msgSendSuper2` of the same `getBool:` selector to
+  `FBMobileConfigContextManager`.
+
+The previous shared replacement selected an `old` trampoline from the runtime
+class of `self`. A super call keeps the sessionless instance as `self`, so the
+base-class replacement selected the sessionless trampoline again and recreated
+the same call forever.
+
+Every one of the ten readers now has a distinct ABI-compatible replacement and
+the exact `old` stub returned by `MSHookMessageEx` for that class/method pair.
+Installation also uses `class_copyMethodList` to accept only methods declared
+directly by the target class; it no longer mistakes an inherited method for a
+second hook target.
+
 | Feature | Config.parameter | Packed key |
 |---|---|---:|
 | Employee | `fb_ford.is_employee` | `0x008103fe000b1472` |
