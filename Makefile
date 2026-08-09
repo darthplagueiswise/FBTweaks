@@ -17,12 +17,11 @@ TWEAK_NAME = FBTweak
 $(TWEAK_NAME)_FILES = \
 	src/MessengerTweak.m \
 	src/FBTDefaults.m \
-	src/UI/FBTUIKit26LiquidGlass.m \
 	src/UI/FBTMessengerQuickMenu.m \
 	src/Features/Messenger/FBTMessengerFlags.m \
 	modules/fishhook/fishhook.c
 
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics
 $(TWEAK_NAME)_LIBRARIES = substrate
 $(TWEAK_NAME)_USE_MODULES = 0
 

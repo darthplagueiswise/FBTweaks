@@ -41,6 +41,9 @@ grep -q '_TtC25MDSModernTabBarController25MDSModernTabBarController' src/Feature
 grep -q '0x008103fe000b1472' src/Features/Messenger/FBTMessengerFlags.m || fail "gate is_employee ausente"
 grep -q '0x0081065800011c1c' src/Features/Messenger/FBTMessengerFlags.m || fail "gate Homebase ausente"
 grep -q 'MSGCSessionedMobileConfigGetBoolean' src/Features/Messenger/FBTMessengerFlags.m || fail "reader Messenger ausente"
+grep -q 'FBTMessengerMCParameterDescriptor' src/Features/Messenger/FBTMessengerFlags.m || fail "ABI de descritor do reader C ausente"
+grep -q 'parameter ? parameter->rawValue' src/Features/Messenger/FBTMessengerFlags.m || fail "reader C não extrai a key em +16 do descritor"
+grep -q 'offsetof(FBTMessengerMCParameterDescriptor, rawValue) == 16' src/Features/Messenger/FBTMessengerFlags.m || fail "offset da key MobileConfig não validado"
 grep -q 'FBMobileConfigContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader ObjC interno do MC ausente"
 grep -q 'FBMobileConfigSessionlessContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessionless do MC ausente"
 grep -q 'FBMobileConfigUserSessionContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessioned ObjC do MC ausente"
@@ -53,7 +56,10 @@ if grep -q 'MSHookFunction' src/Features/Messenger/FBTMessengerFlags.m; then fai
 echo "[validate] Native iOS 26 context-menu morph..."
 grep -q 'UIContextMenuInteraction' src/UI/FBTMessengerQuickMenu.m || fail "context menu nativo ausente"
 grep -q 'UITargetedPreview' src/UI/FBTMessengerQuickMenu.m || fail "target do morph nativo ausente"
+grep -q 'hitTest:location withEvent:nil' src/UI/FBTMessengerQuickMenu.m || fail "morph não usa o controle real sob o toque"
 grep -q 'UIMenuElementAttributesKeepsMenuPresented' src/UI/FBTMessengerQuickMenu.m || fail "menu multi-toggle ausente"
 if grep -q 'panel\.alpha\|animateWithDuration' src/UI/FBTMessengerQuickMenu.m; then fail "fade customizado ainda presente no quick menu"; fi
+if grep -q 'UIVisualEffectView\|UIPreviewTarget\|FBTUIKit26GlassEffect' src/UI/FBTMessengerQuickMenu.m; then fail "preview de bolha artificial ainda presente"; fi
+if grep -q 'src/UI/FBTUIKit26LiquidGlass.m' Makefile; then fail "helper de vidro customizado ainda está no target Messenger"; fi
 
 echo "[validate] OK"

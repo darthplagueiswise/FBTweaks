@@ -5,6 +5,7 @@
 #import <mach-o/dyld.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#include <stddef.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@ static atomic_bool sEmployeeEnabled;
 static atomic_bool sInternalSettingsEnabled;
 static atomic_bool sInternalToolsEnabled;
 static atomic_bool sHomebaseEnabled;
+static atomic_bool sHouseholdEnabled;
 static atomic_bool sHooksScheduled;
 
 static BOOL FBTMessengerEmployeeEnabled(void) {
@@ -47,38 +49,61 @@ static BOOL FBTMessengerInternalToolsEnabled(void) {
     return atomic_load_explicit(&sInternalToolsEnabled, memory_order_relaxed);
 }
 
+static BOOL FBTMessengerInternalSettingsEnabled(void) {
+    return atomic_load_explicit(&sInternalSettingsEnabled, memory_order_relaxed);
+}
+
 static void FBTMessengerReloadPreferences(void) {
     BOOL internalTools = [FBTDefaults boolForKey:FBTKeyMessengerInternalToolsEnabled];
     BOOL internalSettings = internalTools ||
         [FBTDefaults boolForKey:FBTKeyMessengerInternalSettingsEnabled];
     BOOL employee = internalSettings ||
         [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
-    BOOL homebase = [FBTDefaults boolForKey:FBTKeyMessengerHomebaseEnabled] ||
-        [FBTDefaults boolForKey:FBTKeyMessengerHouseholdEnabled];
+    BOOL homebase = [FBTDefaults boolForKey:FBTKeyMessengerHomebaseEnabled];
+    BOOL household = [FBTDefaults boolForKey:FBTKeyMessengerHouseholdEnabled];
 
     atomic_store_explicit(&sInternalToolsEnabled, internalTools, memory_order_relaxed);
     atomic_store_explicit(&sInternalSettingsEnabled, internalSettings, memory_order_relaxed);
     atomic_store_explicit(&sEmployeeEnabled, employee, memory_order_relaxed);
     atomic_store_explicit(&sHomebaseEnabled, homebase, memory_order_relaxed);
+    atomic_store_explicit(&sHouseholdEnabled, household, memory_order_relaxed);
 }
 
 // -------------------------------------------------------------------------
 // Known MobileConfig booleans.
 // -------------------------------------------------------------------------
 
-typedef BOOL (*FBTMessengerMCBoolFn)(void *context,
-                                     uint64_t key,
-                                     BOOL defaultValue,
-                                     void *extra);
+// LightSpeedCore does not pass the packed key in x1. Every mapped call site
+// copies this 32-byte descriptor to the stack and passes a pointer to it:
+//   x0 = session, x1 = descriptor, w2 = fallback, w3 = read options/logging.
+// The previous uint64_t x1 declaration therefore compared a stack address to
+// the packed key and could never match a requested override.
+typedef struct {
+    const char *configName;
+    const char *parameterName;
+    uint64_t rawValue;
+    uint64_t unitType;
+} FBTMessengerMCParameterDescriptor;
+
+_Static_assert(sizeof(FBTMessengerMCParameterDescriptor) == 32,
+               "Messenger MobileConfig descriptor ABI changed");
+_Static_assert(offsetof(FBTMessengerMCParameterDescriptor, rawValue) == 16,
+               "Messenger MobileConfig key offset changed");
+
+typedef BOOL (*FBTMessengerMCBoolFn)(
+    void *context,
+    const FBTMessengerMCParameterDescriptor *parameter,
+    BOOL defaultValue,
+    BOOL readOptions);
 
 static FBTMessengerMCBoolFn orig_MSGCSessionedMobileConfigGetBoolean = NULL;
 
 static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
     BOOL employee = FBTMessengerEmployeeEnabled();
-    BOOL internalSettings =
-        atomic_load_explicit(&sInternalSettingsEnabled, memory_order_relaxed);
+    BOOL internalSettings = FBTMessengerInternalSettingsEnabled();
     BOOL internalTools = FBTMessengerInternalToolsEnabled();
     BOOL homebase = atomic_load_explicit(&sHomebaseEnabled, memory_order_relaxed);
+    BOOL household = atomic_load_explicit(&sHouseholdEnabled, memory_order_relaxed);
 
     if (employee &&
         (key == kMCFBFordIsEmployee || key == kMCSecretConversationIsEmployee)) {
@@ -101,7 +126,15 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
         (key == kMCHomebaseMailboxSync ||
          key == kMCHomebaseTab ||
          key == kMCHomebaseCalendarRSVP ||
-         key == kMCHomebaseListAddRow ||
+         key == kMCHomebaseListAddRow)) {
+        *matched = YES;
+        return YES;
+    }
+    // Messenger 574 has no standalone Household boolean. The verified local
+    // Household paths are Homebase mailbox sync and the Homebase thread-
+    // settings entry point; account membership itself remains server data.
+    if (household &&
+        (key == kMCHomebaseMailboxSync ||
          key == kMCHomebaseThreadSettings)) {
         *matched = YES;
         return YES;
@@ -112,15 +145,18 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
 }
 
 static BOOL fbt_messenger_MobileConfigGetBoolean(void *context,
-                                                  uint64_t key,
+                                                  const FBTMessengerMCParameterDescriptor *parameter,
                                                   BOOL defaultValue,
-                                                  void *extra) {
-    BOOL original = orig_MSGCSessionedMobileConfigGetBoolean
-        ? orig_MSGCSessionedMobileConfigGetBoolean(context, key, defaultValue, extra)
-        : defaultValue;
+                                                  BOOL readOptions) {
     BOOL matched = NO;
-    BOOL forced = FBTMessengerForceBooleanForKey(key, &matched);
-    return matched ? forced : original;
+    BOOL forced = FBTMessengerForceBooleanForKey(
+        parameter ? parameter->rawValue : UINT64_C(0),
+        &matched);
+    if (matched) return forced;
+    return orig_MSGCSessionedMobileConfigGetBoolean
+        ? orig_MSGCSessionedMobileConfigGetBoolean(
+              context, parameter, defaultValue, readOptions)
+        : defaultValue;
 }
 
 static void FBTMessengerInstallMobileConfigHook(void) {
@@ -160,8 +196,11 @@ static FBTMessengerHookDescriptor sEmployeeSetters[] = {
     { "FBWKWebViewDelegateAdaptor", Nil, NULL },
 };
 
-static FBTMessengerHookDescriptor sInternalToolProviders[] = {
+static FBTMessengerHookDescriptor sInternalSettingsProviders[] = {
     { "MSGEBDebugSettingsViewController", Nil, NULL },
+};
+
+static FBTMessengerHookDescriptor sInternalToolProviders[] = {
     { "MSGEBDebugUserSettingsOverrideViewController", Nil, NULL },
 };
 
@@ -205,6 +244,18 @@ static void fbt_messenger_setIsEmployee(id self, SEL _cmd, BOOL value) {
     if (!descriptor || !descriptor->original) return;
     ((void (*)(id, SEL, BOOL))descriptor->original)(
         self, _cmd, FBTMessengerEmployeeEnabled() ? YES : value);
+}
+
+static BOOL fbt_messenger_internalSettingsIsAvailable(id self,
+                                                       SEL _cmd,
+                                                       id context) {
+    if (FBTMessengerInternalSettingsEnabled()) return YES;
+    FBTMessengerHookDescriptor *descriptor = FBTMessengerDescriptorForReceiver(
+        self,
+        sInternalSettingsProviders,
+        sizeof(sInternalSettingsProviders) / sizeof(sInternalSettingsProviders[0]));
+    if (!descriptor || !descriptor->original) return NO;
+    return ((BOOL (*)(id, SEL, id))descriptor->original)(self, _cmd, context);
 }
 
 static BOOL fbt_messenger_internalToolIsAvailable(id self, SEL _cmd, id context) {
@@ -488,6 +539,14 @@ static void FBTMessengerInstallKnownObjectHooks(void) {
         "v20@0:8c16");
 
     FBTMessengerInstallClassHooks(
+        sInternalSettingsProviders,
+        sizeof(sInternalSettingsProviders) / sizeof(sInternalSettingsProviders[0]),
+        sel_registerName("isAvailable:"),
+        (IMP)fbt_messenger_internalSettingsIsAvailable,
+        "B24@0:8@16",
+        "c24@0:8@16");
+
+    FBTMessengerInstallClassHooks(
         sInternalToolProviders,
         sizeof(sInternalToolProviders) / sizeof(sInternalToolProviders[0]),
         sel_registerName("isAvailable:"),
@@ -621,6 +680,39 @@ static void FBTMessengerAttachEntryPoints(id host) {
     FBTMessengerAttachLogoEntryPoint(host, window);
 }
 
+static void FBTMessengerRefreshSettingsController(UIViewController *controller) {
+    if (!controller) return;
+
+    Class settingsClass = objc_getClass("MSGSettingsViewController");
+    SEL refreshSelector = sel_registerName("_refreshData");
+    if (settingsClass &&
+        [controller isKindOfClass:settingsClass] &&
+        [controller respondsToSelector:refreshSelector]) {
+        Method method = class_getInstanceMethod(settingsClass, refreshSelector);
+        if (FBTMessengerEncodingMatches(method, "v16@0:8", NULL)) {
+            ((void (*)(id, SEL))objc_msgSend)(controller, refreshSelector);
+        }
+    }
+
+    for (UIViewController *child in controller.childViewControllers) {
+        FBTMessengerRefreshSettingsController(child);
+    }
+    UIViewController *presented = controller.presentedViewController;
+    if (presented && !presented.isBeingDismissed) {
+        FBTMessengerRefreshSettingsController(presented);
+    }
+}
+
+static void FBTMessengerRefreshVisibleSettings(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.hidden || window.alpha < 0.05) continue;
+            FBTMessengerRefreshSettingsController(window.rootViewController);
+        }
+    }
+}
+
 typedef void (*FBTMessengerViewDidAppearFn)(id, SEL, BOOL);
 static FBTMessengerViewDidAppearFn orig_MessengerTabBar_viewDidAppear = NULL;
 
@@ -688,6 +780,9 @@ void FBTInstallMessengerFlags(void) {
                     usingBlock:^(__unused NSNotification *notification) {
             FBTMessengerReloadPreferences();
             FBTMessengerScheduleHookRetry();
+            dispatch_async(dispatch_get_main_queue(), ^{
+                FBTMessengerRefreshVisibleSettings();
+            });
         }];
     });
 }

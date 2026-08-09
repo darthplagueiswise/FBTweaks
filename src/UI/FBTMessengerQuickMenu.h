@@ -2,8 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Installs a native context-menu interaction. On iOS 26 UIKit renders the
-/// menu with Liquid Glass and morphs it to/from the targeted source preview.
+/// Installs a native context-menu interaction. UIKit owns the iOS 26 Liquid
+/// Glass presentation and morphs from the real Messenger view under the press.
 void FBTMessengerInstallQuickMenuInteraction(UIView *sourceView);
 
 NS_ASSUME_NONNULL_END

@@ -22,7 +22,7 @@ The original branch established the right safety model:
 2. one original IMP per validated Objective-C method;
 3. fishhook for imported C functions instead of modifying signed `__TEXT`;
 4. registered `NSUserDefaults` with reload notifications and hot-path caches;
-5. UIKit/Liquid Glass helpers with an older-iOS blur fallback.
+5. UIKit-native context-menu presentation, with no custom preview surface.
 
 Facebook-only owners such as `FBTabBarViewController`,
 `FBInternalSettingsViewControllerFromSession` and
@@ -52,25 +52,51 @@ FBWKWebView                                 -setIsEmployee:
 FBWKWebViewDelegateAdaptor                  -setIsEmployee:
 ```
 
-Validated internal-tool providers:
+Validated internal availability providers:
 
 ```text
-MSGEBDebugSettingsViewController                    +isAvailable:
-MSGEBDebugUserSettingsOverrideViewController        +isAvailable:
+Internal Settings  MSGEBDebugSettingsViewController              +isAvailable:
+Internal Tools     MSGEBDebugUserSettingsOverrideViewController  +isAvailable:
 ```
 
 Their class-method ABI is `B24@0:8@16`. The replacements preserve the original
-result unless the corresponding quick switch is enabled.
+result unless the corresponding quick switch is enabled. They are intentionally
+separate: enabling Internal Settings does not also expose User Settings Override.
 
 ## Packed MobileConfig keys
 
 `LightSpeedCore` imports `MSGCSessionedMobileConfigGetBoolean` from
-`LightSpeedEngine`, so fishhook remains as a cross-image fallback. Runtime
-testing exposed an important boundary in that first implementation: calls made
-inside `LightSpeedEngine` never cross that import slot.
+`LightSpeedEngine`, so fishhook covers its import slot without modifying signed
+code. Disassembly found 96 direct calls to that stub. At those call sites,
+`LightSpeedCore` copies two 16-byte halves of a descriptor to the stack and
+passes its address in `x1`; it does not pass the packed key in `x1`.
 
-The effective path now also hooks the exact Objective-C readers present in the
-574 Mach-O, preserving their validated encodings:
+The mapped C ABI is:
+
+```c
+struct MSGCMobileConfigParameterDescriptor {
+    const char *configName;       // +0
+    const char *parameterName;    // +8
+    uint64_t rawValue;            // +16
+    uint64_t unitType;            // +24
+};
+
+BOOL MSGCSessionedMobileConfigGetBoolean(
+    void *session,
+    const struct MSGCMobileConfigParameterDescriptor *parameter,
+    BOOL fallback,
+    BOOL readOptions);
+```
+
+The previous implementation declared `x1` as `uint64_t key`. It consequently
+compared the temporary stack address against packed keys, so every menu switch
+missed the C reader. The replacement now reads `parameter->rawValue` at `+16`,
+returns the forced value for a mapped key, and delegates all unmatched reads
+with the original pointer and arguments unchanged.
+
+Calls made inside `LightSpeedEngine` do not cross the `LightSpeedCore` import
+slot. The effective path therefore also hooks the exact Objective-C readers
+present in the 574 Mach-O, preserving their validated encodings:
 
 ```text
 FBMobileConfigContextManager
@@ -131,15 +157,17 @@ second hook target.
 | Homebase | `homebase_ios.enable_homebase_tab` | `0x0081065800011c1c` |
 | Homebase | `homebase_ios.enable_calendar_rsvp_status` | `0x0081065800051c1d` |
 | Homebase | `homebase_ios.enable_list_card_add_row` | `0x2081065800101c1e` |
-| Homebase | `homebase_ios.thread_settings_enabled` | `0x0081065800131c1f` |
+| Household | `homebase_ios.thread_settings_enabled` | `0x0081065800131c1f` |
 
 The native internal section identifier `msg_settings_internal_settings_section`
-and extensive Homebase/Household UI classes are present in `LightSpeedCore`.
+is registered in the Settings section list. Messenger 574 also contains
+extensive Homebase/Household UI classes.
 The only Household-named descriptors in this build are the string descriptors
 `homebase_strings.omnipicker_household_title` and
 `homebase_strings.omnipicker_household_subtitle`; there is no separate local
-Household boolean. The quick switch therefore expresses and documents the
-native dependency on Homebase instead of inventing an unverified gate.
+Household boolean. The Household switch therefore forces only the verified
+mailbox and Homebase thread-settings paths. It stays independent from the
+Homebase tab switch and does not invent local household membership.
 
 ## Long-press behavior
 
@@ -150,18 +178,21 @@ class identifies a Messenger logo. The image also contains the exact identifiers
 accessor is used only after a top-leading geometry check. This avoids hijacking
 unrelated navigation buttons.
 
-The custom panel/alpha animation was removed. `UIContextMenuInteraction` owns
-the five stateful actions, and `UITargetedPreview` supplies the exact logo as
-the morph target—or a 44-point interactive `UIGlassEffect` capsule at the press
-point for the full tab bar. UIKit therefore owns the native iOS 26 Liquid Glass
-presentation and its forward/dismissal morph. There is no custom fade in this
-path.
+The custom panel/alpha animation and the later synthetic 44-point glass capsule
+were both removed. `UIContextMenuInteraction` owns the five stateful actions.
+For the logo, `UITargetedPreview` uses that existing view; for the full tab bar,
+the implementation hit-tests the press and chooses the real compact control or
+child view below the finger. UIKit therefore owns the native iOS 26 Liquid
+Glass presentation and forward/dismissal morph. This path constructs neither a
+custom fade nor an intermediate preview bubble.
 
 ## Boundaries
 
 - Disabled switches always return the original Messenger values.
 - No inline C hook or signed executable-page mutation is used.
 - Employee/Internal are local presentation and client-code gates only.
+- Household account membership and mutations remain server-side; only verified
+  local mailbox/thread-settings gates are affected.
 - Server authorization, remote metadata and account provisioning remain under
   the server/account's control.
 - Packed keys are validated for Messenger 574 and must be rechecked for a new

@@ -1,12 +1,11 @@
 #import "FBTMessengerQuickMenu.h"
-#import "FBTUIKit26LiquidGlass.h"
 #import "../FBTDefaults.h"
-#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 static char kFBTMessengerContextMenuInteractionKey;
 
 @interface FBTMessengerQuickMenuPresenter : NSObject <UIContextMenuInteractionDelegate>
+@property (nonatomic, strong) NSMapTable<UIContextMenuInteraction *, UIView *> *previewSources;
 + (instancetype)sharedPresenter;
 - (UIMenu *)menuForInteraction:(UIContextMenuInteraction *)interaction;
 - (UITargetedPreview *)targetedPreviewForInteraction:(UIContextMenuInteraction *)interaction;
@@ -19,6 +18,7 @@ static char kFBTMessengerContextMenuInteractionKey;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         presenter = [FBTMessengerQuickMenuPresenter new];
+        presenter.previewSources = [NSMapTable weakToWeakObjectsMapTable];
     });
     return presenter;
 }
@@ -31,23 +31,19 @@ static char kFBTMessengerContextMenuInteractionKey;
     BOOL enabled = ![FBTDefaults boolForKey:key];
     [self setRawBool:enabled forKey:key];
 
-    // These are native dependencies, not visual grouping. Internal Tools is
-    // constructed only for an employee that can access Internal Settings;
-    // Household is a Homebase subresource in Messenger 574.
+    // Internal Tools is constructed only for an employee that can access the
+    // internal Settings section. Homebase and Household remain independent:
+    // each now owns a distinct set of verified MobileConfig paths.
     if ([key isEqualToString:FBTKeyMessengerInternalToolsEnabled] && enabled) {
         [self setRawBool:YES forKey:FBTKeyMessengerInternalSettingsEnabled];
         [self setRawBool:YES forKey:FBTKeyEmployeeEnabled];
     } else if ([key isEqualToString:FBTKeyMessengerInternalSettingsEnabled] && enabled) {
         [self setRawBool:YES forKey:FBTKeyEmployeeEnabled];
-    } else if ([key isEqualToString:FBTKeyMessengerHouseholdEnabled] && enabled) {
-        [self setRawBool:YES forKey:FBTKeyMessengerHomebaseEnabled];
     } else if ([key isEqualToString:FBTKeyEmployeeEnabled] && !enabled) {
         [self setRawBool:NO forKey:FBTKeyMessengerInternalSettingsEnabled];
         [self setRawBool:NO forKey:FBTKeyMessengerInternalToolsEnabled];
     } else if ([key isEqualToString:FBTKeyMessengerInternalSettingsEnabled] && !enabled) {
         [self setRawBool:NO forKey:FBTKeyMessengerInternalToolsEnabled];
-    } else if ([key isEqualToString:FBTKeyMessengerHomebaseEnabled] && !enabled) {
-        [self setRawBool:NO forKey:FBTKeyMessengerHouseholdEnabled];
     }
 
     // The observer reloads the atomic hot-path cache synchronously. The
@@ -90,17 +86,17 @@ static char kFBTMessengerContextMenuInteractionKey;
 - (UIMenu *)menuForInteraction:(UIContextMenuInteraction *)interaction {
     NSArray<UIMenuElement *> *children = @[
         [self actionWithTitle:@"Employee"
-                     subtitle:@"Identidade e gates locais"
+                     subtitle:@"Getters nativos isEmployee"
                          image:@"person.crop.circle.badge.checkmark"
                            key:FBTKeyEmployeeEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Internal Settings"
-                     subtitle:@"Seção interna em Settings"
+                     subtitle:@"Debug Settings na seção interna"
                          image:@"gearshape.2"
                            key:FBTKeyMessengerInternalSettingsEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Internal Tools"
-                     subtitle:@"Debug e user overrides"
+                     subtitle:@"User Settings Override"
                          image:@"wrench.and.screwdriver"
                            key:FBTKeyMessengerInternalToolsEnabled
                    interaction:interaction],
@@ -110,19 +106,62 @@ static char kFBTMessengerContextMenuInteractionKey;
                            key:FBTKeyMessengerHomebaseEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Household"
-                     subtitle:@"Subrecurso nativo do Homebase"
+                     subtitle:@"Mailbox e ajustes Homebase da conversa"
                          image:@"person.2"
                            key:FBTKeyMessengerHouseholdEnabled
                    interaction:interaction],
     ];
     UIMenu *menu = [UIMenu menuWithTitle:@"Messenger Flags" children:children];
-    menu.subtitle = @"Aplicação imediata nos getters; abas e Settings ao reabrir";
+    menu.subtitle = @"Settings atualiza agora; abas exigem reabrir o Messenger";
     return menu;
 }
 
+- (UIView *)previewSourceForInteraction:(UIContextMenuInteraction *)interaction
+                               location:(CGPoint)location {
+    UIView *interactionView = interaction.view;
+    if (!interactionView.window) return nil;
+
+    CGRect bounds = interactionView.bounds;
+    BOOL compactInteraction = CGRectGetWidth(bounds) >= 20.0 &&
+        CGRectGetHeight(bounds) >= 20.0 &&
+        CGRectGetWidth(bounds) <= 180.0 &&
+        CGRectGetHeight(bounds) <= 96.0;
+    if (compactInteraction) return interactionView;
+
+    // For a full tab bar, target the real control below the finger. UIKit can
+    // then lift and morph that existing view. Never manufacture a detached
+    // glass capsule: doing so is the extra bubble the user observed.
+    UIView *hitView = [interactionView hitTest:location withEvent:nil];
+    UIView *deepestCompactView = nil;
+    for (UIView *candidate = hitView;
+         candidate && candidate != interactionView;
+         candidate = candidate.superview) {
+        if (candidate.window != interactionView.window ||
+            candidate.hidden || candidate.alpha < 0.05) {
+            continue;
+        }
+        CGRect candidateBounds = candidate.bounds;
+        BOOL compact = CGRectGetWidth(candidateBounds) >= 20.0 &&
+            CGRectGetHeight(candidateBounds) >= 20.0 &&
+            CGRectGetWidth(candidateBounds) <= 180.0 &&
+            CGRectGetHeight(candidateBounds) <= 96.0;
+        if (!compact) continue;
+        if (!deepestCompactView) deepestCompactView = candidate;
+        if ([candidate isKindOfClass:UIControl.class]) return candidate;
+    }
+    return deepestCompactView;
+}
+
 - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                         configurationForMenuAtLocation:(__unused CGPoint)location {
+                         configurationForMenuAtLocation:(CGPoint)location {
     if (![FBTDefaults boolForKey:FBTKeyOpenLongPress]) return nil;
+    UIView *previewSource = [self previewSourceForInteraction:interaction
+                                                     location:location];
+    if (previewSource) {
+        [self.previewSources setObject:previewSource forKey:interaction];
+    } else {
+        [self.previewSources removeObjectForKey:interaction];
+    }
     __weak typeof(self) weakSelf = self;
     __weak UIContextMenuInteraction *weakInteraction = interaction;
     return [UIContextMenuConfiguration
@@ -135,44 +174,9 @@ static char kFBTMessengerContextMenuInteractionKey;
 }
 
 - (UITargetedPreview *)targetedPreviewForInteraction:(UIContextMenuInteraction *)interaction {
-    UIView *sourceView = interaction.view;
-    UIWindow *window = sourceView.window;
-    if (!sourceView || !window) return nil;
-
-    CGRect sourceBounds = sourceView.bounds;
-    BOOL compactSource = CGRectGetWidth(sourceBounds) <= 180.0 &&
-        CGRectGetHeight(sourceBounds) <= 96.0;
-    UIPreviewParameters *parameters = [UIPreviewParameters new];
-    parameters.backgroundColor = UIColor.clearColor;
-
-    if (compactSource) {
-        CGFloat radius = MIN(CGRectGetWidth(sourceBounds), CGRectGetHeight(sourceBounds)) * 0.32;
-        parameters.visiblePath = [UIBezierPath bezierPathWithRoundedRect:sourceBounds
-                                                            cornerRadius:MAX(10.0, radius)];
-        return [[UITargetedPreview alloc] initWithView:sourceView parameters:parameters];
-    }
-
-    // A whole tab bar is too large to be a useful preview. Give UIKit a
-    // compact native-glass source at the exact press location instead, so the
-    // context menu expands from and collapses back into that glass capsule.
-    UIVisualEffectView *glassSource = [[UIVisualEffectView alloc]
-        initWithEffect:FBTUIKit26GlassEffect(NO, YES, nil)];
-    glassSource.bounds = CGRectMake(0.0, 0.0, 44.0, 44.0);
-    glassSource.backgroundColor = UIColor.clearColor;
-    glassSource.layer.cornerRadius = 22.0;
-    glassSource.layer.cornerCurve = kCACornerCurveContinuous;
-    glassSource.clipsToBounds = YES;
-    parameters.visiblePath = [UIBezierPath bezierPathWithOvalInRect:glassSource.bounds];
-
-    CGPoint location = [interaction locationInView:sourceView];
-    CGPoint targetCenter = [sourceView convertPoint:location toView:window];
-    UIPreviewTarget *target = [[UIPreviewTarget alloc]
-        initWithContainer:window
-                   center:targetCenter
-                transform:CGAffineTransformIdentity];
-    return [[UITargetedPreview alloc] initWithView:glassSource
-                                        parameters:parameters
-                                            target:target];
+    UIView *sourceView = [self.previewSources objectForKey:interaction];
+    if (!sourceView.window) return nil;
+    return [[UITargetedPreview alloc] initWithView:sourceView];
 }
 
 - (UITargetedPreview *)contextMenuInteraction:(UIContextMenuInteraction *)interaction

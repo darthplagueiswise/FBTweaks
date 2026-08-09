@@ -14,8 +14,9 @@ signed `__TEXT` page is patched.
 Long-press the Messenger tab bar. A second entry point is attached when the
 Messenger logo/title image can be identified conservatively in the top
 navigation area. UIKit presents a native `UIContextMenuInteraction`; on iOS 26
-its `UITargetedPreview` morphs the Liquid Glass menu to and from the logo or a
-compact glass capsule at the tab-bar press point. It contains only:
+its `UITargetedPreview` uses the real logo or tab control below the finger as
+the morph source. No detached blur/glass view or intermediate bubble is
+created. The menu contains only:
 
 - Employee
 - Internal Settings
@@ -23,23 +24,31 @@ compact glass capsule at the tab-bar press point. It contains only:
 - Homebase
 - Household
 
-Internal Tools automatically enables Internal Settings and Employee. Household
-automatically enables Homebase because Messenger 574 contains Household UI and
-copy descriptors but no independent Household boolean descriptor.
+Internal Tools automatically enables Internal Settings and Employee. Homebase
+and Household are independent local switches. Messenger 574 has no standalone
+Household membership boolean, so Household is limited to its verified local
+Homebase mailbox/thread-settings paths and never fabricates account membership.
 
-Some gates are consumed while Messenger builds Settings and its tabs, so reopen
-the app after changing switches.
+The visible Messenger Settings controller is asked to rebuild immediately after
+a switch changes. Tab-model gates are launch-consumed, so reopen Messenger for
+Homebase tab changes.
 
 ## Mapped runtime behavior
 
 - Employee: `fb_ford.is_employee`, the secret-conversation employee gate, six
   validated `-isEmployee` models and two `-setIsEmployee:` propagation points.
-- Internal Settings: `fb_ford.can_access_internal_settings`.
-- Internal Tools: four validated `labyrinth_ui` debug gates plus the two native
-  encrypted-backup debug providers.
-- Homebase: mailbox sync, tab, calendar RSVP, list add-row and thread settings.
-- Household: uses the Homebase dependency chain. Account/server support is still
-  required for remote data or actions.
+- Internal Settings: `fb_ford.can_access_internal_settings` plus the native
+  `MSGEBDebugSettingsViewController +isAvailable:` provider.
+- Internal Tools: four validated `labyrinth_ui` debug gates plus
+  `MSGEBDebugUserSettingsOverrideViewController +isAvailable:`.
+- Homebase: mailbox sync, tab, calendar RSVP and list add-row.
+- Household: mailbox sync and Homebase thread settings. Account/server support
+  is still required for household membership, remote data and mutations.
+
+The imported C reader receives a pointer to a 32-byte parameter descriptor, not
+the packed key itself. This branch extracts `rawValue` at descriptor offset 16;
+the previous `uint64_t x1` declaration compared a stack address and therefore
+could not match any requested override.
 
 The overrides are local UI/client gates. They do not mint an employee token,
 grant server authorization or provision unsupported account data.
