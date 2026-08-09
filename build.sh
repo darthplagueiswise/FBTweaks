@@ -26,22 +26,6 @@ if [ -z "${THEOS:-}" ] || [ ! -d "$THEOS" ]; then
 fi
 echo "[FBTweak] THEOS=$THEOS"
 
-BUNDLE_DIR="layout/Library/Application Support/FBTweak.bundle"
-
-verify_assets() {
-  for f in FBTFlags.json FBTHeadlineFlags.json; do
-    if [ ! -f "$BUNDLE_DIR/$f" ]; then
-      echo "ERRO: asset ausente: $BUNDLE_DIR/$f"
-      exit 1
-    fi
-  done
-  if [ ! -d "$BUNDLE_DIR/QueryConfigs" ]; then
-    echo "ERRO: QueryConfigs ausente: $BUNDLE_DIR/QueryConfigs"
-    exit 1
-  fi
-  echo "[FBTweak] assets do bundle OK"
-}
-
 case "$MODE" in
   clean)
     echo "[FBTweak] make clean"
@@ -53,7 +37,6 @@ case "$MODE" in
 
   rootless|*)
     export THEOS_PACKAGE_SCHEME=rootless
-    verify_assets
 
     if [ "$FAST" -eq 0 ]; then
       echo "[FBTweak] make clean"

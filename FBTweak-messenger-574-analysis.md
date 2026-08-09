@@ -1,0 +1,112 @@
+# Messenger 574 runtime analysis and implementation recap
+
+## Scope and provenance
+
+- Base branch: `flags`
+- Base commit: `8123092` (`fix(build): avoid Logos orig inside ternary expression`)
+- App: Messenger 574.0.0, build 1035554267
+- Bundle/executable: `com.facebook.Messenger` / `Messenger`
+- IPA SHA-256: `a109ceeaac210f46f559d8aee96c7a6b331ce7ddb33eb0f1e1420d97d1787d2c`
+- Main images inspected: `Messenger`, `LightSpeedCore`, `LightSpeedEngine`
+
+The IPA was inspected with LIEF and Capstone plus manual Mach-O Objective-C
+metadata and chained-fixup decoding. `r2pipe` could be installed, but no
+radare2 executable was available in the container, so no conclusion depends on
+radare2 output.
+
+## What was retained from `flags`
+
+The original branch established the right safety model:
+
+1. exact and idempotent hooks rather than constructor-time global scans;
+2. one original IMP per validated Objective-C method;
+3. fishhook for imported C functions instead of modifying signed `__TEXT`;
+4. registered `NSUserDefaults` with reload notifications and hot-path caches;
+5. UIKit/Liquid Glass helpers with an older-iOS blur fallback.
+
+Facebook-only owners such as `FBTabBarViewController`,
+`FBInternalSettingsViewControllerFromSession` and
+`FBShouldEnableInternalSettings` do not exist as usable Messenger exports and
+are not linked into the Messenger target. The explicit source list also omits
+the base branch's independent settings constructor and Facebook catalog assets.
+
+## Validated host and Objective-C gates
+
+The Messenger tab host is:
+
+```text
+_TtC25MDSModernTabBarController25MDSModernTabBarController
+-viewDidAppear:  v20@0:8B16
+```
+
+Validated employee methods:
+
+```text
+MBUISimpleParticipantModel                  -isEmployee
+MBQPreviewParticipant                       -isEmployee
+MSGParticipantContact                       -isEmployee
+MSGMentionPlaceholderParticipant            -isEmployee
+MSGPublicChatParticipantAdapter             -isEmployee
+MSGPublicChatMemberAdapter                  -isEmployee
+FBWKWebView                                 -setIsEmployee:
+FBWKWebViewDelegateAdaptor                  -setIsEmployee:
+```
+
+Validated internal-tool providers:
+
+```text
+MSGEBDebugSettingsViewController                    +isAvailable:
+MSGEBDebugUserSettingsOverrideViewController        +isAvailable:
+```
+
+Their class-method ABI is `B24@0:8@16`. The replacements preserve the original
+result unless the corresponding quick switch is enabled.
+
+## Packed MobileConfig keys
+
+`LightSpeedCore` imports `MSGCSessionedMobileConfigGetBoolean` from
+`LightSpeedEngine`. The replacement therefore uses fishhook on the import slot
+and calls the original reader first.
+
+| Feature | Config.parameter | Packed key |
+|---|---|---:|
+| Employee | `fb_ford.is_employee` | `0x008103fe000b1472` |
+| Employee | `messenger_secret_conversation_deprecation.is_employee` | `0x008104aa0006174b` |
+| Internal Settings | `fb_ford.can_access_internal_settings` | `0x008103fe00051470` |
+| Internal Tools | `labyrinth_ui.is_dev_debug_only_ux_enabled` | `0x00810130001606e3` |
+| Internal Tools | `labyrinth_ui.is_eb_debug_menu_enabled` | `0x00810130007c071b` |
+| Internal Tools | `labyrinth_ui.is_eb_debug_advanced_menu_enabled` | `0x00810130007d071c` |
+| Internal Tools | `labyrinth_ui.is_eb_debug_user_settings_override_enabled` | `0x008101300140078a` |
+| Homebase | `homebase_ios.enable_mailbox_sync` | `0x0081065800001c1b` |
+| Homebase | `homebase_ios.enable_homebase_tab` | `0x0081065800011c1c` |
+| Homebase | `homebase_ios.enable_calendar_rsvp_status` | `0x0081065800051c1d` |
+| Homebase | `homebase_ios.enable_list_card_add_row` | `0x2081065800101c1e` |
+| Homebase | `homebase_ios.thread_settings_enabled` | `0x0081065800131c1f` |
+
+The native internal section identifier `msg_settings_internal_settings_section`
+and extensive Homebase/Household UI classes are present in `LightSpeedCore`.
+The only Household-named descriptors in this build are the string descriptors
+`homebase_strings.omnipicker_household_title` and
+`homebase_strings.omnipicker_household_subtitle`; there is no separate local
+Household boolean. The quick switch therefore expresses and documents the
+native dependency on Homebase instead of inventing an unverified gate.
+
+## Long-press behavior
+
+The host hook attaches the same 0.55-second recognizer to the native tab bar and
+to a top-leading view only when its accessibility label, identifier or runtime
+class identifies a Messenger logo. The image also contains the exact identifiers
+`MSGMessengerWordmarkView`, `messengerLogoImageView` and `messenger_logo`; the
+accessor is used only after a top-leading geometry check. This avoids hijacking
+unrelated navigation buttons. The compact panel morphs from the press point, uses the existing
+Liquid Glass helper and falls back to system material blur before iOS 26.
+
+## Boundaries
+
+- Disabled switches always return the original Messenger values.
+- No inline C hook or signed executable-page mutation is used.
+- Employee/Internal are local presentation and client-code gates only.
+- Server authorization, remote metadata and account provisioning remain under
+  the server/account's control.
+- Packed keys are validated for Messenger 574 and must be rechecked for a new
+  app build.

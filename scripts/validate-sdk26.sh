@@ -13,6 +13,8 @@ fail() { echo "VALIDATION FAIL: $1"; exit 1; }
 echo "[validate] Makefile target/arch..."
 grep -q 'TARGET := iphone:clang:26.2:16.3' Makefile || fail "TARGET errado no Makefile"
 grep -q '^ARCHS = arm64$' Makefile || fail "ARCHS != arm64"
+grep -q '^INSTALL_TARGET_PROCESSES = Messenger$' Makefile || fail "processo alvo != Messenger"
+grep -q 'com.facebook.Messenger' FBTweak.plist || fail "bundle alvo != Messenger"
 
 echo "[validate] SDK presente..."
 SDK="${THEOS:-$HOME/theos}/sdks/iPhoneOS26.2.sdk"
@@ -24,19 +26,20 @@ if [ -d "$UIKIT" ]; then
   grep -rq "UIGlassEffect" "$UIKIT" || echo "AVISO: UIGlassEffect não encontrado nos headers (UI nativa pode degradar)."
 fi
 
-echo "[validate] Assets de bundle presentes..."
-[ -f "layout/Library/Application Support/FBTweak.bundle/FBTFlags.json" ] || fail "FBTFlags.json ausente no layout"
-[ -f "layout/Library/Application Support/FBTweak.bundle/FBTHeadlineFlags.json" ] || fail "FBTHeadlineFlags.json ausente no layout"
-[ -d "layout/Library/Application Support/FBTweak.bundle/QueryConfigs" ] || fail "QueryConfigs dir ausente no layout"
 if find src -type f -name "*.swift" | grep -q .; then fail "Swift ainda presente em src/"; fi
 
 echo "[validate] Sem arquivos temporários em src/ que o find pegaria..."
 BADF="$(find src -type f \( -name '*.old.m' -o -name '*.bak' -o -name '*wip*.xm' -o -name '*_backup.m' \) 2>/dev/null || true)"
 [ -z "$BADF" ] || fail "arquivos temporários em src/: $BADF"
 
-echo "[validate] Runtime files..."
-grep -q "MSGCSessionedMobileConfigGetBoolean" src/Runtime/FBTMobileConfigRuntime.m || fail "MobileConfig runtime sem MSGC bool hook"
-grep -q "MSHookMessageEx" src/Runtime/FBTRuntimeBoolBrowser.m || fail "Runtime BOOL sem MSHookMessageEx"
-grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m || fail "UI UIKit sem default Liquid Glass appearance"
+echo "[validate] Messenger 574 mapped hooks..."
+grep -q '^THEOS_LAYOUT_DIR_NAME := layout-messenger$' Makefile || fail "layout Messenger isolado ausente"
+grep -q 'src/MessengerTweak.m' Makefile || fail "entrypoint Messenger fora do target"
+if grep -q '\$(shell find src' Makefile; then fail "target Messenger ainda compila toda a branch Facebook"; fi
+grep -q '_TtC25MDSModernTabBarController25MDSModernTabBarController' src/Features/Messenger/FBTMessengerFlags.m || fail "host Messenger ausente"
+grep -q '0x008103fe000b1472' src/Features/Messenger/FBTMessengerFlags.m || fail "gate is_employee ausente"
+grep -q '0x0081065800011c1c' src/Features/Messenger/FBTMessengerFlags.m || fail "gate Homebase ausente"
+grep -q 'MSGCSessionedMobileConfigGetBoolean' src/Features/Messenger/FBTMessengerFlags.m || fail "reader Messenger ausente"
+if grep -q 'MSHookFunction' src/Features/Messenger/FBTMessengerFlags.m; then fail "Messenger não pode usar hook inline em __TEXT"; fi
 
 echo "[validate] OK"
