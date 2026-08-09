@@ -41,6 +41,15 @@ grep -q '_TtC25MDSModernTabBarController25MDSModernTabBarController' src/Feature
 grep -q '0x008103fe000b1472' src/Features/Messenger/FBTMessengerFlags.m || fail "gate is_employee ausente"
 grep -q '0x0081065800011c1c' src/Features/Messenger/FBTMessengerFlags.m || fail "gate Homebase ausente"
 grep -q 'MSGCSessionedMobileConfigGetBoolean' src/Features/Messenger/FBTMessengerFlags.m || fail "reader Messenger ausente"
+grep -q 'FBMobileConfigContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader ObjC interno do MC ausente"
+grep -q 'FBMobileConfigSessionlessContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessionless do MC ausente"
+grep -q 'FBMobileConfigUserSessionContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessioned ObjC do MC ausente"
 if grep -q 'MSHookFunction' src/Features/Messenger/FBTMessengerFlags.m; then fail "Messenger não pode usar hook inline em __TEXT"; fi
+
+echo "[validate] Native iOS 26 context-menu morph..."
+grep -q 'UIContextMenuInteraction' src/UI/FBTMessengerQuickMenu.m || fail "context menu nativo ausente"
+grep -q 'UITargetedPreview' src/UI/FBTMessengerQuickMenu.m || fail "target do morph nativo ausente"
+grep -q 'UIMenuElementAttributesKeepsMenuPresented' src/UI/FBTMessengerQuickMenu.m || fail "menu multi-toggle ausente"
+if grep -q 'panel\.alpha\|animateWithDuration' src/UI/FBTMessengerQuickMenu.m; then fail "fade customizado ainda presente no quick menu"; fi
 
 echo "[validate] OK"

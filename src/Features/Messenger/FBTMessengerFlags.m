@@ -251,7 +251,237 @@ static void FBTMessengerInstallClassHooks(FBTMessengerHookDescriptor *descriptor
     }
 }
 
+// -------------------------------------------------------------------------
+// Native MobileConfig Objective-C readers.
+//
+// LightSpeedEngine performs many reads inside its own image. A fishhook on
+// LightSpeedCore's import slot cannot observe those direct internal calls.
+// Messenger 574 exposes the typed readers below through Objective-C dispatch,
+// which lets us override the validated uint64 descriptor keys without writing
+// to a signed __TEXT page.
+// -------------------------------------------------------------------------
+
+typedef NS_ENUM(uint8_t, FBTMessengerMCObjectVariant) {
+    FBTMessengerMCObjectVariantValue,
+    FBTMessengerMCObjectVariantValueDefault,
+    FBTMessengerMCObjectVariantValueOptions,
+    FBTMessengerMCObjectVariantValueOptionsDefault,
+};
+
+typedef struct {
+    const char *className;
+    const char *selectorName;
+    const char *encoding;
+    FBTMessengerMCObjectVariant variant;
+    Class targetClass;
+    IMP original;
+} FBTMessengerMCObjectHook;
+
+static FBTMessengerMCObjectHook sMobileConfigObjectHooks[] = {
+    {
+        "FBMobileConfigContextManager",
+        "getBool:",
+        "B24@0:8{mc_bool_param_t=Q}16",
+        FBTMessengerMCObjectVariantValue,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigContextManager",
+        "getBoolWithoutLogging:",
+        "B24@0:8{mc_bool_param_t=Q}16",
+        FBTMessengerMCObjectVariantValue,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigContextManager",
+        "getBool:withDefault:",
+        "B28@0:8{mc_bool_param_t=Q}16B24",
+        FBTMessengerMCObjectVariantValueDefault,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigContextManager",
+        "getBoolWithoutLogging:withDefault:",
+        "B28@0:8{mc_bool_param_t=Q}16B24",
+        FBTMessengerMCObjectVariantValueDefault,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigContextManager",
+        "getBool:withOptions:",
+        "B32@0:8{mc_bool_param_t=Q}16@24",
+        FBTMessengerMCObjectVariantValueOptions,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigContextManager",
+        "getBool:withOptions:withDefault:",
+        "B36@0:8{mc_bool_param_t=Q}16@24B32",
+        FBTMessengerMCObjectVariantValueOptionsDefault,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigSessionlessContextManager",
+        "getBool:",
+        "B24@0:8{mc_sessionless_bool_param_t=Q}16",
+        FBTMessengerMCObjectVariantValue,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigSessionlessContextManager",
+        "getBool:withOptions:",
+        "B32@0:8{mc_sessionless_bool_param_t=Q}16@24",
+        FBTMessengerMCObjectVariantValueOptions,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigUserSessionContextManager",
+        "getBool:",
+        "B24@0:8{mc_sessionbased_bool_param_t=Q}16",
+        FBTMessengerMCObjectVariantValue,
+        Nil,
+        NULL,
+    },
+    {
+        "FBMobileConfigUserSessionContextManager",
+        "getBool:withOptions:",
+        "B32@0:8{mc_sessionbased_bool_param_t=Q}16@24",
+        FBTMessengerMCObjectVariantValueOptions,
+        Nil,
+        NULL,
+    },
+};
+
+static FBTMessengerMCObjectHook *FBTMessengerMCObjectDescriptor(id receiver,
+                                                                SEL selector,
+                                                                FBTMessengerMCObjectVariant variant) {
+    Class receiverClass = object_getClass(receiver);
+    for (Class current = receiverClass; current; current = class_getSuperclass(current)) {
+        for (size_t index = 0;
+             index < sizeof(sMobileConfigObjectHooks) / sizeof(sMobileConfigObjectHooks[0]);
+             index++) {
+            FBTMessengerMCObjectHook *descriptor = &sMobileConfigObjectHooks[index];
+            if (descriptor->targetClass == current &&
+                descriptor->variant == variant &&
+                sel_isEqual(selector, sel_registerName(descriptor->selectorName))) {
+                return descriptor;
+            }
+        }
+    }
+    return NULL;
+}
+
+static BOOL FBTMessengerForcedObjectBoolean(uint64_t key, BOOL *matched) {
+    return FBTMessengerForceBooleanForKey(key, matched);
+}
+
+static BOOL fbt_messenger_mcGetBool(id self, SEL _cmd, uint64_t key) {
+    BOOL matched = NO;
+    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
+    if (matched) return forced;
+
+    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
+        self, _cmd, FBTMessengerMCObjectVariantValue);
+    return descriptor && descriptor->original
+        ? ((BOOL (*)(id, SEL, uint64_t))descriptor->original)(self, _cmd, key)
+        : NO;
+}
+
+static BOOL fbt_messenger_mcGetBoolWithDefault(id self,
+                                                SEL _cmd,
+                                                uint64_t key,
+                                                BOOL defaultValue) {
+    BOOL matched = NO;
+    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
+    if (matched) return forced;
+
+    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
+        self, _cmd, FBTMessengerMCObjectVariantValueDefault);
+    return descriptor && descriptor->original
+        ? ((BOOL (*)(id, SEL, uint64_t, BOOL))descriptor->original)(
+            self, _cmd, key, defaultValue)
+        : defaultValue;
+}
+
+static BOOL fbt_messenger_mcGetBoolWithOptions(id self,
+                                                SEL _cmd,
+                                                uint64_t key,
+                                                id options) {
+    BOOL matched = NO;
+    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
+    if (matched) return forced;
+
+    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
+        self, _cmd, FBTMessengerMCObjectVariantValueOptions);
+    return descriptor && descriptor->original
+        ? ((BOOL (*)(id, SEL, uint64_t, id))descriptor->original)(
+            self, _cmd, key, options)
+        : NO;
+}
+
+static BOOL fbt_messenger_mcGetBoolWithOptionsDefault(id self,
+                                                       SEL _cmd,
+                                                       uint64_t key,
+                                                       id options,
+                                                       BOOL defaultValue) {
+    BOOL matched = NO;
+    BOOL forced = FBTMessengerForcedObjectBoolean(key, &matched);
+    if (matched) return forced;
+
+    FBTMessengerMCObjectHook *descriptor = FBTMessengerMCObjectDescriptor(
+        self, _cmd, FBTMessengerMCObjectVariantValueOptionsDefault);
+    return descriptor && descriptor->original
+        ? ((BOOL (*)(id, SEL, uint64_t, id, BOOL))descriptor->original)(
+            self, _cmd, key, options, defaultValue)
+        : defaultValue;
+}
+
+static IMP FBTMessengerMCReplacementForVariant(FBTMessengerMCObjectVariant variant) {
+    switch (variant) {
+        case FBTMessengerMCObjectVariantValue:
+            return (IMP)fbt_messenger_mcGetBool;
+        case FBTMessengerMCObjectVariantValueDefault:
+            return (IMP)fbt_messenger_mcGetBoolWithDefault;
+        case FBTMessengerMCObjectVariantValueOptions:
+            return (IMP)fbt_messenger_mcGetBoolWithOptions;
+        case FBTMessengerMCObjectVariantValueOptionsDefault:
+            return (IMP)fbt_messenger_mcGetBoolWithOptionsDefault;
+    }
+    return NULL;
+}
+
+static void FBTMessengerInstallMobileConfigObjectHooks(void) {
+    for (size_t index = 0;
+         index < sizeof(sMobileConfigObjectHooks) / sizeof(sMobileConfigObjectHooks[0]);
+         index++) {
+        FBTMessengerMCObjectHook *descriptor = &sMobileConfigObjectHooks[index];
+        if (descriptor->original) continue;
+
+        Class cls = objc_getClass(descriptor->className);
+        SEL selector = sel_registerName(descriptor->selectorName);
+        Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
+        const char *encoding = method ? method_getTypeEncoding(method) : NULL;
+        if (!encoding || strcmp(encoding, descriptor->encoding) != 0) continue;
+
+        descriptor->targetClass = cls;
+        MSHookMessageEx(cls,
+                        selector,
+                        FBTMessengerMCReplacementForVariant(descriptor->variant),
+                        &descriptor->original);
+    }
+}
+
 static void FBTMessengerInstallKnownObjectHooks(void) {
+    FBTMessengerInstallMobileConfigObjectHooks();
+
     FBTMessengerInstallInstanceHooks(
         sEmployeeGetters,
         sizeof(sEmployeeGetters) / sizeof(sEmployeeGetters[0]),
@@ -279,49 +509,12 @@ static void FBTMessengerInstallKnownObjectHooks(void) {
 
 // -------------------------------------------------------------------------
 // Compact long-press entry points: native tab bar and a conservatively
-// identified Messenger logo/title image in the top navigation area.
+// identified Messenger logo/title image in the top navigation area. UIKit's
+// context-menu interaction supplies the native iOS 26 Liquid Glass morph.
 // -------------------------------------------------------------------------
 
-static char kFBTMessengerLongPressKey;
-
-@interface FBTMessengerGestureTarget : NSObject
-+ (instancetype)sharedTarget;
-- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
-@end
-
-@implementation FBTMessengerGestureTarget
-
-+ (instancetype)sharedTarget {
-    static FBTMessengerGestureTarget *target;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ target = [FBTMessengerGestureTarget new]; });
-    return target;
-}
-
-- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateBegan) return;
-    if (![FBTDefaults boolForKey:FBTKeyOpenLongPress]) return;
-    CGPoint point = [recognizer locationInView:recognizer.view];
-    FBTMessengerPresentQuickMenu(recognizer.view, point);
-}
-
-@end
-
 static void FBTMessengerAttachLongPress(UIView *view) {
-    if (!view || objc_getAssociatedObject(view, &kFBTMessengerLongPressKey)) return;
-    UILongPressGestureRecognizer *recognizer =
-        [[UILongPressGestureRecognizer alloc]
-            initWithTarget:[FBTMessengerGestureTarget sharedTarget]
-                    action:@selector(handleLongPress:)];
-    recognizer.minimumPressDuration = 0.55;
-    recognizer.cancelsTouchesInView = NO;
-    recognizer.delaysTouchesBegan = NO;
-    view.userInteractionEnabled = YES;
-    [view addGestureRecognizer:recognizer];
-    objc_setAssociatedObject(view,
-                             &kFBTMessengerLongPressKey,
-                             recognizer,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    FBTMessengerInstallQuickMenuInteraction(view);
 }
 
 static BOOL FBTMessengerStringContains(NSString *value, NSString *needle) {

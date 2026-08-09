@@ -65,8 +65,29 @@ result unless the corresponding quick switch is enabled.
 ## Packed MobileConfig keys
 
 `LightSpeedCore` imports `MSGCSessionedMobileConfigGetBoolean` from
-`LightSpeedEngine`. The replacement therefore uses fishhook on the import slot
-and calls the original reader first.
+`LightSpeedEngine`, so fishhook remains as a cross-image fallback. Runtime
+testing exposed an important boundary in that first implementation: calls made
+inside `LightSpeedEngine` never cross that import slot.
+
+The effective path now also hooks the exact Objective-C readers present in the
+574 Mach-O, preserving their validated encodings:
+
+```text
+FBMobileConfigContextManager
+FBMobileConfigSessionlessContextManager
+FBMobileConfigUserSessionContextManager
+
+-getBool:
+-getBool:withDefault:
+-getBool:withOptions:
+-getBool:withOptions:withDefault:
+-getBoolWithoutLogging:
+-getBoolWithoutLogging:withDefault:
+```
+
+The three parameter structs are all single-`uint64_t` ABI wrappers. These are
+Objective-C method hooks (`MSHookMessageEx`), so internal Engine reads are
+covered without an inline C hook or signed `__TEXT` mutation.
 
 | Feature | Config.parameter | Packed key |
 |---|---|---:|
@@ -93,13 +114,19 @@ native dependency on Homebase instead of inventing an unverified gate.
 
 ## Long-press behavior
 
-The host hook attaches the same 0.55-second recognizer to the native tab bar and
-to a top-leading view only when its accessibility label, identifier or runtime
+The host hook attaches a native context-menu interaction to the tab bar and to
+a top-leading view only when its accessibility label, identifier or runtime
 class identifies a Messenger logo. The image also contains the exact identifiers
 `MSGMessengerWordmarkView`, `messengerLogoImageView` and `messenger_logo`; the
 accessor is used only after a top-leading geometry check. This avoids hijacking
-unrelated navigation buttons. The compact panel morphs from the press point, uses the existing
-Liquid Glass helper and falls back to system material blur before iOS 26.
+unrelated navigation buttons.
+
+The custom panel/alpha animation was removed. `UIContextMenuInteraction` owns
+the five stateful actions, and `UITargetedPreview` supplies the exact logo as
+the morph target—or a 44-point interactive `UIGlassEffect` capsule at the press
+point for the full tab bar. UIKit therefore owns the native iOS 26 Liquid Glass
+presentation and its forward/dismissal morph. There is no custom fade in this
+path.
 
 ## Boundaries
 

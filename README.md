@@ -4,15 +4,18 @@ Branch Theos/rootless for Messenger iOS 574.0.0 (build 1035554267), arm64,
 using the iPhoneOS 26.2 SDK with a minimum deployment target of iOS 16.3.
 
 This branch starts at `flags` commit `8123092` and keeps its safe runtime
-architecture: exact Objective-C selectors use `MSHookMessageEx`, imported C
-readers use fishhook/GOT, preferences are cached away from hot paths, and no
+architecture: exact Objective-C selectors—including the three native
+MobileConfig context managers—use `MSHookMessageEx`, imported C readers retain
+fishhook/GOT as a fallback, preferences are cached away from hot paths, and no
 signed `__TEXT` page is patched.
 
 ## Compact long-press menu
 
 Long-press the Messenger tab bar. A second entry point is attached when the
 Messenger logo/title image can be identified conservatively in the top
-navigation area. The compact morphing glass menu contains only:
+navigation area. UIKit presents a native `UIContextMenuInteraction`; on iOS 26
+its `UITargetedPreview` morphs the Liquid Glass menu to and from the logo or a
+compact glass capsule at the tab-bar press point. It contains only:
 
 - Employee
 - Internal Settings
