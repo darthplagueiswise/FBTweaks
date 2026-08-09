@@ -23,6 +23,7 @@ $(TWEAK_NAME)_FILES = \
 	modules/fishhook/fishhook.c
 
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore
+$(TWEAK_NAME)_LIBRARIES = substrate
 $(TWEAK_NAME)_USE_MODULES = 0
 
 # Defines TARGET_OS_* para os headers do SDK iPhoneOS26.2 resolverem sob Theos.

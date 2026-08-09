@@ -35,6 +35,7 @@ BADF="$(find src -type f \( -name '*.old.m' -o -name '*.bak' -o -name '*wip*.xm'
 echo "[validate] Messenger 574 mapped hooks..."
 grep -q '^THEOS_LAYOUT_DIR_NAME := layout-messenger$' Makefile || fail "layout Messenger isolado ausente"
 grep -q 'src/MessengerTweak.m' Makefile || fail "entrypoint Messenger fora do target"
+grep -q '^\$(TWEAK_NAME)_LIBRARIES = substrate$' Makefile || fail "link explícito do Substrate ausente"
 if grep -q '\$(shell find src' Makefile; then fail "target Messenger ainda compila toda a branch Facebook"; fi
 grep -q '_TtC25MDSModernTabBarController25MDSModernTabBarController' src/Features/Messenger/FBTMessengerFlags.m || fail "host Messenger ausente"
 grep -q '0x008103fe000b1472' src/Features/Messenger/FBTMessengerFlags.m || fail "gate is_employee ausente"
