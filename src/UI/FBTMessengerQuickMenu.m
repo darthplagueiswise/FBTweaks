@@ -27,13 +27,35 @@ static char kFBTMessengerContextMenuInteractionKey;
     [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
 }
 
+- (BOOL)effectiveBoolForKey:(NSString *)key {
+    BOOL internalTools = [FBTDefaults boolForKey:FBTKeyMessengerInternalToolsEnabled];
+    BOOL internalSettings = internalTools ||
+        [FBTDefaults boolForKey:FBTKeyMessengerInternalSettingsEnabled];
+    BOOL employee = internalSettings ||
+        [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
+    BOOL household = [FBTDefaults boolForKey:FBTKeyMessengerHouseholdEnabled];
+    BOOL homebase = household ||
+        [FBTDefaults boolForKey:FBTKeyMessengerHomebaseEnabled];
+
+    if ([key isEqualToString:FBTKeyEmployeeEnabled]) return employee;
+    if ([key isEqualToString:FBTKeyMessengerInternalSettingsEnabled]) {
+        return internalSettings;
+    }
+    if ([key isEqualToString:FBTKeyMessengerInternalToolsEnabled]) {
+        return internalTools;
+    }
+    if ([key isEqualToString:FBTKeyMessengerHomebaseEnabled]) return homebase;
+    if ([key isEqualToString:FBTKeyMessengerHouseholdEnabled]) return household;
+    return [FBTDefaults boolForKey:key];
+}
+
 - (void)toggleKey:(NSString *)key {
-    BOOL enabled = ![FBTDefaults boolForKey:key];
+    BOOL enabled = ![self effectiveBoolForKey:key];
     [self setRawBool:enabled forKey:key];
 
-    // Internal Tools is constructed only for an employee that can access the
-    // internal Settings section. Homebase and Household remain independent:
-    // each now owns a distinct set of verified MobileConfig paths.
+    // Match the dependency graph used by the native consumers. Internal Tools
+    // requires Internal Settings + employee identity. Household is a Homebase
+    // surface, so its local entry points cannot exist without Homebase.
     if ([key isEqualToString:FBTKeyMessengerInternalToolsEnabled] && enabled) {
         [self setRawBool:YES forKey:FBTKeyMessengerInternalSettingsEnabled];
         [self setRawBool:YES forKey:FBTKeyEmployeeEnabled];
@@ -44,6 +66,10 @@ static char kFBTMessengerContextMenuInteractionKey;
         [self setRawBool:NO forKey:FBTKeyMessengerInternalToolsEnabled];
     } else if ([key isEqualToString:FBTKeyMessengerInternalSettingsEnabled] && !enabled) {
         [self setRawBool:NO forKey:FBTKeyMessengerInternalToolsEnabled];
+    } else if ([key isEqualToString:FBTKeyMessengerHouseholdEnabled] && enabled) {
+        [self setRawBool:YES forKey:FBTKeyMessengerHomebaseEnabled];
+    } else if ([key isEqualToString:FBTKeyMessengerHomebaseEnabled] && !enabled) {
+        [self setRawBool:NO forKey:FBTKeyMessengerHouseholdEnabled];
     }
 
     // The observer reloads the atomic hot-path cache synchronously. The
@@ -76,7 +102,7 @@ static char kFBTMessengerContextMenuInteractionKey;
         }];
     }];
     action.subtitle = subtitle;
-    action.state = [FBTDefaults boolForKey:key]
+    action.state = [self effectiveBoolForKey:key]
         ? UIMenuElementStateOn
         : UIMenuElementStateOff;
     action.attributes = UIMenuElementAttributesKeepsMenuPresented;
@@ -86,17 +112,17 @@ static char kFBTMessengerContextMenuInteractionKey;
 - (UIMenu *)menuForInteraction:(UIContextMenuInteraction *)interaction {
     NSArray<UIMenuElement *> *children = @[
         [self actionWithTitle:@"Employee"
-                     subtitle:@"Getters nativos isEmployee"
+                     subtitle:@"Identidade + propagação Rage Shake/Bloks"
                          image:@"person.crop.circle.badge.checkmark"
                            key:FBTKeyEmployeeEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Internal Settings"
-                     subtitle:@"Debug Settings na seção interna"
+                     subtitle:@"Gate fb_ford da seção interna"
                          image:@"gearshape.2"
                            key:FBTKeyMessengerInternalSettingsEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Internal Tools"
-                     subtitle:@"User Settings Override"
+                     subtitle:@"Labyrinth + EasyGating interno"
                          image:@"wrench.and.screwdriver"
                            key:FBTKeyMessengerInternalToolsEnabled
                    interaction:interaction],
@@ -106,13 +132,13 @@ static char kFBTMessengerContextMenuInteractionKey;
                            key:FBTKeyMessengerHomebaseEnabled
                    interaction:interaction],
         [self actionWithTitle:@"Household"
-                     subtitle:@"Mailbox e ajustes Homebase da conversa"
+                     subtitle:@"Homebase + ajustes da conversa"
                          image:@"person.2"
                            key:FBTKeyMessengerHouseholdEnabled
                    interaction:interaction],
     ];
     UIMenu *menu = [UIMenu menuWithTitle:@"Messenger Flags" children:children];
-    menu.subtitle = @"Settings atualiza agora; abas exigem reabrir o Messenger";
+    menu.subtitle = @"Aplicado agora; reabra o Messenger para reconstruir abas/plugins";
     return menu;
 }
 

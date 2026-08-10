@@ -1,60 +1,56 @@
 # FBTweak — Messenger Flags
 
-Branch Theos/rootless for Messenger iOS 574.0.0 (build 1035554267), arm64,
-using the iPhoneOS 26.2 SDK with a minimum deployment target of iOS 16.3.
+Theos/rootless branch for Messenger iOS 574.0.0 (1035554267), arm64, built
+with the iPhoneOS 26.2 SDK and a minimum deployment target of iOS 16.3. It is
+based on `flags` commit `8123092`.
 
-This branch starts at `flags` commit `8123092` and keeps its safe runtime
-architecture: exact Objective-C selectors—including the three native
-MobileConfig context managers—use `MSHookMessageEx`, imported C readers retain
-fishhook/GOT as a fallback, preferences are cached away from hot paths, and no
-signed `__TEXT` page is patched.
+## What the five switches do
 
-## Compact long-press menu
+- **Employee** forces the current session's validated
+  `fb_ford.is_employee` and secret-conversation employee descriptors. It also
+  propagates that value through the exact Messenger consumers that correspond
+  to the original `flags` branch: `MBUISimpleParticipantModel`, both
+  `FBWKWebView` setters, `LSRageShakeView`, and the Bloks Lab deeplink helper.
+- **Internal Settings** implies Employee and additionally forces
+  `fb_ford.can_access_internal_settings`.
+- **Internal Tools** implies Internal Settings and Employee, enables the four
+  mapped `labyrinth_ui` debug descriptors, and enables the imported internal
+  EasyGating path.
+- **Homebase** enables the mapped local tab, mailbox, calendar, and list gates.
+- **Household** implies Homebase and enables the verified Homebase mailbox and
+  thread-settings paths. It does not create server-side household membership.
 
-Long-press the Messenger tab bar. A second entry point is attached when the
-Messenger logo/title image can be identified conservatively in the top
-navigation area. UIKit presents a native `UIContextMenuInteraction`; on iOS 26
-its `UITargetedPreview` uses the real logo or tab control below the finger as
-the morph source. No detached blur/glass view or intermediate bubble is
-created. The menu contains only:
+The important identity path is not a participant-model sweep. Messenger imports
+`LSShouldEnablePluginBasedOnMobileConfigParam`, the direct counterpart of the
+Facebook branch's `FBShouldEnableInternalSettings` gate. Its second argument is
+a tagged descriptor pointer; after clearing bit 0, the packed MobileConfig key
+is at descriptor offset `+16`. The tweak forces the exact Employee/Internal
+keys at that final plugin decision as well as at the imported C reader.
 
-- Employee
-- Internal Settings
-- Internal Tools
-- Homebase
-- Household
+Messenger's `__DATA_CONST.__got` is `S_NON_LAZY_SYMBOL_POINTERS`, not
+`S_REGULAR`, and has the required indirect symbol table. The target therefore
+uses fishhook for the three imported functions and never patches signed
+`__TEXT`. The vendored implementation includes the PAC/`__AUTH_CONST` support
+from the maintained `opa334/fishhook` fork.
 
-Internal Tools automatically enables Internal Settings and Employee. Homebase
-and Household are independent local switches. Messenger 574 has no standalone
-Household membership boolean, so Household is limited to its verified local
-Homebase mailbox/thread-settings paths and never fabricates account membership.
+## Long-press menu
 
-The visible Messenger Settings controller is asked to rebuild immediately after
-a switch changes. Tab-model gates are launch-consumed, so reopen Messenger for
-Homebase tab changes.
+Long-press the Messenger tab bar. When the Messenger logo/wordmark can be
+identified conservatively in the top navigation area, it is an alternative
+entry point. The menu is a native `UIContextMenuInteraction`; its
+`UITargetedPreview` uses the existing logo or tab control under the finger, so
+UIKit owns the iOS 26 Liquid Glass lift, morph, and dismissal. No custom fade,
+detached glass capsule, or intermediate bubble is created.
 
-## Mapped runtime behavior
+The visible Settings controller is refreshed after a toggle. User-scoped
+plugins and the tab model may already be cached, so reopen Messenger after
+changing Employee, Internal Settings/Tools, Homebase, or Household.
 
-- Employee: `fb_ford.is_employee`, the secret-conversation employee gate, six
-  validated `-isEmployee` models and two `-setIsEmployee:` propagation points.
-- Internal Settings: `fb_ford.can_access_internal_settings` plus the native
-  `MSGEBDebugSettingsViewController +isAvailable:` provider.
-- Internal Tools: four validated `labyrinth_ui` debug gates plus
-  `MSGEBDebugUserSettingsOverrideViewController +isAvailable:`.
-- Homebase: mailbox sync, tab, calendar RSVP and list add-row.
-- Household: mailbox sync and Homebase thread settings. Account/server support
-  is still required for household membership, remote data and mutations.
-
-The imported C reader receives a pointer to a 32-byte parameter descriptor, not
-the packed key itself. This branch extracts `rawValue` at descriptor offset 16;
-the previous `uint64_t x1` declaration compared a stack address and therefore
-could not match any requested override.
-
-The overrides are local UI/client gates. They do not mint an employee token,
-grant server authorization or provision unsupported account data.
+These are local client/UI gates. They do not mint an employee token, grant
+server authorization, or provision unsupported account data.
 
 See [FBTweak-messenger-574-analysis.md](FBTweak-messenger-574-analysis.md) for
-the binary evidence and exact packed keys.
+the binary evidence, ABI mapping, and crash analysis.
 
 ## Build
 
@@ -63,7 +59,6 @@ export THEOS=~/theos
 ./build.sh rootless
 ```
 
-The package filter and install process both target `com.facebook.Messenger` /
-`Messenger`. Its explicit source list excludes every Facebook settings browser,
-constructor and catalog asset retained in the base branch. The CI build uses
-`iPhoneOS26.2.sdk`, rootless, arm64 and `FINALPACKAGE=1`.
+The package filter and install process target `com.facebook.Messenger` /
+`Messenger`. The explicit source list excludes the Facebook-only settings
+browsers, constructors, and catalogs from the base branch.

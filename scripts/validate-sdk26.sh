@@ -44,6 +44,13 @@ grep -q 'MSGCSessionedMobileConfigGetBoolean' src/Features/Messenger/FBTMessenge
 grep -q 'FBTMessengerMCParameterDescriptor' src/Features/Messenger/FBTMessengerFlags.m || fail "ABI de descritor do reader C ausente"
 grep -q 'parameter ? parameter->rawValue' src/Features/Messenger/FBTMessengerFlags.m || fail "reader C não extrai a key em +16 do descritor"
 grep -q 'offsetof(FBTMessengerMCParameterDescriptor, rawValue) == 16' src/Features/Messenger/FBTMessengerFlags.m || fail "offset da key MobileConfig não validado"
+grep -q 'LSShouldEnablePluginBasedOnMobileConfigParam' src/Features/Messenger/FBTMessengerFlags.m || fail "gate final de plugin/identidade ausente"
+grep -q 'FBTMessengerPluginParameterKey' src/Features/Messenger/FBTMessengerFlags.m || fail "decoder do parâmetro tagged de plugin ausente"
+grep -q '~(uintptr_t)1' src/Features/Messenger/FBTMessengerFlags.m || fail "tag do fallback do plugin não é removida"
+grep -q 'rebind_symbols' src/Features/Messenger/FBTMessengerFlags.m || fail "fishhook dos imports Messenger ausente"
+grep -q 'modules/fishhook/fishhook.c' Makefile || fail "fishhook não está no target Messenger"
+grep -q 'SEG_AUTH_CONST' modules/fishhook/fishhook.c || fail "fork fishhook sem suporte __AUTH_CONST"
+grep -q 'ptrauth_auth_and_resign' modules/fishhook/fishhook.c || fail "fork fishhook sem suporte PAC"
 grep -q 'FBMobileConfigContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader ObjC interno do MC ausente"
 grep -q 'FBMobileConfigSessionlessContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessionless do MC ausente"
 grep -q 'FBMobileConfigUserSessionContextManager' src/Features/Messenger/FBTMessengerFlags.m || fail "reader sessioned ObjC do MC ausente"
@@ -51,6 +58,14 @@ grep -q 'FBTMessengerDirectInstanceMethod' src/Features/Messenger/FBTMessengerFl
 if grep -q 'FBTMessengerMCObjectDescriptor' src/Features/Messenger/FBTMessengerFlags.m; then fail "lookup de trampoline por receiver reintroduz recursão"; fi
 mc_original_slots="$(grep -o '&sMC[A-Za-z]*Original' src/Features/Messenger/FBTMessengerFlags.m | sort -u | wc -l | tr -d ' ')"
 [ "$mc_original_slots" -eq 10 ] || fail "cada reader MC precisa de um trampoline original próprio"
+grep -q 'LSRageShakeView_init' src/Features/Messenger/FBTMessengerFlags.m || fail "propagação employee no Rage Shake ausente"
+grep -q 'BKBloksLabDeeplinkHelper_process' src/Features/Messenger/FBTMessengerFlags.m || fail "propagação employee no Bloks ausente"
+grep -q 'MBUISimpleParticipantModel_isEmployee' src/Features/Messenger/FBTMessengerFlags.m || fail "propagação exata da branch flags ausente"
+grep -q 'orig_FBWKWebView_setIsEmployee' src/Features/Messenger/FBTMessengerFlags.m || fail "trampoline próprio de FBWKWebView ausente"
+grep -q 'orig_FBWKWebViewDelegateAdaptor_setIsEmployee' src/Features/Messenger/FBTMessengerFlags.m || fail "trampoline próprio do WebView adaptor ausente"
+if grep -q 'FBTMessengerDescriptorForReceiver' src/Features/Messenger/FBTMessengerFlags.m; then fail "seleção de trampoline por receiver reintroduz risco de recursão"; fi
+if grep -Eq 'MBQPreviewParticipant|MSGParticipantContact|MSGMentionPlaceholderParticipant|MSGPublicChatParticipantAdapter|MSGPublicChatMemberAdapter' src/Features/Messenger/FBTMessengerFlags.m; then fail "modelos de outros participantes não podem representar a identidade atual"; fi
+if grep -q 'MSGEBDebugSettingsViewController' src/Features/Messenger/FBTMessengerFlags.m; then fail "Encrypted Backups ainda mapeado como Internal Settings"; fi
 if grep -q 'MSHookFunction' src/Features/Messenger/FBTMessengerFlags.m; then fail "Messenger não pode usar hook inline em __TEXT"; fi
 
 echo "[validate] Native iOS 26 context-menu morph..."
@@ -58,6 +73,7 @@ grep -q 'UIContextMenuInteraction' src/UI/FBTMessengerQuickMenu.m || fail "conte
 grep -q 'UITargetedPreview' src/UI/FBTMessengerQuickMenu.m || fail "target do morph nativo ausente"
 grep -q 'hitTest:location withEvent:nil' src/UI/FBTMessengerQuickMenu.m || fail "morph não usa o controle real sob o toque"
 grep -q 'UIMenuElementAttributesKeepsMenuPresented' src/UI/FBTMessengerQuickMenu.m || fail "menu multi-toggle ausente"
+grep -q 'BOOL homebase = household ||' src/UI/FBTMessengerQuickMenu.m || fail "Household não implica Homebase no menu"
 if grep -q 'panel\.alpha\|animateWithDuration' src/UI/FBTMessengerQuickMenu.m; then fail "fade customizado ainda presente no quick menu"; fi
 if grep -q 'UIVisualEffectView\|UIPreviewTarget\|FBTUIKit26GlassEffect' src/UI/FBTMessengerQuickMenu.m; then fail "preview de bolha artificial ainda presente"; fi
 if grep -q 'src/UI/FBTUIKit26LiquidGlass.m' Makefile; then fail "helper de vidro customizado ainda está no target Messenger"; fi

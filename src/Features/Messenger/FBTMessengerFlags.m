@@ -14,9 +14,11 @@
 // Messenger 574.0.0 (1035554267) — validated MobileConfig descriptors.
 //
 // These are packed descriptor keys, not offsets and not __TEXT patches.
-// LightSpeedCore imports MSGCSessionedMobileConfigGetBoolean from
-// LightSpeedEngine, so fishhook updates the import slot without modifying a
-// signed executable page.
+// LightSpeedCore imports MSGCSessionedMobileConfigGetBoolean and
+// LSShouldEnablePluginBasedOnMobileConfigParam from LightSpeedEngine. Both
+// imports live in __DATA_CONST.__got as S_NON_LAZY_SYMBOL_POINTERS and have
+// entries in LC_DYSYMTAB's indirect symbol table, so fishhook can rebind them
+// without modifying a signed executable page.
 // -------------------------------------------------------------------------
 
 static const uint64_t kMCFBFordCanAccessInternalSettings = UINT64_C(0x008103fe00051470);
@@ -40,6 +42,15 @@ static atomic_bool sInternalToolsEnabled;
 static atomic_bool sHomebaseEnabled;
 static atomic_bool sHouseholdEnabled;
 static atomic_bool sHooksScheduled;
+static atomic_uint sObservedOverrideKinds;
+
+enum {
+    FBTMessengerObservedEmployee = 1u << 0,
+    FBTMessengerObservedInternalSettings = 1u << 1,
+    FBTMessengerObservedInternalTools = 1u << 2,
+    FBTMessengerObservedHomebase = 1u << 3,
+    FBTMessengerObservedHousehold = 1u << 4,
+};
 
 static BOOL FBTMessengerEmployeeEnabled(void) {
     return atomic_load_explicit(&sEmployeeEnabled, memory_order_relaxed);
@@ -59,8 +70,9 @@ static void FBTMessengerReloadPreferences(void) {
         [FBTDefaults boolForKey:FBTKeyMessengerInternalSettingsEnabled];
     BOOL employee = internalSettings ||
         [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
-    BOOL homebase = [FBTDefaults boolForKey:FBTKeyMessengerHomebaseEnabled];
     BOOL household = [FBTDefaults boolForKey:FBTKeyMessengerHouseholdEnabled];
+    BOOL homebase = household ||
+        [FBTDefaults boolForKey:FBTKeyMessengerHomebaseEnabled];
 
     atomic_store_explicit(&sInternalToolsEnabled, internalTools, memory_order_relaxed);
     atomic_store_explicit(&sInternalSettingsEnabled, internalSettings, memory_order_relaxed);
@@ -98,6 +110,19 @@ typedef BOOL (*FBTMessengerMCBoolFn)(
 
 static FBTMessengerMCBoolFn orig_MSGCSessionedMobileConfigGetBoolean = NULL;
 
+static void FBTMessengerRecordObservedOverride(unsigned int kind,
+                                                uint64_t key,
+                                                const char *name) {
+    unsigned int previous = atomic_fetch_or_explicit(&sObservedOverrideKinds,
+                                                      kind,
+                                                      memory_order_relaxed);
+    if ((previous & kind) == 0) {
+        FBTLog(@"Messenger override consumed: %s (0x%016llx)",
+               name,
+               (unsigned long long)key);
+    }
+}
+
 static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
     BOOL employee = FBTMessengerEmployeeEnabled();
     BOOL internalSettings = FBTMessengerInternalSettingsEnabled();
@@ -107,10 +132,16 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
 
     if (employee &&
         (key == kMCFBFordIsEmployee || key == kMCSecretConversationIsEmployee)) {
+        FBTMessengerRecordObservedOverride(FBTMessengerObservedEmployee,
+                                            key,
+                                            "employee");
         *matched = YES;
         return YES;
     }
     if (internalSettings && key == kMCFBFordCanAccessInternalSettings) {
+        FBTMessengerRecordObservedOverride(FBTMessengerObservedInternalSettings,
+                                            key,
+                                            "internal-settings");
         *matched = YES;
         return YES;
     }
@@ -119,6 +150,9 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
          key == kMCLabyrinthEBDebugMenu ||
          key == kMCLabyrinthEBDebugAdvancedMenu ||
          key == kMCLabyrinthEBDebugUserOverrides)) {
+        FBTMessengerRecordObservedOverride(FBTMessengerObservedInternalTools,
+                                            key,
+                                            "internal-tools");
         *matched = YES;
         return YES;
     }
@@ -127,6 +161,9 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
          key == kMCHomebaseTab ||
          key == kMCHomebaseCalendarRSVP ||
          key == kMCHomebaseListAddRow)) {
+        FBTMessengerRecordObservedOverride(FBTMessengerObservedHomebase,
+                                            key,
+                                            "homebase");
         *matched = YES;
         return YES;
     }
@@ -136,6 +173,9 @@ static BOOL FBTMessengerForceBooleanForKey(uint64_t key, BOOL *matched) {
     if (household &&
         (key == kMCHomebaseMailboxSync ||
          key == kMCHomebaseThreadSettings)) {
+        FBTMessengerRecordObservedOverride(FBTMessengerObservedHousehold,
+                                            key,
+                                            "household");
         *matched = YES;
         return YES;
     }
@@ -159,50 +199,129 @@ static BOOL fbt_messenger_MobileConfigGetBoolean(void *context,
         : defaultValue;
 }
 
-static void FBTMessengerInstallMobileConfigHook(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        struct rebinding binding = {
+// Preserve all four x-register arguments exactly as the original flags branch
+// does. Narrowing x1..x3 to int32/BOOL would corrupt any pointer-sized payload
+// on the fall-through path even though the return value itself is a BOOL.
+typedef BOOL (*FBTMessengerEasyGatingBoolFn)(void *, void *, void *, void *);
+
+static FBTMessengerEasyGatingBoolFn
+    orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock = NULL;
+
+static BOOL fbt_messenger_EasyGatingGetBoolean_Internal_DoNotUseOrMock(
+    void *a0,
+    void *a1,
+    void *a2,
+    void *a3) {
+    if (FBTMessengerInternalToolsEnabled()) return YES;
+    return orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock
+        ? orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock(
+              a0, a1, a2, a3)
+        : NO;
+}
+
+// Messenger's direct equivalent of Facebook's
+// FBShouldEnableInternalSettings import. Capstone validation of
+// LSShouldEnablePluginBasedOnMobileConfigParam at LightSpeedEngine+0x1a5ce0:
+//   x0 = MCI auth-data context
+//   x1 = address of a tagged descriptor pointer (bit 0 is the fallback BOOL)
+//   descriptor + 16 = packed uint64 MobileConfig key
+//   w0 = BOOL result
+// This catches the plugin eligibility decision itself, including the
+// fb_ford.is_employee identity gate, rather than only changing a generic MC
+// reader and hoping the settings plugin asks that import again.
+typedef BOOL (*FBTMessengerPluginMobileConfigGateFn)(
+    void *authDataContext,
+    const uintptr_t *taggedParameter);
+
+static FBTMessengerPluginMobileConfigGateFn
+    orig_LSShouldEnablePluginBasedOnMobileConfigParam = NULL;
+
+static uint64_t FBTMessengerPluginParameterKey(
+    const uintptr_t *taggedParameter) {
+    if (!taggedParameter) return UINT64_C(0);
+    uintptr_t descriptorAddress =
+        __atomic_load_n(taggedParameter, __ATOMIC_ACQUIRE) &
+        ~(uintptr_t)1;
+    if (!descriptorAddress) return UINT64_C(0);
+
+    uint64_t key = UINT64_C(0);
+    memcpy(&key,
+           (const void *)(descriptorAddress +
+                          offsetof(FBTMessengerMCParameterDescriptor, rawValue)),
+           sizeof(key));
+    return key;
+}
+
+static BOOL fbt_messenger_LSShouldEnablePluginBasedOnMobileConfigParam(
+    void *authDataContext,
+    const uintptr_t *taggedParameter) {
+    BOOL matched = NO;
+    BOOL forced = FBTMessengerForceBooleanForKey(
+        FBTMessengerPluginParameterKey(taggedParameter),
+        &matched);
+    if (matched) return forced;
+    return orig_LSShouldEnablePluginBasedOnMobileConfigParam
+        ? orig_LSShouldEnablePluginBasedOnMobileConfigParam(
+              authDataContext, taggedParameter)
+        : (taggedParameter &&
+           ((__atomic_load_n(taggedParameter, __ATOMIC_RELAXED) & 1u) != 0));
+}
+
+static atomic_bool sCImportHooksInstalled;
+static atomic_bool sCImportStatusLogged;
+
+static void FBTMessengerInstallCImportHooks(void) {
+    if (atomic_exchange_explicit(&sCImportHooksInstalled,
+                                 true,
+                                 memory_order_relaxed)) {
+        return;
+    }
+
+    struct rebinding rebindings[] = {
+        {
             "MSGCSessionedMobileConfigGetBoolean",
             (void *)fbt_messenger_MobileConfigGetBoolean,
             (void **)&orig_MSGCSessionedMobileConfigGetBoolean,
-        };
-        rebind_symbols(&binding, 1);
-        FBTLog(@"Messenger MobileConfig bool hook installed (fishhook only)");
-    });
+        },
+        {
+            "LSShouldEnablePluginBasedOnMobileConfigParam",
+            (void *)fbt_messenger_LSShouldEnablePluginBasedOnMobileConfigParam,
+            (void **)&orig_LSShouldEnablePluginBasedOnMobileConfigParam,
+        },
+        {
+            "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+            (void *)fbt_messenger_EasyGatingGetBoolean_Internal_DoNotUseOrMock,
+            (void **)&orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock,
+        },
+    };
+    int result = rebind_symbols(
+        rebindings,
+        sizeof(rebindings) / sizeof(rebindings[0]));
+    FBTLog(@"Messenger import hooks registered: result=%d", result);
 }
 
 // -------------------------------------------------------------------------
-// Exact Objective-C identity and provider hooks.
+// Exact Objective-C identity propagation hooks.
 // -------------------------------------------------------------------------
 
-typedef struct {
-    const char *className;
-    Class targetClass;
-    IMP original;
-} FBTMessengerHookDescriptor;
+// The original flags branch deliberately includes this exact propagation
+// model. It is not the source of the current viewer's identity; the source is
+// fb_ford.is_employee above. It remains useful for downstream Messenger UI
+// that receives the viewer as a participant. Keep its own trampoline so a
+// different participant class can never recurse through this original IMP.
+typedef BOOL (*FBTMessengerBoolVoidFn)(id, SEL);
+static FBTMessengerBoolVoidFn
+    orig_MBUISimpleParticipantModel_isEmployee = NULL;
 
-static FBTMessengerHookDescriptor sEmployeeGetters[] = {
-    { "MBUISimpleParticipantModel", Nil, NULL },
-    { "MBQPreviewParticipant", Nil, NULL },
-    { "MSGParticipantContact", Nil, NULL },
-    { "MSGMentionPlaceholderParticipant", Nil, NULL },
-    { "MSGPublicChatParticipantAdapter", Nil, NULL },
-    { "MSGPublicChatMemberAdapter", Nil, NULL },
-};
-
-static FBTMessengerHookDescriptor sEmployeeSetters[] = {
-    { "FBWKWebView", Nil, NULL },
-    { "FBWKWebViewDelegateAdaptor", Nil, NULL },
-};
-
-static FBTMessengerHookDescriptor sInternalSettingsProviders[] = {
-    { "MSGEBDebugSettingsViewController", Nil, NULL },
-};
-
-static FBTMessengerHookDescriptor sInternalToolProviders[] = {
-    { "MSGEBDebugUserSettingsOverrideViewController", Nil, NULL },
-};
+static BOOL fbt_messenger_MBUISimpleParticipantModel_isEmployee(
+    id self,
+    SEL _cmd) {
+    return FBTMessengerEmployeeEnabled()
+        ? YES
+        : (orig_MBUISimpleParticipantModel_isEmployee
+               ? orig_MBUISimpleParticipantModel_isEmployee(self, _cmd)
+               : NO);
+}
 
 static BOOL FBTMessengerEncodingMatches(Method method,
                                          const char *first,
@@ -213,100 +332,236 @@ static BOOL FBTMessengerEncodingMatches(Method method,
          (second && strcmp(actual, second) == 0));
 }
 
-static FBTMessengerHookDescriptor *FBTMessengerDescriptorForReceiver(
-    id receiver,
-    FBTMessengerHookDescriptor *descriptors,
-    size_t count) {
-    Class receiverClass = object_getClass(receiver);
-    for (Class current = receiverClass; current; current = class_getSuperclass(current)) {
-        for (size_t index = 0; index < count; index++) {
-            if (descriptors[index].targetClass == current) return &descriptors[index];
+static Method FBTMessengerDirectInstanceMethod(Class cls, SEL selector) {
+    unsigned int methodCount = 0;
+    Method *methods = cls ? class_copyMethodList(cls, &methodCount) : NULL;
+    Method match = NULL;
+    for (unsigned int index = 0; index < methodCount; index++) {
+        if (sel_isEqual(method_getName(methods[index]), selector)) {
+            match = methods[index];
+            break;
         }
     }
-    return NULL;
+    free(methods);
+    return match;
 }
 
-static BOOL fbt_messenger_isEmployee(id self, SEL _cmd) {
-    if (FBTMessengerEmployeeEnabled()) return YES;
-    FBTMessengerHookDescriptor *descriptor = FBTMessengerDescriptorForReceiver(
-        self,
-        sEmployeeGetters,
-        sizeof(sEmployeeGetters) / sizeof(sEmployeeGetters[0]));
-    if (!descriptor || !descriptor->original) return NO;
-    return ((BOOL (*)(id, SEL))descriptor->original)(self, _cmd);
-}
+typedef void (*FBTMessengerVoidBoolFn)(id, SEL, BOOL);
+static FBTMessengerVoidBoolFn orig_FBWKWebView_setIsEmployee = NULL;
+static FBTMessengerVoidBoolFn
+    orig_FBWKWebViewDelegateAdaptor_setIsEmployee = NULL;
 
-static void fbt_messenger_setIsEmployee(id self, SEL _cmd, BOOL value) {
-    FBTMessengerHookDescriptor *descriptor = FBTMessengerDescriptorForReceiver(
-        self,
-        sEmployeeSetters,
-        sizeof(sEmployeeSetters) / sizeof(sEmployeeSetters[0]));
-    if (!descriptor || !descriptor->original) return;
-    ((void (*)(id, SEL, BOOL))descriptor->original)(
-        self, _cmd, FBTMessengerEmployeeEnabled() ? YES : value);
-}
-
-static BOOL fbt_messenger_internalSettingsIsAvailable(id self,
-                                                       SEL _cmd,
-                                                       id context) {
-    if (FBTMessengerInternalSettingsEnabled()) return YES;
-    FBTMessengerHookDescriptor *descriptor = FBTMessengerDescriptorForReceiver(
-        self,
-        sInternalSettingsProviders,
-        sizeof(sInternalSettingsProviders) / sizeof(sInternalSettingsProviders[0]));
-    if (!descriptor || !descriptor->original) return NO;
-    return ((BOOL (*)(id, SEL, id))descriptor->original)(self, _cmd, context);
-}
-
-static BOOL fbt_messenger_internalToolIsAvailable(id self, SEL _cmd, id context) {
-    if (FBTMessengerInternalToolsEnabled()) return YES;
-    FBTMessengerHookDescriptor *descriptor = FBTMessengerDescriptorForReceiver(
-        self,
-        sInternalToolProviders,
-        sizeof(sInternalToolProviders) / sizeof(sInternalToolProviders[0]));
-    if (!descriptor || !descriptor->original) return NO;
-    return ((BOOL (*)(id, SEL, id))descriptor->original)(self, _cmd, context);
-}
-
-static void FBTMessengerInstallInstanceHooks(FBTMessengerHookDescriptor *descriptors,
-                                              size_t count,
-                                              SEL selector,
-                                              IMP replacement,
-                                              const char *firstEncoding,
-                                              const char *secondEncoding) {
-    for (size_t index = 0; index < count; index++) {
-        FBTMessengerHookDescriptor *descriptor = &descriptors[index];
-        if (descriptor->original) continue;
-        Class cls = objc_getClass(descriptor->className);
-        Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
-        if (!FBTMessengerEncodingMatches(method, firstEncoding, secondEncoding)) continue;
-        descriptor->targetClass = cls;
-        MSHookMessageEx(cls, selector, replacement, &descriptor->original);
+static void fbt_messenger_FBWKWebView_setIsEmployee(id self,
+                                                     SEL _cmd,
+                                                     BOOL value) {
+    if (orig_FBWKWebView_setIsEmployee) {
+        orig_FBWKWebView_setIsEmployee(
+            self, _cmd, FBTMessengerEmployeeEnabled() ? YES : value);
     }
 }
 
-static void FBTMessengerInstallClassHooks(FBTMessengerHookDescriptor *descriptors,
-                                           size_t count,
-                                           SEL selector,
-                                           IMP replacement,
-                                           const char *firstEncoding,
-                                           const char *secondEncoding) {
-    for (size_t index = 0; index < count; index++) {
-        FBTMessengerHookDescriptor *descriptor = &descriptors[index];
-        if (descriptor->original) continue;
-        Class cls = objc_getClass(descriptor->className);
+static void fbt_messenger_FBWKWebViewDelegateAdaptor_setIsEmployee(
+    id self,
+    SEL _cmd,
+    BOOL value) {
+    if (orig_FBWKWebViewDelegateAdaptor_setIsEmployee) {
+        orig_FBWKWebViewDelegateAdaptor_setIsEmployee(
+            self, _cmd, FBTMessengerEmployeeEnabled() ? YES : value);
+    }
+}
+
+static void FBTMessengerInstallVoidBoolHook(const char *className,
+                                            const char *selectorName,
+                                            IMP replacement,
+                                            IMP *original) {
+    if (!className || !selectorName || !replacement || !original || *original) {
+        return;
+    }
+    Class cls = objc_getClass(className);
+    SEL selector = sel_registerName(selectorName);
+    Method method = FBTMessengerDirectInstanceMethod(cls, selector);
+    if (!FBTMessengerEncodingMatches(method,
+                                     "v20@0:8B16",
+                                     "v20@0:8c16")) {
+        return;
+    }
+    MSHookMessageEx(cls, selector, replacement, original);
+}
+
+typedef id (*FBTMessengerRageShakeInitFn)(id,
+                                          SEL,
+                                          id,
+                                          id,
+                                          id,
+                                          id,
+                                          id,
+                                          id,
+                                          BOOL,
+                                          BOOL,
+                                          BOOL,
+                                          BOOL,
+                                          BOOL,
+                                          BOOL,
+                                          id,
+                                          NSInteger,
+                                          NSInteger,
+                                          BOOL);
+
+static FBTMessengerRageShakeInitFn orig_LSRageShakeView_init = NULL;
+
+static id fbt_messenger_LSRageShakeView_init(id self,
+                                             SEL _cmd,
+                                             id bugDescription,
+                                             id textViewDelegate,
+                                             id tapLinkHandler,
+                                             id addMediaButtonTapHandler,
+                                             id takeScreenshotButtonTapHandler,
+                                             id recordScreenButtonTapHandler,
+                                             BOOL showSuggestedProblemTags,
+                                             BOOL isEmployee,
+                                             BOOL showAssignToMeField,
+                                             BOOL showReproStepsBox,
+                                             BOOL showLoginAsUserPermissionField,
+                                             BOOL isAiStudioTabEnabled,
+                                             id selectedProblemTagsHandler,
+                                             NSInteger minCharacterCount,
+                                             NSInteger maxCharacterCount,
+                                             BOOL isCharacterCountEnabled) {
+    if (!orig_LSRageShakeView_init) return nil;
+    return orig_LSRageShakeView_init(
+        self,
+        _cmd,
+        bugDescription,
+        textViewDelegate,
+        tapLinkHandler,
+        addMediaButtonTapHandler,
+        takeScreenshotButtonTapHandler,
+        recordScreenButtonTapHandler,
+        showSuggestedProblemTags,
+        FBTMessengerEmployeeEnabled() ? YES : isEmployee,
+        showAssignToMeField,
+        showReproStepsBox,
+        showLoginAsUserPermissionField,
+        isAiStudioTabEnabled,
+        selectedProblemTagsHandler,
+        minCharacterCount,
+        maxCharacterCount,
+        isCharacterCountEnabled);
+}
+
+typedef void (*FBTMessengerBloksLabDeeplinkFn)(id,
+                                               SEL,
+                                               id,
+                                               id,
+                                               BOOL,
+                                               BOOL,
+                                               BOOL,
+                                               id,
+                                               id);
+
+static FBTMessengerBloksLabDeeplinkFn
+    orig_BKBloksLabDeeplinkHelper_process = NULL;
+
+static void fbt_messenger_BKBloksLabDeeplinkHelper_process(
+    id self,
+    SEL _cmd,
+    id deeplink,
+    id foaObjectSet,
+    BOOL passPrototypeShortcode,
+    BOOL useInternalNetworkCheck,
+    BOOL isEmployee,
+    id session,
+    id containerConfigProvider) {
+    if (!orig_BKBloksLabDeeplinkHelper_process) return;
+    orig_BKBloksLabDeeplinkHelper_process(
+        self,
+        _cmd,
+        deeplink,
+        foaObjectSet,
+        passPrototypeShortcode,
+        FBTMessengerInternalToolsEnabled() ? YES : useInternalNetworkCheck,
+        FBTMessengerEmployeeEnabled() ? YES : isEmployee,
+        session,
+        containerConfigProvider);
+}
+
+static void FBTMessengerInstallIdentityPropagationHooks(void) {
+    if (!orig_MBUISimpleParticipantModel_isEmployee) {
+        Class cls = objc_getClass("MBUISimpleParticipantModel");
+        SEL selector = sel_registerName("isEmployee");
+        Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
+        if (FBTMessengerEncodingMatches(method,
+                                        "B16@0:8",
+                                        "c16@0:8")) {
+            MSHookMessageEx(
+                cls,
+                selector,
+                (IMP)fbt_messenger_MBUISimpleParticipantModel_isEmployee,
+                (IMP *)&orig_MBUISimpleParticipantModel_isEmployee);
+        }
+    }
+
+    FBTMessengerInstallVoidBoolHook(
+        "FBWKWebView",
+        "setIsEmployee:",
+        (IMP)fbt_messenger_FBWKWebView_setIsEmployee,
+        (IMP *)&orig_FBWKWebView_setIsEmployee);
+    FBTMessengerInstallVoidBoolHook(
+        "FBWKWebViewDelegateAdaptor",
+        "setIsEmployee:",
+        (IMP)fbt_messenger_FBWKWebViewDelegateAdaptor_setIsEmployee,
+        (IMP *)&orig_FBWKWebViewDelegateAdaptor_setIsEmployee);
+
+    if (!orig_LSRageShakeView_init) {
+        Class cls = objc_getClass("LSRageShakeView");
+        SEL selector = sel_registerName(
+            "initWithBugDescription:textViewDelegate:tapLinkHandler:"
+            "addMediaButtonTapHandler:takeScreenshotButtonTapHandler:"
+            "recordScreenButtonTapHandler:showSuggestedProblemTags:isEmployee:"
+            "showAssignToMeField:showReproStepsBox:"
+            "showLoginAsUserPermissionField:isAiStudioTabEnabled:"
+            "selectedProblemTagsHandler:minCharacterCount:maxCharacterCount:"
+            "isCharacterCountEnabled:");
+        Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
+        const char *encoding = method ? method_getTypeEncoding(method) : NULL;
+        const char *expected =
+            "@116@0:8@16@24@?32@?40@?48@?56B64B68B72B76B80B84"
+            "@?88q96q104B112";
+        if (encoding && strcmp(encoding, expected) == 0) {
+            MSHookMessageEx(cls,
+                            selector,
+                            (IMP)fbt_messenger_LSRageShakeView_init,
+                            (IMP *)&orig_LSRageShakeView_init);
+        }
+    }
+
+    if (!orig_BKBloksLabDeeplinkHelper_process) {
+        Class cls = objc_getClass(
+            "_TtC24BKBloksLabDeeplinkHelper24BKBloksLabDeeplinkHelper");
         Class metaclass = cls ? object_getClass(cls) : Nil;
-        Method method = metaclass ? class_getInstanceMethod(metaclass, selector) : NULL;
-        if (!FBTMessengerEncodingMatches(method, firstEncoding, secondEncoding)) continue;
-        descriptor->targetClass = metaclass;
-        MSHookMessageEx(metaclass, selector, replacement, &descriptor->original);
+        SEL selector = sel_registerName(
+            "processDeeplinkWith:foaObjectSet:passPrototypeShortcode:"
+            "useInternalNetworkCheck:isEmployee:session:"
+            "containerConfigProvider:");
+        Method method = metaclass
+            ? class_getInstanceMethod(metaclass, selector)
+            : NULL;
+        if (FBTMessengerEncodingMatches(method,
+                                        "v60@0:8@16@24B32B36B40@44@?52",
+                                        NULL)) {
+            MSHookMessageEx(
+                metaclass,
+                selector,
+                (IMP)fbt_messenger_BKBloksLabDeeplinkHelper_process,
+                (IMP *)&orig_BKBloksLabDeeplinkHelper_process);
+        }
     }
 }
 
 // -------------------------------------------------------------------------
 // Native MobileConfig Objective-C readers.
 //
-// LightSpeedEngine performs many reads inside its own image. A fishhook on
+// LightSpeedEngine performs many reads inside its own image. Rebinding
 // LightSpeedCore's import slot cannot observe those direct internal calls.
 // Messenger 574 exposes the typed readers below through Objective-C dispatch,
 // which lets us override the validated uint64 descriptor keys without writing
@@ -484,20 +739,6 @@ static FBTMessengerMCObjectHook sMobileConfigObjectHooks[] = {
     },
 };
 
-static Method FBTMessengerDirectInstanceMethod(Class cls, SEL selector) {
-    unsigned int methodCount = 0;
-    Method *methods = cls ? class_copyMethodList(cls, &methodCount) : NULL;
-    Method match = NULL;
-    for (unsigned int index = 0; index < methodCount; index++) {
-        if (sel_isEqual(method_getName(methods[index]), selector)) {
-            match = methods[index];
-            break;
-        }
-    }
-    free(methods);
-    return match;
-}
-
 static void FBTMessengerInstallMobileConfigObjectHooks(void) {
     for (size_t index = 0;
          index < sizeof(sMobileConfigObjectHooks) / sizeof(sMobileConfigObjectHooks[0]);
@@ -521,38 +762,7 @@ static void FBTMessengerInstallMobileConfigObjectHooks(void) {
 
 static void FBTMessengerInstallKnownObjectHooks(void) {
     FBTMessengerInstallMobileConfigObjectHooks();
-
-    FBTMessengerInstallInstanceHooks(
-        sEmployeeGetters,
-        sizeof(sEmployeeGetters) / sizeof(sEmployeeGetters[0]),
-        sel_registerName("isEmployee"),
-        (IMP)fbt_messenger_isEmployee,
-        "B16@0:8",
-        "c16@0:8");
-
-    FBTMessengerInstallInstanceHooks(
-        sEmployeeSetters,
-        sizeof(sEmployeeSetters) / sizeof(sEmployeeSetters[0]),
-        sel_registerName("setIsEmployee:"),
-        (IMP)fbt_messenger_setIsEmployee,
-        "v20@0:8B16",
-        "v20@0:8c16");
-
-    FBTMessengerInstallClassHooks(
-        sInternalSettingsProviders,
-        sizeof(sInternalSettingsProviders) / sizeof(sInternalSettingsProviders[0]),
-        sel_registerName("isAvailable:"),
-        (IMP)fbt_messenger_internalSettingsIsAvailable,
-        "B24@0:8@16",
-        "c24@0:8@16");
-
-    FBTMessengerInstallClassHooks(
-        sInternalToolProviders,
-        sizeof(sInternalToolProviders) / sizeof(sInternalToolProviders[0]),
-        sel_registerName("isAvailable:"),
-        (IMP)fbt_messenger_internalToolIsAvailable,
-        "B24@0:8@16",
-        "c24@0:8@16");
+    FBTMessengerInstallIdentityPropagationHooks();
 }
 
 // -------------------------------------------------------------------------
@@ -747,6 +957,17 @@ static void FBTMessengerInstallTabHostHook(void) {
 static void FBTMessengerRetryHooks(void) {
     FBTMessengerInstallKnownObjectHooks();
     FBTMessengerInstallTabHostHook();
+
+    if (atomic_load_explicit(&sCImportHooksInstalled,
+                             memory_order_relaxed) &&
+        !atomic_exchange_explicit(&sCImportStatusLogged,
+                                  true,
+                                  memory_order_relaxed)) {
+        FBTLog(@"Messenger imports rebound: mobileConfig=%d pluginIdentity=%d easyGating=%d",
+               orig_MSGCSessionedMobileConfigGetBoolean != NULL,
+               orig_LSShouldEnablePluginBasedOnMobileConfigParam != NULL,
+               orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock != NULL);
+    }
 }
 
 static void FBTMessengerScheduleHookRetry(void) {
@@ -760,8 +981,9 @@ static void FBTMessengerScheduleHookRetry(void) {
     });
 }
 
-static void FBTMessengerImageAdded(__unused const struct mach_header *header,
+static void FBTMessengerImageAdded(const struct mach_header *header,
                                     __unused intptr_t slide) {
+    (void)header;
     FBTMessengerScheduleHookRetry();
 }
 
@@ -769,7 +991,7 @@ void FBTInstallMessengerFlags(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         FBTMessengerReloadPreferences();
-        FBTMessengerInstallMobileConfigHook();
+        FBTMessengerInstallCImportHooks();
         FBTMessengerRetryHooks();
         _dyld_register_func_for_add_image(FBTMessengerImageAdded);
 
