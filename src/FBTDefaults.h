@@ -20,6 +20,13 @@ extern NSString * const FBTKeyFloatingTabBarEnabled;
 extern NSString * const FBTKeyDatingEnabled;
 extern NSString * const FBTKeyOpenLongPress;
 
+// Messenger 574 quick flags. Employee reuses FBTKeyEmployeeEnabled so the
+// identity switch remains compatible with the original flags branch.
+extern NSString * const FBTKeyMessengerInternalSettingsEnabled;
+extern NSString * const FBTKeyMessengerInternalToolsEnabled;
+extern NSString * const FBTKeyMessengerHomebaseEnabled;
+extern NSString * const FBTKeyMessengerHouseholdEnabled;
+
 extern NSString * const FBTKeyMobileConfigRuntimeEnabled;
 extern NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled;
 extern NSString * const FBTKeyMobileConfigCaptureEnabled;

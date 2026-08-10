@@ -1,20 +1,28 @@
 TARGET := iphone:clang:26.2:16.3
-INSTALL_TARGET_PROCESSES = Facebook
+INSTALL_TARGET_PROCESSES = Messenger
 ARCHS = arm64
 
 # Rootless por padrão (pode ser sobrescrito pelo build.sh / CI).
 THEOS_PACKAGE_SCHEME ?= rootless
 
+# Messenger does not ship the Facebook flag catalogs from the base branch.
+THEOS_LAYOUT_DIR_NAME := layout-messenger
+
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FBTweak
 
-# Todos os fontes de src/ (.x/.xm/.m/.mm) + fishhook.
-# Theos roteia por extensão: Logos p/ .x/.xm, clang p/ .m/.c.
-$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m -o -iname \*.mm \)) modules/fishhook/fishhook.c
+# This target intentionally excludes the Facebook settings browsers and their
+# independent constructors. Only the mapped Messenger runtime is linked.
+$(TWEAK_NAME)_FILES = \
+	src/MessengerTweak.m \
+	src/FBTDefaults.m \
+	src/UI/FBTMessengerQuickMenu.m \
+	src/Features/Messenger/FBTMessengerFlags.m \
+	modules/fishhook/fishhook.c
 
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore CoreServices Security SystemConfiguration
-$(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics
+$(TWEAK_NAME)_LIBRARIES = substrate
 $(TWEAK_NAME)_USE_MODULES = 0
 
 # Defines TARGET_OS_* para os headers do SDK iPhoneOS26.2 resolverem sob Theos.

@@ -6,7 +6,7 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
-			<string>com.facebook.Facebook</string>
+			<string>com.facebook.Messenger</string>
 		</array>
 	</dict>
 </dict>

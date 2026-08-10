@@ -5,6 +5,7 @@ on:
     branches:
       - 'flags'
       - 'main'
+      - 'messenger-*'
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +20,7 @@ jobs:
       contents: write
     env:
       SDK_NAME: iPhoneOS26.2.sdk
-      OUTPUT_BASENAME: FBTweak.1.0.${{ github.run_number }}
+      OUTPUT_BASENAME: FBTweak-Messenger.1.1.${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,6 +89,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FBTweak.1.0.${{ github.run_number }}
-          path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
+          name: FBTweak-Messenger.1.1.${{ github.run_number }}
+          path: main/release/FBTweak-Messenger.1.1.${{ github.run_number }}.deb
           if-no-files-found: error

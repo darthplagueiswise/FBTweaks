@@ -1,8 +1,8 @@
-Package: com.darthplagueiswise.fbtweak
-Name: FBTweak
-Version: 1.0.0
+Package: com.darthplagueiswise.fbtweak.messenger
+Name: FBTweak Messenger Flags
+Version: 1.1.0
 Architecture: iphoneos-arm64
-Description: Sideload/rootless tweak para o Facebook iOS (v566+). UIKit + runtime browsers para MobileConfig vivo, ObjC BOOL hooks, modo employee/internal, Liquid Glass, floating tab bar e dating.
+Description: Tweak rootless para Messenger iOS 574. Employee, Internal Settings/Tools e Homebase/Household com menu compacto em Liquid Glass.
 Maintainer: darthplagueiswise
 Author: darthplagueiswise
 Section: Tweaks

@@ -1,52 +1,56 @@
-# FBTweak
+# FBTweak — Messenger Flags
 
-Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.3. Abertura por long-press na tab bar.
+Theos/rootless branch for Messenger iOS 574.0.0 (1035554267), arm64, built
+with the iPhoneOS 26.2 SDK and a minimum deployment target of iOS 16.3. It is
+based on `flags` commit `8123092`.
 
-## v3.2 — runtime correto
+## What the five switches do
 
-- MobileConfig: fishhook nos imports + OverridesTable nativo via contextos ObjC capturados.
-- Sem `MSHookFunction` em símbolos C do `FBSharedFramework` assinado.
-- Runtime BOOL Browser agora busca por `main-exec`, `FBSharedFramework`, `framework` e path real do image.
-- QueryConfigs atualizados no bundle.
+- **Employee** forces the current session's validated
+  `fb_ford.is_employee` and secret-conversation employee descriptors. It also
+  propagates that value through the exact Messenger consumers that correspond
+  to the original `flags` branch: `MBUISimpleParticipantModel`, both
+  `FBWKWebView` setters, `LSRageShakeView`, and the Bloks Lab deeplink helper.
+- **Internal Settings** implies Employee and additionally forces
+  `fb_ford.can_access_internal_settings`.
+- **Internal Tools** implies Internal Settings and Employee, enables the four
+  mapped `labyrinth_ui` debug descriptors, and enables the imported internal
+  EasyGating path.
+- **Homebase** enables the mapped local tab, mailbox, calendar, and list gates.
+- **Household** implies Homebase and enables the verified Homebase mailbox and
+  thread-settings paths. It does not create server-side household membership.
 
+The important identity path is not a participant-model sweep. Messenger imports
+`LSShouldEnablePluginBasedOnMobileConfigParam`, the direct counterpart of the
+Facebook branch's `FBShouldEnableInternalSettings` gate. Its second argument is
+a tagged descriptor pointer; after clearing bit 0, the packed MobileConfig key
+is at descriptor offset `+16`. The tweak forces the exact Employee/Internal
+keys at that final plugin decision as well as at the imported C reader.
 
-## O que esta versão entrega
+Messenger's `__DATA_CONST.__got` is `S_NON_LAZY_SYMBOL_POINTERS`, not
+`S_REGULAR`, and has the required indirect symbol table. The target therefore
+uses fishhook for the three imported functions and never patches signed
+`__TEXT`. The vendored implementation includes the PAC/`__AUTH_CONST` support
+from the maintained `opa334/fishhook` fork.
 
-- **UI UIKit pura**, sem Swift, sem bridging header, sem modulemap. O painel usa `UITableViewStyleInsetGrouped`, `UISearchController`, `UINavigationController` e `UINavigationBarAppearance configureWithDefaultBackground`, deixando o iOS aplicar o Liquid Glass/default background nativo.
-- **Hooks conhecidos no padrão Ryukgram**:
-  - Employee/Internal por Logos em getters ObjC conhecidos + `MSHookMessageEx` para classe Swift conhecida.
-  - Floating Tab Bar por Logos em getters conhecidos.
-  - Liquid Glass por fishhook em `METAIsLiquidGlassEnabled`.
-  - Dating/Gemstone: sem direct C hook em __TEXT assinado; use Employee/Internal + Runtime BOOL Browser para gates ObjC hookáveis.
-  - Internal Settings nativo por ação manual: `FBInternalSettingsViewControllerFromSession(session)`.
-- **MobileConfig Live**:
-  - fishhook nos readers importados `MSGCSessionedMobileConfigGetBoolean`, `GetInt64`, `GetDouble`, `GetString`;
-  - captura a chave `uint64` real que o app leu em runtime, tipo, default, resultado, contador e timestamp;
-  - aplica override manual por chave capturada, sem tentar construir chave offline a partir do JSON;
-  - overrides persistem em `NSUserDefaults` e entram em backup/export porque a key está nos defaults registrados.
-- **ObjC BOOL Runtime Browser hookável**:
-  - varredura de classes/selectors só quando a tela abre ou quando o usuário toca em Buscar;
-  - lista getters BOOL sem argumentos de instância e classe;
-  - salva Force ON / Force OFF / Clear;
-  - reinstala hooks persistidos no `%ctor` com `MSHookMessageEx + imp_implementationWithBlock`;
-  - o replacement não lê `NSUserDefaults` na hot path, usa cache estático recarregado por notificação.
-- **Browsers auxiliares**:
-  - Headline flags;
-  - Dump completo `FBTFlags.json`;
-  - QueryConfigs enviados, empacotados em `FBTweak.bundle/QueryConfigs/`.
+## Long-press menu
 
-## Timing correto
+Long-press the Messenger tab bar. When the Messenger logo/wordmark can be
+identified conservatively in the top navigation area, it is an alternative
+entry point. The menu is a native `UIContextMenuInteraction`; its
+`UITargetedPreview` uses the existing logo or tab control under the finger, so
+UIKit owns the iOS 26 Liquid Glass lift, morph, and dismissal. No custom fade,
+detached glass capsule, or intermediate bubble is created.
 
-O `%ctor` faz apenas leituras baratas de pref e instala:
+The visible Settings controller is refreshed after a toggle. User-scoped
+plugins and the tab model may already be cached, so reopen Messenger after
+changing Employee, Internal Settings/Tools, Homebase, or Household.
 
-1. host do long-press;
-2. observer barato para abrir Internal Settings nativo;
-3. hooks conhecidos ligados no launch;
-4. runtime bool persistido, sem varrer classes;
-5. MobileConfig runtime, se a pref já estava ON;
-6. Liquid Glass fishhook, se a pref já estava ON.
+These are local client/UI gates. They do not mint an employee token, grant
+server authorization, or provision unsupported account data.
 
-Ligar hooks conhecidos ou MobileConfig runtime pela primeira vez pode exigir reabrir o Facebook. Depois que o hook já está instalado, captura/overrides e alguns toggles mudam ao vivo.
+See [FBTweak-messenger-574-analysis.md](FBTweak-messenger-574-analysis.md) for
+the binary evidence, ABI mapping, and crash analysis.
 
 ## Build
 
@@ -55,8 +59,6 @@ export THEOS=~/theos
 ./build.sh rootless
 ```
 
-O CI usa `iPhoneOS26.2.sdk`, rootless, arm64, `FINALPACKAGE=1`.
-
-## v3.3 buildfix
-
-Correção de build: remove restos `orig_*` não usados de Dating/LiquidGlass que quebravam CI com `-Werror,-Wunused-variable`. Não reintroduz hook C direto em `__TEXT` assinado.
+The package filter and install process target `com.facebook.Messenger` /
+`Messenger`. The explicit source list excludes the Facebook-only settings
+browsers, constructors, and catalogs from the base branch.

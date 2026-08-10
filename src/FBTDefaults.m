@@ -16,6 +16,11 @@ NSString * const FBTKeyFloatingTabBarEnabled = @"fbt_floating_tabbar_enabled";
 NSString * const FBTKeyDatingEnabled         = @"fbt_dating_enabled";
 NSString * const FBTKeyOpenLongPress         = @"fbt_open_longpress_enabled";
 
+NSString * const FBTKeyMessengerInternalSettingsEnabled = @"fbt_messenger_internal_settings_enabled";
+NSString * const FBTKeyMessengerInternalToolsEnabled = @"fbt_messenger_internal_tools_enabled";
+NSString * const FBTKeyMessengerHomebaseEnabled = @"fbt_messenger_homebase_enabled";
+NSString * const FBTKeyMessengerHouseholdEnabled = @"fbt_messenger_household_enabled";
+
 NSString * const FBTKeyMobileConfigRuntimeEnabled   = @"fbt_mobileconfig_runtime_enabled";
 NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled = @"fbt_mobileconfig_native_ui_warmup_enabled";
 NSString * const FBTKeyMobileConfigCaptureEnabled   = @"fbt_mobileconfig_capture_enabled";
@@ -48,6 +53,11 @@ static NSDictionary *gRegistered = nil;
         FBTKeyFloatingTabBarEnabled:            @(NO),
         FBTKeyDatingEnabled:                    @(NO),
         FBTKeyOpenLongPress:                    @(YES),
+
+        FBTKeyMessengerInternalSettingsEnabled: @(NO),
+        FBTKeyMessengerInternalToolsEnabled:    @(NO),
+        FBTKeyMessengerHomebaseEnabled:         @(NO),
+        FBTKeyMessengerHouseholdEnabled:        @(NO),
 
         // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
         // para não tocar __TEXT assinado; varredura pesada é on-demand.
