@@ -2,6 +2,7 @@
 #import "FBTDefaults.h"
 #import "FBTMobileConfigRuntime.h"
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTMobileConfigDebugUIHooks.h"
 #import <objc/runtime.h>
 #import <string.h>
@@ -185,6 +186,14 @@ static void fbt_FBMobileConfigDebug_selectParam(id self,
            backendType,
            backendName ?: @"",
            (unsigned long)FBTNativeMobileConfigContextCount());
+    FBTMobileConfigFetchDiagnosticsRecord(@"selection_started", @{
+        @"param": FBTStringFromStdString(param),
+        @"config": FBTStringFromStdString(configName),
+        @"key": @(key),
+        @"backend_type": @(backendType),
+        @"backend": backendName ?: @"",
+        @"context_count": @(FBTNativeMobileConfigContextCount())
+    });
 
     // When the correct context manager has not been captured yet, defer the
     // first original invocation to the next short post-load window. The C++
@@ -208,6 +217,14 @@ static void fbt_FBMobileConfigDebug_present(id self,
                                              void (^completion)(void)) {
     if (FBTIsTransientParamInfoAlert(controller)) {
         FBTMCSelection *selection = objc_getAssociatedObject(self, &kFBTMCSelectionKey);
+        FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_failure_alert", @{
+            @"alert": ((UIAlertController *)controller).title ?: @"",
+            @"key": @(selection ? selection->_key : 0),
+            @"param": selection ? FBTStringFromStdString(selection->_param) : @"unknown",
+            @"config": selection ? FBTStringFromStdString(selection->_configName) : @"unknown",
+            @"retry": @(selection ? selection->_retryCount : 0),
+            @"context_count": @(FBTNativeMobileConfigContextCount())
+        });
         if (selection && selection->_retryCount == 0 && orig_FBMobileConfigDebug_selectParam) {
             selection->_retryCount = 1;
             FBTLog(@"native MC transient param-info failure; retrying key=%d once", selection->_key);

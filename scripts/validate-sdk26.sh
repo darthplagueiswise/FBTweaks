@@ -37,6 +37,9 @@ BADF="$(find src -type f \( -name '*.old.m' -o -name '*.bak' -o -name '*wip*.xm'
 echo "[validate] Runtime files..."
 grep -q "MSGCSessionedMobileConfigGetBoolean" src/Runtime/FBTMobileConfigRuntime.m || fail "MobileConfig runtime sem MSGC bool hook"
 grep -q "MSHookMessageEx" src/Runtime/FBTRuntimeBoolBrowser.m || fail "Runtime BOOL sem MSHookMessageEx"
+grep -q "FBTMobileConfigFetchDiagnosticsRecord" src/Runtime/FBTMobileConfigDebugUIHooks.mm || fail "fetch MobileConfig sem registro de eventos QE-info"
+grep -q "fbt_fetch_diagnostics.json" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "relatorio de fetch nao persiste no AppGroup"
+grep -q "showFetchDiagnostics" src/Settings/FBTSettingsViewController.m || fail "UI sem acesso ao diagnóstico de fetch"
 grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m || fail "UI UIKit sem default Liquid Glass appearance"
 
 echo "[validate] OK"

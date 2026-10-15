@@ -7,6 +7,7 @@
 #import "FBTFeatureParamsViewController.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
+#import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
 
@@ -314,7 +315,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [super viewDidLoad];
     self.title = @"MobileConfig Live";
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reloadSnapshot)];
+    UIBarButtonItem *diagnostics = [[UIBarButtonItem alloc] initWithTitle:@"Fetch log" style:UIBarButtonItemStylePlain target:self action:@selector(showFetchDiagnostics)];
+    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reloadSnapshot)];
+    self.navigationItem.rightBarButtonItems = @[diagnostics, refresh];
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -337,6 +340,46 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.navigationItem.prompt = FBTNativeMobileConfigStatus();
     self.entries = FBTMobileConfigSnapshot();
     [self applyFilter];
+}
+
+- (void)showFetchDiagnostics {
+    NSDictionary *report = FBTMobileConfigFetchDiagnosticsSnapshot();
+    NSArray *events = [report[@"events"] isKindOfClass:[NSArray class]] ? report[@"events"] : @[];
+    NSDictionary *last = [events.lastObject isKindOfClass:[NSDictionary class]] ? events.lastObject : @{};
+    NSDictionary *cache = [report[@"cache_state"] isKindOfClass:[NSDictionary class]] ? report[@"cache_state"] : @{};
+    NSArray *qce = [cache[@"qce_metadata"] isKindOfClass:[NSArray class]] ? cache[@"qce_metadata"] : @[];
+    NSArray *dumps = [cache[@"response_dumps"] isKindOfClass:[NSArray class]] ? cache[@"response_dumps"] : @[];
+    NSMutableString *summary = [NSMutableString stringWithFormat:@"Eventos capturados: %lu\nÚltimo evento: %@ · %@\nParâmetro/config: %@ / %@\nBackend type: %@ · contextos vivos: %@\n",
+        (unsigned long)events.count,
+        last[@"event"] ?: @"nenhum",
+        last[@"time_utc"] ?: @"—",
+        last[@"param"] ?: @"—",
+        last[@"config"] ?: @"—",
+        last[@"backend_type"] ?: @"—",
+        last[@"context_count"] ?: @"—"];
+    [summary appendString:@"\nQE-info cache:\n"];
+    if (!qce.count) [summary appendString:@"  nenhum store QCE encontrado\n"];
+    [qce enumerateObjectsUsingBlock:^(NSDictionary *store, NSUInteger idx, __unused BOOL *stop) {
+        [summary appendFormat:@"  store %lu: gen %@ · nomes %@ · atualizado %@\n",
+            (unsigned long)(idx + 1), store[@"latest_generation"] ?: @"?",
+            store[@"param_name_count"] ?: @"?", store[@"latest_file_utc"] ?: @"?"];
+    }];
+    [summary appendString:@"Resposta MobileConfig mais recente (se exportada):\n"];
+    if (!dumps.count) [summary appendString:@"  nenhum dump disponível\n"];
+    [dumps enumerateObjectsUsingBlock:^(NSDictionary *dump, NSUInteger idx, __unused BOOL *stop) {
+        [summary appendFormat:@"  dump %lu: configs %@ · QCE entries %@ · query hash %@\n",
+            (unsigned long)(idx + 1), dump[@"config_count"] ?: @"?",
+            dump[@"qce_entry_count"] ?: @"?",
+            [dump[@"has_query_hash"] boolValue] ? @"presente" : @"ausente"];
+    }];
+    [summary appendString:@"\nRelatório JSON redigido persistido em AppGroup/mobileconfig/fbt_fetch_diagnostics.json.\nO fetch remoto pode falhar por rede/permissão/backend; esta tela registra o estado local, não inventa sucesso."];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Diagnóstico de fetch" message:summary preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar JSON completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self applyFilter]; }
