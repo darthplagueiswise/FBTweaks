@@ -287,6 +287,10 @@ void FBTInstallMobileConfigDebugUIBootstrap(void) {
         if ([last containsString:@"FBRarelyUsedFramework"] ||
             [last containsString:@"FBReactNativeProductsFramework"] ||
             [last containsString:@"FBSharedDynamicFramework"]) {
+            // Context/readers may only become visible after these images load.
+            // The installer rescans when the Objective-C class count changes;
+            // its per-method sets prevent duplicate hooks.
+            FBTInstallNativeMobileConfigContextCapture();
             FBTInstallMobileConfigDebugUIHooks();
         }
     }];

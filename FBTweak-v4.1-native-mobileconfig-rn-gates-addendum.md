@@ -130,3 +130,12 @@ A persistent failure still indicates unavailable remote QE metadata, credentials
 - DATA descriptors are never treated as functions;
 - global class scans remain manual/on-demand, never in the constructor;
 - Runtime BOOL sweep entries record provenance and are removed when their specific sweep toggle is turned off.
+
+
+## Late-loaded MobileConfig classes (flags branch follow-up)
+
+The original one-shot context-capture installer could run before `FBReactNativeProductsFramework`, `FBRarelyUsedFramework` or `FBSharedDynamicFramework` registered their Objective-C classes. It then permanently returned on later calls, so readers/context getters in those images were never observed. That is a local capture/diagnostic gap, not proof that the server-side QE-info request itself is failing.
+
+The follow-up removes the permanent one-shot guard. The installer records the last Objective-C class count and rescans when that count changes; existing per-method installation sets keep hooks idempotent. The bundle-load observer explicitly reruns context capture after the relevant frameworks load, before reinstalling the native debug-UI hooks. The native parameter-info retry remains limited to one attempt and does not manufacture server metadata.
+
+Validation in the sandbox: source-level assertions and `git diff --check` pass. A local Theos/iPhoneOS 26.2 SDK is not installed here, so a binary build must be validated by the repository's macOS GitHub Actions workflow. A server-side failure still needs the on-device log (selected config/param/backend and request result) to distinguish network/auth/backend issues from local map resolution.

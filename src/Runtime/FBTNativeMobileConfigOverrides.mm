@@ -38,7 +38,10 @@ static FBTUpdateStringFn sUpdateString = NULL;
 static FBTRemoveFn sRemove = NULL;
 static FBTSetSkipOverrideCheckEnabledFn sSetSkipOverrideCheckEnabled = NULL;
 static BOOL sSymbolsResolved = NO;
-static BOOL sContextHooksInstalled = NO;
+// O processo carrega classes do Facebook em fases (incluindo RN/RarelyUsed).
+// Revarremos quando a contagem de classes muda; os sets de hooks abaixo
+// tornam cada instalação idempotente.
+static int sLastScannedClassCount = 0;
 
 static NSHashTable *sContexts = nil; // weak objects
 static NSHashTable *sOverrideObjects = nil; // weak objects that implement native ObjC debug/override API
@@ -760,13 +763,11 @@ static void FBTInstallGenericObjCMobileConfigReaderHooks(Class cls) {
 }
 
 void FBTInstallNativeMobileConfigContextCapture(void) {
-    if (sContextHooksInstalled) return;
-    sContextHooksInstalled = YES;
-    FBTResolveNativeSymbols();
-    FBTInstallKnownObjCMobileConfigHooks();
-
     int classCount = objc_getClassList(NULL, 0);
     if (classCount <= 0) return;
+    if (classCount == sLastScannedClassCount) return;
+    FBTResolveNativeSymbols();
+    FBTInstallKnownObjCMobileConfigHooks();
     Class *classes = (__unsafe_unretained Class *)calloc((size_t)classCount, sizeof(Class));
     if (!classes) return;
     classCount = objc_getClassList(classes, classCount);
@@ -780,4 +781,6 @@ void FBTInstallNativeMobileConfigContextCapture(void) {
         FBTHookContextMethodsForClass(cls, YES);
     }
     free(classes);
+    sLastScannedClassCount = classCount;
+    FBTLog(@"native MC late-class scan: %d classes", classCount);
 }
