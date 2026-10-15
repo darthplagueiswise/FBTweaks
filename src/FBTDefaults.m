@@ -20,6 +20,7 @@ NSString * const FBTKeyMobileConfigRuntimeEnabled   = @"fbt_mobileconfig_runtime
 NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled = @"fbt_mobileconfig_native_ui_warmup_enabled";
 NSString * const FBTKeyMobileConfigCaptureEnabled   = @"fbt_mobileconfig_capture_enabled";
 NSString * const FBTKeyMobileConfigOverridesEnabled = @"fbt_mobileconfig_overrides_enabled";
+NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"fbt_mobileconfig_fetch_diagnostics_enabled";
 NSString * const FBTKeyMobileConfigOverrides        = @"fbt_mobileconfig_overrides";
 
 NSString * const FBTKeyRuntimeBoolBrowserEnabled = @"fbt_runtime_bool_browser_enabled";
@@ -55,6 +56,7 @@ static NSDictionary *gRegistered = nil;
         FBTKeyMobileConfigNativeUIWarmupEnabled:@(YES),
         FBTKeyMobileConfigCaptureEnabled:       @(YES),
         FBTKeyMobileConfigOverridesEnabled:     @(YES),
+        FBTKeyMobileConfigFetchDiagnosticsEnabled:@(NO),
         FBTKeyMobileConfigOverrides:            @{},
 
         FBTKeyRuntimeBoolBrowserEnabled:        @(YES),

@@ -121,7 +121,8 @@ static void FBTInstallEnabledKnownFamilies(void) {
         }
 
         // O bootstrap só registra um observer filtrado e tenta classes exatas.
-        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled] ||
+            [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
             FBTInstallMobileConfigDebugUIBootstrap();
         }
 
@@ -135,7 +136,8 @@ static void FBTInstallEnabledKnownFamilies(void) {
                         FBTInternalImportReloadPrefs();
                         FBTInstallEnabledKnownFamilies();
 
-                        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
+                        if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled] ||
+                            [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
                             FBTInstallMobileConfigDebugUIBootstrap();
                         }
                     }];

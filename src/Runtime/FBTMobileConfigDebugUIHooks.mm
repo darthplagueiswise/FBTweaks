@@ -5,8 +5,10 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTMobileConfigDebugUIHooks.h"
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 #import <string.h>
 #include <string>
+#include "../../modules/fishhook/fishhook.h"
 
 // The advanced native MobileConfig UI lives in FBRarelyUsedFramework. The
 // selected-param method receives two const std::string references; ObjC++ is
@@ -29,10 +31,21 @@ typedef void (*FBTPresentViewControllerOrig)(id, SEL,
                                               BOOL,
                                               void (^ _Nullable)(void));
 
+// ABI verificada nos três call sites ARM64: os chamadores testam w0 como bool.
+typedef bool (*FBTQEInfoFetchOrig)(void *, void *, const std::string &,
+                                   const std::string &, const void *, void *, void *);
+typedef NSError *(*FBTNSErrorInitOrig)(id, SEL, NSString *, NSInteger, NSDictionary *);
+
 static FBTViewDidLoadOrig orig_FBMobileConfigDebug_viewDidLoad = NULL;
 static FBTSelectParamOrig orig_FBMobileConfigDebug_selectParam = NULL;
 static FBTPresentViewControllerOrig orig_FBMobileConfigDebug_present = NULL;
 static BOOL sBundleObserverInstalled = NO;
+static BOOL sQEInfoFetchImportHookInstalled = NO;
+static BOOL sNSErrorInitHookInstalled = NO;
+static thread_local NSUInteger sQEInfoFetchDepth = 0;
+static thread_local BOOL sRecordingQEInfoNSError = NO;
+static FBTQEInfoFetchOrig orig_FBMobileConfigQEInfoFetch = NULL;
+static FBTNSErrorInitOrig orig_NSError_initWithDomain = NULL;
 static char kFBTMCSelectionKey;
 
 @interface FBTMobileConfigViewController : UITableViewController
@@ -91,6 +104,93 @@ static NSString *FBTStringFromStdString(const std::string &value) {
     return text ?: @"<non-UTF8>";
 }
 
+static NSError *fbt_NSError_initWithDomain(id self, SEL _cmd, NSString *domain,
+                                            NSInteger code, NSDictionary *userInfo) {
+    NSError *error = orig_NSError_initWithDomain
+        ? orig_NSError_initWithDomain(self, _cmd, domain, code, userInfo) : nil;
+    if (sQEInfoFetchDepth > 0 && !sRecordingQEInfoNSError &&
+        [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        NSMutableDictionary *details = [NSMutableDictionary dictionary];
+        if (domain.length) details[@"error_domain"] = domain;
+        details[@"error_code"] = @(code);
+        id message = userInfo[NSLocalizedDescriptionKey] ?: userInfo[NSLocalizedFailureReasonErrorKey];
+        if ([message isKindOfClass:[NSString class]]) details[@"message"] = message;
+        for (NSString *key in @[@"statusCode", @"httpStatusCode", @"responseStatusCode", @"tigonStatusCode"]) {
+            id status = userInfo[key];
+            if ([status isKindOfClass:[NSNumber class]]) { details[@"http_status"] = status; break; }
+            if ([status isKindOfClass:[NSString class]]) {
+                NSInteger parsed = [status integerValue];
+                if (parsed >= 100 && parsed <= 599) { details[@"http_status"] = @(parsed); break; }
+            }
+        }
+        sRecordingQEInfoNSError = YES;
+        FBTMobileConfigFetchDiagnosticsRecord(@"native_network_error", details);
+        sRecordingQEInfoNSError = NO;
+    }
+    return error;
+}
+
+static void FBTInstallNSErrorMetadataHook(void) {
+    if (sNSErrorInitHookInstalled) return;
+    Class cls = objc_getClass("NSError");
+    SEL sel = @selector(initWithDomain:code:userInfo:);
+    Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
+    if (!method || method_getNumberOfArguments(method) != 5) return;
+    MSHookMessageEx(cls, sel, (IMP)fbt_NSError_initWithDomain,
+                    (IMP *)&orig_NSError_initWithDomain);
+    sNSErrorInitHookInstalled = (orig_NSError_initWithDomain != NULL);
+    FBTMobileConfigFetchDiagnosticsRecord(@"native_error_hook", @{@"hook_installed": @(sNSErrorInitHookInstalled)});
+}
+
+static bool fbt_FBMobileConfigQEInfoFetch(void *manager, void *query,
+                                          const std::string &arg2,
+                                          const std::string &arg3,
+                                          const void *metaMap,
+                                          void *universeInfos,
+                                          void *gkInfos) {
+    if (!orig_FBMobileConfigQEInfoFetch) return false;
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_request_started", @{
+        @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3)
+    });
+    CFTimeInterval started = CACurrentMediaTime();
+    ++sQEInfoFetchDepth;
+    bool result = false;
+    try {
+        result = orig_FBMobileConfigQEInfoFetch(manager, query, arg2, arg3,
+                                                metaMap, universeInfos, gkInfos);
+    } catch (...) {
+        --sQEInfoFetchDepth;
+        FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_request_exception", @{
+            @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3)
+        });
+        throw;
+    }
+    --sQEInfoFetchDepth;
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_request_returned", @{
+        @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3),
+        @"fetch_result": @(result), @"duration_ms": @((CACurrentMediaTime() - started) * 1000.0)
+    });
+    return result;
+}
+
+static void FBTInstallQEInfoFetchImportHook(void) {
+    if (sQEInfoFetchImportHookInstalled ||
+        ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    FBTInstallNSErrorMetadataHook();
+    // fishhook removes Mach-O's leading underscore, so _ZN... is the Itanium name.
+    struct rebinding binding = {
+        "_ZN12mobileconfig27FBMobileConfigQEInfoManager24fetchQEInfoSynchronouslyERNS_31FBMobileConfigQEInfoQueryParamsERKNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEESB_RKNS3_10shared_ptrINS_21FBMobileConfigMetaMapEEERNS3_6vectorINS_28FBMobileConfigQEUniverseInfoENS7_ISI_EEEERNSH_INS_20FBMobileConfigGKInfoENS7_ISM_EEEE",
+        (void *)fbt_FBMobileConfigQEInfoFetch,
+        (void **)&orig_FBMobileConfigQEInfoFetch
+    };
+    int status = rebind_symbols(&binding, 1);
+    sQEInfoFetchImportHookInstalled = (orig_FBMobileConfigQEInfoFetch != NULL &&
+                                        orig_FBMobileConfigQEInfoFetch != fbt_FBMobileConfigQEInfoFetch);
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_import_hook", @{
+        @"hook_installed": @(sQEInfoFetchImportHookInstalled), @"rebind_status": @(status)
+    });
+}
+
 static BOOL FBTMCUIEncodingEquals(Class cls, SEL sel, const char *expected) {
     Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
     const char *actual = method ? method_getTypeEncoding(method) : NULL;
@@ -103,6 +203,7 @@ static void FBTMobileConfigDebugWarmup(void) {
     FBTInstallMobileConfigRuntime();
     FBTInstallNativeMobileConfigContextCapture();
     FBTMobileConfigReloadPrefs();
+    FBTInstallQEInfoFetchImportHook();
 }
 
 static void FBTCallOriginalSelection(id controller, SEL selector, FBTMCSelection *selection) {
@@ -219,6 +320,7 @@ static void fbt_FBMobileConfigDebug_present(id self,
         FBTMCSelection *selection = objc_getAssociatedObject(self, &kFBTMCSelectionKey);
         FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_failure_alert", @{
             @"alert": ((UIAlertController *)controller).title ?: @"",
+            @"alert_message": ((UIAlertController *)controller).message ?: @"",
             @"key": @(selection ? selection->_key : 0),
             @"param": selection ? FBTStringFromStdString(selection->_param) : @"unknown",
             @"config": selection ? FBTStringFromStdString(selection->_configName) : @"unknown",
@@ -251,7 +353,10 @@ static void fbt_FBMobileConfigDebug_present(id self,
 }
 
 void FBTInstallMobileConfigDebugUIHooks(void) {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) return;
+    BOOL warmupEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled];
+    BOOL diagnosticsEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+    if (!warmupEnabled && !diagnosticsEnabled) return;
+    FBTInstallQEInfoFetchImportHook();
 
     Class cls = objc_getClass("FBMobileConfigDebugViewController");
     if (!cls) return;
@@ -288,7 +393,8 @@ void FBTInstallMobileConfigDebugUIHooks(void) {
 }
 
 void FBTInstallMobileConfigDebugUIBootstrap(void) {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) return;
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled] &&
+        ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
 
     FBTInstallMobileConfigDebugUIHooks();
     if (sBundleObserverInstalled) return;

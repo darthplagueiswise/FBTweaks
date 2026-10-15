@@ -22,20 +22,21 @@ A nova ferramenta grava um arquivo redigido no container AppGroup ativo:
 mobileconfig/fbt_fetch_diagnostics.json
 ```
 
-Ela registra, para cada seleção na UI nativa, nome do parâmetro/config, chave numérica, tipo/rótulo de backend (IDs longos mascarados), quantidade de contextos vivos e horário UTC. Ao surgir o alerta `Failed to fetch param info from server!`, registra evento de falha e número da tentativa. O snapshot também lista gerações/horários/tamanhos das stores gerais e QCE, quantidade de nomes de parâmetro e resumo dos dumps de sync existentes. Não copia cookies, tokens, valores da resposta ou dados de sessão.
+Ela registra nome do parâmetro/config, chave, backend (IDs longos mascarados), contextos vivos e horário UTC. A nova versão também fishhooks, sem patch de `__TEXT`, o import C++ `FBMobileConfigQEInfoManager::fetchQEInfoSynchronously` usado por `FBRarelyUsedFramework`: registra início, retorno booleano real e duração. Durante essa chamada, captura metadados de `NSError` (domain, code, HTTP/Tigon status e mensagem de erro disponíveis). No alerta nativo também guarda título e mensagem apresentados. Não lê nem grava cookies, headers, body/valores da resposta ou dados de sessão; mensagens passam por redação de credenciais e query strings.
 
-Em `FBTweak → MobileConfig Live`, o botão **Fetch log** mostra um resumo; **Copiar JSON completo** copia o relatório redigido. O próprio arquivo fica no AppGroup para ser incluído no próximo ZIP após reproduzir a falha. Isso permite decidir se a seleção chegou ao método, qual backend foi selecionado e se o cache QE-info mudou no instante da tentativa.
+O controle fica na tela principal: **FBTweak → Runtime → Log de fetch QE-info (ON/OFF)**. Ele começa desligado; ligue antes de reproduzir e desligue depois para pausar gravações. Os registros anteriores permanecem no AppGroup. Em **FBTweak → Runtime → MobileConfig Live**, o botão **Fetch log** mostra o retorno/erro; **Copiar JSON completo** copia o relatório redigido. O arquivo está em `AppGroup/mobileconfig/fbt_fetch_diagnostics.json` (container AppGroup ativo), para incluir no ZIP após reproduzir.
 
 ## Como reproduzir e interpretar
 
-1. Instalar o pacote de `flags` que inclui esta instrumentação.
-2. Reabrir o app, abrir a tela nativa de parâmetros e selecionar exatamente o parâmetro que falha.
-3. Se aparecer o alerta, retornar a `FBTweak → MobileConfig Live → Fetch log` e salvar/copiar o JSON.
-4. Interpretar o próximo relatório:
-   - nenhum evento `selection_started`: hook/classe/selector da UI não foi alcançado;
-   - `selection_started` sem alerta: não é prova de sucesso; conferir a tela e os caches;
-   - `qe_info_failure_alert` com QCE ainda vazio: falha persistente no fluxo de metadata;
-   - QCE passa a ter nomes/geração nova: resposta foi gravada, então investigar resolução/compatibilidade do parâmetro;
-   - stores gerais avançam, mas QCE não: fetch geral funciona; isolar autorização/endpoint QE-info.
+1. Instalar o pacote de `flags` e abrir o app.
+2. Em `FBTweak → Runtime`, ligar **Log de fetch QE-info (ON/OFF)**. A captura persiste entre relançamentos.
+3. Reproduzir a seleção na tela nativa de parâmetros.
+4. Abrir `FBTweak → Runtime → MobileConfig Live → Fetch log` e copiar o JSON.
+5. Interpretar o resultado:
+   - `qe_info_import_hook.hook_installed=false`: o import não foi ligado nessa imagem/versão;
+   - `selection_started` sem `qe_info_request_started`: seleção UI chegou, mas não entrou no método QE-info instrumentado;
+   - `qe_info_request_returned.fetch_result=false`: método nativo executou e devolveu falha; olhar `native_network_error` e mensagem/status, quando existirem;
+   - nenhum `native_network_error`, mas alerta “Refresh did not finish…”: o próprio cliente não obteve código server-side (timeout/rede ou erro sem código);
+   - `fetch_result=true` e QCE vazio: a chamada terminou sem nomes em cache; investigar resposta lógica/compatibilidade da consulta.
 
-A instrumentação não força permissões, não simula respostas e não altera valores MetaConfig. Ela adiciona observabilidade para obter a causa concreta. Para fechar definitivamente um erro HTTP/permissão seria necessário um log do cliente que exponha status/código do request QE-info, sem credenciais.
+A instrumentação não força permissões, não simula respostas e não altera valores MetaConfig. O status/código é registrado somente se o cliente o expuser em `NSError`; se o backend/Tigon não disponibilizar esse dado, o relatório indica retorno/duração e a mensagem nativa, mas não inventa um status nem coleta o corpo da resposta.

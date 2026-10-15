@@ -8,6 +8,7 @@
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
+#import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
 
@@ -155,6 +156,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @[
             @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura ObjC/RCT MobileConfig pós-launch. Abrir MobileConfig Live também instala manualmente na sessão.", @"key": FBTKeyMobileConfigRuntimeEnabled },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
+            @{ @"kind": @"switch", @"title": @"Log de fetch QE-info (ON/OFF)", @"subtitle": @"Ligue aqui antes de reproduzir. Captura retorno nativo e erro/status HTTP/Tigon disponíveis; nunca grava cookies nem corpo da resposta.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
@@ -231,6 +233,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
+    if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled] && !sender.isOn) {
+        FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
+    }
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
         if (sender.isOn) {
@@ -238,6 +243,17 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             FBTInstallNativeMobileConfigContextCapture();
         }
         FBTMobileConfigReloadPrefs();
+    }
+    if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        if (sender.isOn) {
+            FBTInstallMobileConfigDebugUIBootstrap();
+            FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
+            [self showInfoTitle:@"QE-info diagnostics ativado"
+                        message:@"Reproduza agora o fetch na tela nativa de parâmetros. Depois abra FBTweak → Runtime → MobileConfig Live → Fetch log. O arquivo fica em AppGroup/mobileconfig/fbt_fetch_diagnostics.json."];
+        } else {
+            [self showInfoTitle:@"QE-info diagnostics pausado"
+                        message:@"Novos eventos não serão registrados. Os logs existentes permanecem no AppGroup."];
+        }
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigCaptureEnabled] ||
         [sender.prefKey isEqualToString:FBTKeyMobileConfigOverridesEnabled]) {
@@ -346,17 +362,53 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *report = FBTMobileConfigFetchDiagnosticsSnapshot();
     NSArray *events = [report[@"events"] isKindOfClass:[NSArray class]] ? report[@"events"] : @[];
     NSDictionary *last = [events.lastObject isKindOfClass:[NSDictionary class]] ? events.lastObject : @{};
+    NSDictionary *lastFetch = nil;
+    NSDictionary *lastError = nil;
+    NSDictionary *lastSelection = nil;
+    NSDictionary *lastHook = nil;
+    NSInteger lastSelectionIndex = -1;
+    for (NSDictionary *event in [events.reverseObjectEnumerator allObjects]) {
+        if (!lastFetch && [event[@"event"] isEqualToString:@"qe_info_request_returned"]) lastFetch = event;
+        if (!lastSelection && [event[@"event"] isEqualToString:@"selection_started"]) lastSelection = event;
+        if (!lastHook && [event[@"event"] isEqualToString:@"qe_info_import_hook"]) lastHook = event;
+        if (lastFetch && lastSelection && lastHook) break;
+    }
+    if (lastSelection) {
+        lastSelectionIndex = [events indexOfObjectIdenticalTo:lastSelection];
+        lastFetch = nil;
+        for (NSUInteger i = (NSUInteger)MAX(lastSelectionIndex, 0); i < events.count; i++) {
+            NSDictionary *event = events[i];
+            if ([event[@"event"] isEqualToString:@"qe_info_request_returned"]) lastFetch = event;
+            if ([event[@"event"] isEqualToString:@"native_network_error"] || [event[@"event"] isEqualToString:@"qe_info_failure_alert"]) lastError = event;
+        }
+    }
     NSDictionary *cache = [report[@"cache_state"] isKindOfClass:[NSDictionary class]] ? report[@"cache_state"] : @{};
     NSArray *qce = [cache[@"qce_metadata"] isKindOfClass:[NSArray class]] ? cache[@"qce_metadata"] : @[];
     NSArray *dumps = [cache[@"response_dumps"] isKindOfClass:[NSArray class]] ? cache[@"response_dumps"] : @[];
-    NSMutableString *summary = [NSMutableString stringWithFormat:@"Eventos capturados: %lu\nÚltimo evento: %@ · %@\nParâmetro/config: %@ / %@\nBackend type: %@ · contextos vivos: %@\n",
+    BOOL enabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+    NSMutableString *summary = [NSMutableString stringWithFormat:@"Captura: %@\nEventos capturados: %lu\nÚltimo evento: %@ · %@\nParâmetro/config: %@ / %@\nBackend type: %@ · contextos vivos: %@\n",
+        enabled ? @"LIGADA" : @"DESLIGADA",
         (unsigned long)events.count,
         last[@"event"] ?: @"nenhum",
         last[@"time_utc"] ?: @"—",
-        last[@"param"] ?: @"—",
-        last[@"config"] ?: @"—",
-        last[@"backend_type"] ?: @"—",
-        last[@"context_count"] ?: @"—"];
+        lastSelection[@"param"] ?: @"—",
+        lastSelection[@"config"] ?: @"—",
+        lastSelection[@"backend_type"] ?: @"—",
+        lastSelection[@"context_count"] ?: @"—"];
+    [summary appendFormat:@"Hook QE-info: %@\n",
+        lastHook ? ([lastHook[@"hook_installed"] boolValue] ? @"INSTALADO" : @"NÃO DISPONÍVEL") : @"sem registro"];
+    if (lastFetch) {
+        [summary appendFormat:@"\nRetorno nativo: %@ · duração: %@ ms\n",
+            [lastFetch[@"fetch_result"] boolValue] ? @"SUCESSO" : @"FALHA",
+            lastFetch[@"duration_ms"] ?: @"?"];
+    }
+    if (lastError) {
+        [summary appendFormat:@"Último erro: %@ · código %@ · HTTP %@\n%@\n",
+            lastError[@"error_domain"] ?: @"QE-info/UI",
+            lastError[@"error_code"] ?: @"—",
+            lastError[@"http_status"] ?: @"—",
+            lastError[@"message"] ?: lastError[@"alert_message"] ?: lastError[@"alert"] ?: @"sem mensagem"];
+    }
     [summary appendString:@"\nQE-info cache:\n"];
     if (!qce.count) [summary appendString:@"  nenhum store QCE encontrado\n"];
     [qce enumerateObjectsUsingBlock:^(NSDictionary *store, NSUInteger idx, __unused BOOL *stop) {
