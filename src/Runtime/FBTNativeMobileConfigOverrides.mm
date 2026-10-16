@@ -161,6 +161,28 @@ static NSArray *FBTNativeOverrideObjectsSnapshot(void) {
     return items ?: @[];
 }
 
+static NSArray<NSString *> *FBTNativeMobileConfigGroupCandidates(void) {
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    NSMutableOrderedSet<NSString *> *groups = [NSMutableOrderedSet orderedSet];
+    if ([bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]) {
+        [groups addObject:@"group.facebook.ota"];
+        [groups addObject:@"group.com.facebook.ota"];
+    } else if ([bundleID.lowercaseString isEqualToString:@"com.facebook.facebook"]) {
+        [groups addObject:@"group.com.facebook.Facebook"];
+        [groups addObject:@"group.facebook.Facebook"];
+    }
+    if (bundleID.length) [groups addObject:[@"group." stringByAppendingString:bundleID]];
+    if ([bundleID hasPrefix:@"com."] && bundleID.length > 4) {
+        [groups addObject:[@"group." stringByAppendingString:[bundleID substringFromIndex:4]]];
+    }
+    [groups addObject:@"group.com.facebook.Facebook"];
+    [groups addObject:@"group.facebook.ota"];
+    [groups addObject:@"group.com.facebook.ota"];
+    [groups addObject:@"group.com.facebook.dogfood.internal"];
+    [groups addObject:@"group.com.facebook.family"];
+    return groups.array;
+}
+
 NSString *FBTNativeMobileConfigOverridesFilePath(void) {
     SEL pathSel = NSSelectorFromString(@"getOverridesTablePath");
     for (id obj in FBTNativeOverrideObjectsSnapshot()) {
@@ -172,16 +194,30 @@ NSString *FBTNativeMobileConfigOverridesFilePath(void) {
         } @catch (__unused NSException *e) {
         }
     }
-    NSArray<NSString *> *groups = @[
-        @"group.com.facebook.dogfood.internal",
-        @"group.com.facebook.Facebook",
-        @"group.com.facebook.family"
-    ];
-    for (NSString *group in groups) {
-        NSURL *url = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:group];
-        if (url.path.length) {
-            return [[url URLByAppendingPathComponent:@"mobileconfig/mc_overrides.json"] path];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    for (NSString *group in FBTNativeMobileConfigGroupCandidates()) {
+        NSURL *url = [fm containerURLForSecurityApplicationGroupIdentifier:group];
+        if (!url.path.length) continue;
+
+        NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+        // Keep a pre-existing file in its actual location. Some builds use
+        // AppGroup/Documents/mobileconfig; others export mobileconfig directly
+        // at the shared-container root.
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"AppData/Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        for (NSString *candidate in candidates) {
+            if ([fm fileExistsAtPath:candidate]) return candidate;
         }
+
+        // With no existing file, create the path for the suite inferred from
+        // the active bundle, rather than taking the first unrelated group.
+        NSString *preferredRelative = [bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]
+            ? @"Documents/mobileconfig/mc_overrides.json"
+            : @"mobileconfig/mc_overrides.json";
+        return [url.path stringByAppendingPathComponent:preferredRelative];
     }
     return nil;
 }
