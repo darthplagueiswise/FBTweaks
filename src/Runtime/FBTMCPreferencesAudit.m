@@ -117,18 +117,21 @@ static NSDictionary *FBTMCAPISelectPlist(NSArray<NSString *> *paths,
     NSString *bestPath = nil;
     NSInteger bestScore = NSIntegerMin;
     NSUInteger found = 0;
+    NSString *preferredSuite = suiteIDs.firstObject ?: @"";
     for (NSString *path in paths) {
         NSDictionary *plist = FBTMCAPIReadPlist(path);
         if (!plist) continue;
         found++;
         NSDictionary *startup = [plist[@"FBMobileConfigStartupConfigs"] isKindOfClass:[NSDictionary class]]
             ? plist[@"FBMobileConfigStartupConfigs"] : nil;
-        NSInteger score = startup ? (100000 + (NSInteger)startup.count * 10) : 0;
+        NSInteger score = startup ? (100000 + (NSInteger)startup.count) : 0;
         NSString *filename = path.lastPathComponent.lowercaseString;
-        if ([filename isEqualToString:[[bundleID stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 1200;
+        if (preferredSuite.length &&
+            [filename isEqualToString:[[preferredSuite stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 1000000;
+        if ([filename isEqualToString:[[bundleID stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 500000;
         for (NSString *suite in suiteIDs) {
-            if ([filename isEqualToString:[[suite stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 2000;
-            if ([path.lowercaseString containsString:suite.lowercaseString]) score += 100;
+            if ([filename isEqualToString:[[suite stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 1000;
+            if ([path.lowercaseString containsString:suite.lowercaseString]) score += 50;
         }
         if ([path.lowercaseString containsString:bundleID.lowercaseString]) score += 300;
         if ([path.lowercaseString containsString:@"/preferences/"]) score += 50;
