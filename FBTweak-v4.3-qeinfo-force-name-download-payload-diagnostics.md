@@ -26,12 +26,17 @@ This patch targets the separate QE-info/name-metadata path used by the native Mo
 ## Reproduction
 
 1. Install the branch build and restart Facebook if needed.
-2. Open **FBTweak → Runtime**, enable **Log de fetch QE-info (ON/OFF)**.
-3. Open **Internal Settings → MobileConfig → Force name download** and execute the action. Also reproduce selecting a parameter that fails in the native parameter list.
-4. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**.
-5. Export the App Group. Inspect:
-   - `mobileconfig/fbt_fetch_diagnostics.json`
-   - `mobileconfig/fbt_fetch_payloads/`
+2. Open **FBTweak → Runtime** and enable **Log de fetch QE-info (ON/OFF)**.
+3. Under **Ações**, open **A/B QE-info: isolar refresh/hash**.
+4. Run test A (**legacy refresh OFF**). The tool snapshots the original tri-state values (\`SYS\`/\`OFF\`/\`ON\`) once, restores that baseline before each test, and changes only the selected candidate. Restart Facebook, then run **Internal Settings → MobileConfig → Force name download**. Export diagnostics and response dumps.
+5. Return to the A/B action and run test B (**builtin query hash OFF**). The baseline is reapplied first, so this test does not leave both candidates disabled. Restart Facebook, repeat the same action, and export a second snapshot.
+6. Use **Restaurar estado anterior** after the comparison to return both entries to the exact original tri-state values. \`SYS\` means the tool removes that explicit override entry rather than writing \`false\`.
+7. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**. Inspect:
+   - \`mobileconfig/fbt_fetch_diagnostics.json\`
+   - \`mobileconfig/fbt_fetch_payloads/\`
+   - the timestamps and contents of \`mc_sync_response_dump*.json\`
+
+The event fields \`legacy_refresh_override_file_state\` and \`builtin_query_hash_override_file_state\` report what was written in \`mc_overrides.json\` when QE-info/name-download events occurred. They are deliberately named *file_state*: they do not prove the current executable found the parameter in its active name map or consumed the override.
 
 ## Interpretation
 
