@@ -412,11 +412,15 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             lastError[@"message"] ?: lastError[@"alert_message"] ?: lastError[@"alert"] ?: @"sem mensagem"];
     }
     NSDictionary *bodyStatus = FBTMobileConfigResponseCaptureStatus();
-    [summary appendFormat:@"\nRaw response capture: hook %@ · state %@ · payload %@ · saved bodies %@\n",
+    [summary appendFormat:@"\nRaw response capture: NSURLSession %@ · Tigon %@ · state %@ · payload %@\n",
         [bodyStatus[@"hook_installed"] boolValue] ? @"INSTALLED" : @"NOT INSTALLED",
+        [bodyStatus[@"tigon_hooks_installed"] boolValue] ? @"INSTALLED" : @"NOT INSTALLED",
         bodyStatus[@"last_capture_status"] ?: @"unknown",
-        bodyStatus[@"last_payload_file"] ?: @"none",
-        bodyStatus[@"captured_body_count"] ?: @0];
+        bodyStatus[@"last_payload_file"] ?: @"none"];
+    [summary appendFormat:@"Captured bodies: NSURLSession %@ · Tigon %@ · active Tigon contexts %@\n",
+        bodyStatus[@"captured_body_count"] ?: @0,
+        bodyStatus[@"tigon_captured_body_count"] ?: @0,
+        bodyStatus[@"tigon_context_count"] ?: @0];
     NSDictionary *lastNameDownload = nil;
     NSDictionary *lastResponseBody = nil;
     NSDictionary *lastRequest = nil;
@@ -424,8 +428,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         if (!lastNameDownload && ([event[@"event"] isEqualToString:@"name_download_completed"] ||
                                   [event[@"event"] isEqualToString:@"name_download_started"])) lastNameDownload = event;
         if (!lastResponseBody && ([event[@"event"] isEqualToString:@"network_response_body_captured"] ||
-                                  [event[@"event"] isEqualToString:@"network_response_body_skipped"])) lastResponseBody = event;
-        if (!lastRequest && [event[@"event"] isEqualToString:@"network_request_candidate"]) lastRequest = event;
+                                  [event[@"event"] isEqualToString:@"network_response_body_skipped"] ||
+                                  [event[@"event"] isEqualToString:@"tigon_response_body_unavailable"])) lastResponseBody = event;
+        if (!lastRequest && ([event[@"event"] isEqualToString:@"network_request_candidate"] ||
+                             [event[@"event"] isEqualToString:@"tigon_request_started"])) lastRequest = event;
         if (lastNameDownload && lastResponseBody && lastRequest) break;
     }
     if (lastNameDownload) {
@@ -444,9 +450,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             lastRequest[@"one_query_hash_length"] ?: @0];
     }
     if (lastResponseBody) {
-        [summary appendFormat:@"Last response body: %@ · HTTP %@ · %@ bytes · %@\n",
+        [summary appendFormat:@"Last response body: %@ · transport %@ · HTTP %@ · %@ bytes · %@\n",
             lastResponseBody[@"body_capture_status"] ?: lastResponseBody[@"event"] ?: @"unknown",
-            lastResponseBody[@"http_status"] ?: @"—",
+            lastResponseBody[@"transport"] ?: @"unknown",
+            ([lastResponseBody[@"http_status"] integerValue] > 0) ? lastResponseBody[@"http_status"] : @"not exposed",
             lastResponseBody[@"response_bytes"] ?: @0,
             lastResponseBody[@"payload_file"] ?: @"no file saved"];
     }
