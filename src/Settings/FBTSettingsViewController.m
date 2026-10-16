@@ -474,8 +474,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.title = @"MobileConfig Live";
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
     UIBarButtonItem *diagnostics = [[UIBarButtonItem alloc] initWithTitle:@"Fetch log" style:UIBarButtonItemStylePlain target:self action:@selector(showFetchDiagnostics)];
+    UIBarButtonItem *plistAudit = [[UIBarButtonItem alloc] initWithTitle:@"Plist audit" style:UIBarButtonItemStylePlain target:self action:@selector(showOverridesPlistAudit)];
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reloadSnapshot)];
-    self.navigationItem.rightBarButtonItems = @[diagnostics, refresh];
+    self.navigationItem.rightBarButtonItems = @[diagnostics, plistAudit, refresh];
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -498,6 +499,61 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.navigationItem.prompt = FBTNativeMobileConfigStatus();
     self.entries = FBTMobileConfigSnapshot();
     [self applyFilter];
+}
+
+
+- (void)showOverridesPlistAudit {
+    NSDictionary *report = [FBTMCOverridesFile auditAgainstEffectivePreferences] ?: @{};
+    NSArray<NSDictionary *> *mismatches = [report[@"mismatches"] isKindOfClass:[NSArray class]] ? report[@"mismatches"] : @[];
+    NSMutableString *summary = [NSMutableString stringWithFormat:
+        @"Bundle ID: %@\nOverride: %@\nEffective plist: %@\n\n"
+         "Rows inspected: %@\nMatch: %@ · Mismatch: %@\nNot represented in plist: %@\nPlist entries without value: %@\nMalformed: %@\nPlist candidates found: %@ · startup configs: %@\n\n",
+        report[@"bundle_id"] ?: @"unknown",
+        report[@"override_file_path"] ?: @"not_found",
+        report[@"preferences_plist_path"] ?: @"not_found",
+        report[@"override_rows_total"] ?: @0,
+        report[@"values_matching_plist"] ?: @0,
+        report[@"values_mismatching_plist"] ?: @0,
+        report[@"parameters_not_represented_in_plist"] ?: @0,
+        report[@"plist_entries_without_v"] ?: @0,
+        report[@"malformed_override_rows"] ?: @0,
+        report[@"preferences_plist_candidates_found"] ?: @0,
+        report[@"startup_config_entries"] ?: @0];
+    if (mismatches.count) {
+        [summary appendString:@"\nDivergências (override → plist):\n"];
+        NSUInteger limit = MIN(mismatches.count, 18);
+        for (NSUInteger i = 0; i < limit; i++) {
+            NSDictionary *item = mismatches[i];
+            [summary appendFormat:@"• %@.%@: %@ → %@\n",
+                item[@"config"] ?: @"?",
+                item[@"param"] ?: @"?",
+                item[@"override_value"] ?: @"?",
+                item[@"plist_value"] ?: @"?"];
+        }
+        if (mismatches.count > limit) {
+            [summary appendFormat:@"… mais %lu divergências; copie o JSON completo.\n",
+                (unsigned long)(mismatches.count - limit)];
+        }
+    } else {
+        [summary appendString:@"\nNenhuma divergência entre as entradas comparáveis encontradas."];
+    }
+    [summary appendString:@"\n\n‘Não representado no plist’ não é contado como divergência: significa que esse config.param não existe no mapa FBMobileConfigStartupConfigs selecionado. A auditoria compara estado persistido; sozinha, não prova que um reader em runtime consumiu o override."];
+    if ([report[@"audit_report_path"] isKindOfClass:[NSString class]]) {
+        [summary appendFormat:@"\n\nJSON completo: %@", report[@"audit_report_path"]];
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"mc_overrides ↔ Preferences plist"
+                                                                   message:summary
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar JSON completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        if ([NSJSONSerialization isValidJSONObject:report]) {
+            NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
+            NSString *json = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+            if (json.length) [UIPasteboard generalPasteboard].string = json;
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)showFetchDiagnostics {
