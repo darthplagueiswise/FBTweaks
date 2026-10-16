@@ -5,6 +5,10 @@ on:
     branches:
       - 'flags'
       - 'main'
+  pull_request:
+    branches:
+      - 'flags'
+      - 'main'
   workflow_dispatch:
 
 concurrency:
