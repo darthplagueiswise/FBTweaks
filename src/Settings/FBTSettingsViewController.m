@@ -8,6 +8,7 @@
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
 #import "../Runtime/FBTMCOverridesFile.h"
+#import "../Runtime/FBTMCPreferencesAudit.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
@@ -503,7 +504,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
 
 - (void)showOverridesPlistAudit {
-    NSDictionary *report = [FBTMCOverridesFile auditAgainstEffectivePreferences] ?: @{};
+    NSDictionary *report = FBTMCPreferencesAuditRun() ?: @{};
     NSArray<NSDictionary *> *mismatches = [report[@"mismatches"] isKindOfClass:[NSArray class]] ? report[@"mismatches"] : @[];
     NSMutableString *summary = [NSMutableString stringWithFormat:
         @"Bundle ID: %@\nOverride: %@\nOverride JSON: %@ · file %@\nEffective plist: %@\n\n"
