@@ -326,107 +326,19 @@ static void FBTSaveResponseBody(NSData *data, NSURLResponse *response, NSError *
             }
         }
     }
-    NSMutableDictionary *event = [@{
-        @"request_host": host ?: @"",
-        @"request_path": path ?: @"",
-        @"request_method": method ?: @"",
-        @"response_bytes": @(data.length),
-        @"http_status": @(status),
-        @"content_type": contentType,
-        @"capture_reason": captureReason ?: @"qe_info",
-        @"body_capture_status": @"not_saved"
-    } mutableCopy];
     if (networkError) {
-        event[@"network_error_domain"] = networkError.domain ?: @"";
-        event[@"network_error_code"] = @(networkError.code);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_error", event);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_error", @{
+            @"transport": @"NSURLSession",
+            @"request_host": host ?: @"",
+            @"request_path": path ?: @"",
+            @"request_method": method ?: @"",
+            @"network_error_domain": networkError.domain ?: @"",
+            @"network_error_code": @(networkError.code),
+            @"http_status": @(status)
+        });
     }
-
-    if (!data.length) {
-        event[@"body_capture_status"] = @"empty_body";
-        FBTSetCaptureStatus(@"empty_body", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-    if (data.length > 2 * 1024 * 1024) {
-        event[@"body_capture_status"] = @"over_2mb_limit";
-        FBTSetCaptureStatus(@"over_2mb_limit", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-
-    NSString *utf8 = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (!utf8) {
-        event[@"body_capture_status"] = @"non_utf8_body_not_persisted";
-        FBTSetCaptureStatus(@"non_utf8_body_not_persisted", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-    id parsed = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:nil];
-    BOOL credentialPayload = parsed ? FBTJSONHasCredentialField(parsed) : FBTTextLooksLikeCredentialPayload(utf8);
-    if (credentialPayload) {
-        // Do not write a response that itself contains credential fields.
-        // Otherwise the body is written byte-for-byte, without redacting or rewriting it.
-        event[@"body_capture_status"] = @"credential_field_detected_not_persisted";
-        FBTSetCaptureStatus(@"credential_field_detected_not_persisted", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-
-    NSString *base = FBTResponseCaptureBasePath();
-    if (!base.length) {
-        event[@"body_capture_status"] = @"app_group_unavailable";
-        FBTSetCaptureStatus(@"app_group_unavailable", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-    NSError *fileError = nil;
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm createDirectoryAtPath:base withIntermediateDirectories:YES attributes:nil error:&fileError]) {
-        event[@"body_capture_status"] = @"directory_create_failed";
-        FBTSetCaptureStatus(@"directory_create_failed", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-    NSString *extension = parsed ? @"json" : @"txt";
-    NSString *leaf = [NSString stringWithFormat:@"qe_payload_%@.%@", [NSUUID UUID].UUIDString, extension];
-    NSString *absolutePath = [base stringByAppendingPathComponent:leaf];
-    NSString *relativePath = [@"fbt_fetch_payloads/" stringByAppendingString:leaf];
-    if (![data writeToFile:absolutePath options:NSDataWritingAtomic error:&fileError]) {
-        event[@"body_capture_status"] = @"write_failed";
-        FBTSetCaptureStatus(@"write_failed", nil, nil);
-        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
-        return;
-    }
-
-    NSString *sha = FBTSHA256(data);
-    NSDictionary *metadata = @{
-        @"captured_at_utc": FBTUTCNow(),
-        @"capture_reason": captureReason ?: @"qe_info",
-        @"request_host": host ?: @"",
-        @"request_path": path ?: @"",
-        @"request_method": method ?: @"",
-        @"http_status": @(status),
-        @"content_type": contentType,
-        @"response_bytes": @(data.length),
-        @"sha256": sha,
-        @"query_hash_state": queryHashState[@"query_hash_state"] ?: @"missing",
-        @"query_hash_length": queryHashState[@"query_hash_length"] ?: @0,
-        @"one_query_hash_state": queryHashState[@"one_query_hash_state"] ?: @"missing",
-        @"one_query_hash_length": queryHashState[@"one_query_hash_length"] ?: @0,
-        @"body_file": relativePath
-    };
-    NSData *metaData = [NSJSONSerialization dataWithJSONObject:metadata options:NSJSONWritingPrettyPrinted error:nil];
-    if (metaData.length) [metaData writeToFile:[absolutePath stringByAppendingString:@".meta.json"] options:NSDataWritingAtomic error:nil];
-
-    event[@"payload_file"] = relativePath;
-    event[@"payload_sha256"] = sha;
-    event[@"body_capture_status"] = @"saved_raw_bytes";
-    FBTSetCaptureStatus(@"saved_raw_bytes", absolutePath, relativePath);
-    [sCaptureLock lock];
-    sCapturedBodyCount++;
-    [sCaptureLock unlock];
-    FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_captured", event);
+    FBTMobileConfigResponseCaptureWriteRawBody(data, host, path, method, queryHashState,
+        captureReason, status, contentType, @"NSURLSession");
 }
 
 static NSURLSessionDataTask *FBTSessionDataTaskHook(id self, SEL _cmd, NSURLRequest *request,
