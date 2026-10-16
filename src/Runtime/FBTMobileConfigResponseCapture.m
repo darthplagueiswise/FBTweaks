@@ -176,12 +176,139 @@ static NSDictionary *FBTCurrentCaptureArm(void) {
     return state;
 }
 
+NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void) {
+    return FBTCurrentCaptureArm() ?: @{};
+}
+
+BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *host, NSString *path, NSString *reason) {
+    NSString *probe = [NSString stringWithFormat:@"%@ %@", host ?: @"", path ?: @""];
+    NSArray<NSString *> *markers = @[
+        @"qe_info", @"qeinfo", @"qce", @"mobileconfig", @"params_names",
+        @"param_names", @"parameter_names", @"fetch_names", @"refresh_names",
+        @"query_hash", @"one_query_hash", @"fbmobileconfigqeinfo", @"get_param_info",
+        @"graphql"
+    ];
+    BOOL namedFlow = FBTStringContainsOneOf(probe, markers);
+    BOOL forceWindow = [reason isEqualToString:@"force_name_download"] ||
+                       [reason isEqualToString:@"qe_info_name_refresh"] ||
+                       [reason isEqualToString:@"qe_info_param_fetch"];
+    return namedFlow || (forceWindow && FBTStringContainsOneOf(probe, @[@"/api/", @"graphql"]));
+}
+
+void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details) {
+    FBTMobileConfigFetchDiagnosticsRecord(event ?: @"transport_event", details ?: @{});
+}
+
 static void FBTSetCaptureStatus(NSString *status, NSString *absolutePath, NSString *relativePath) {
     [sCaptureLock lock];
     sLastCaptureStatus = status ?: @"unknown";
     if (absolutePath.length) sLastBodyPath = absolutePath;
     if (relativePath.length) sLastBodyRelativePath = relativePath;
     [sCaptureLock unlock];
+}
+
+static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSString *path,
+        NSString *method, NSDictionary *queryHashState, NSString *captureReason,
+        NSInteger httpStatus, NSString *contentType, NSString *transport) {
+    NSMutableDictionary *event = [@{
+        @"request_host": host ?: @"",
+        @"request_path": path ?: @"",
+        @"request_method": method ?: @"",
+        @"response_bytes": @(data.length),
+        @"http_status": @(httpStatus),
+        @"content_type": contentType ?: @"",
+        @"capture_reason": captureReason ?: @"qe_info",
+        @"transport": transport ?: @"unknown",
+        @"body_capture_status": @"not_saved"
+    } mutableCopy];
+    if (!data.length) {
+        event[@"body_capture_status"] = @"empty_body";
+        FBTSetCaptureStatus(@"empty_body", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    if (data.length > 2 * 1024 * 1024) {
+        event[@"body_capture_status"] = @"over_2mb_limit";
+        FBTSetCaptureStatus(@"over_2mb_limit", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    NSString *utf8 = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!utf8) {
+        event[@"body_capture_status"] = @"non_utf8_body_not_persisted";
+        FBTSetCaptureStatus(@"non_utf8_body_not_persisted", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:nil];
+    BOOL credentialPayload = (parsed && FBTJSONHasCredentialField(parsed)) ||
+                             FBTTextLooksLikeCredentialPayload(utf8);
+    if (credentialPayload) {
+        event[@"body_capture_status"] = @"credential_field_detected_not_persisted";
+        FBTSetCaptureStatus(@"credential_field_detected_not_persisted", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    NSString *base = FBTResponseCaptureBasePath();
+    if (!base.length) {
+        event[@"body_capture_status"] = @"app_group_unavailable";
+        FBTSetCaptureStatus(@"app_group_unavailable", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    NSError *fileError = nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm createDirectoryAtPath:base withIntermediateDirectories:YES attributes:nil error:&fileError]) {
+        event[@"body_capture_status"] = @"directory_create_failed";
+        FBTSetCaptureStatus(@"directory_create_failed", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    NSString *extension = parsed ? @"json" : @"txt";
+    NSString *leaf = [NSString stringWithFormat:@"qe_payload_%@.%@", [NSUUID UUID].UUIDString, extension];
+    NSString *absolutePath = [base stringByAppendingPathComponent:leaf];
+    NSString *relativePath = [@"fbt_fetch_payloads/" stringByAppendingString:leaf];
+    if (![data writeToFile:absolutePath options:NSDataWritingAtomic error:&fileError]) {
+        event[@"body_capture_status"] = @"write_failed";
+        FBTSetCaptureStatus(@"write_failed", nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    NSString *sha = FBTSHA256(data);
+    NSDictionary *metadata = @{
+        @"captured_at_utc": FBTUTCNow(),
+        @"capture_reason": captureReason ?: @"qe_info",
+        @"request_host": host ?: @"",
+        @"request_path": path ?: @"",
+        @"request_method": method ?: @"",
+        @"http_status": @(httpStatus),
+        @"content_type": contentType ?: @"",
+        @"transport": transport ?: @"unknown",
+        @"response_bytes": @(data.length),
+        @"sha256": sha,
+        @"query_hash_state": queryHashState[@"query_hash_state"] ?: @"missing",
+        @"query_hash_length": queryHashState[@"query_hash_length"] ?: @0,
+        @"one_query_hash_state": queryHashState[@"one_query_hash_state"] ?: @"missing",
+        @"one_query_hash_length": queryHashState[@"one_query_hash_length"] ?: @0,
+        @"body_file": relativePath
+    };
+    NSData *metaData = [NSJSONSerialization dataWithJSONObject:metadata options:NSJSONWritingPrettyPrinted error:nil];
+    if (metaData.length) [metaData writeToFile:[absolutePath stringByAppendingString:@".meta.json"] options:NSDataWritingAtomic error:nil];
+    event[@"payload_file"] = relativePath;
+    event[@"payload_sha256"] = sha;
+    event[@"body_capture_status"] = @"saved_raw_bytes";
+    FBTSetCaptureStatus(@"saved_raw_bytes", absolutePath, relativePath);
+    [sCaptureLock lock];
+    sCapturedBodyCount++;
+    [sCaptureLock unlock];
+    FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_captured", event);
+}
+
+void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *host, NSString *path,
+        NSString *method, NSDictionary *queryHashState, NSString *reason, NSInteger httpStatus,
+        NSString *contentType, NSString *transport) {
+    FBTResponseCaptureWriteRawPayload(data, host, path, method, queryHashState, reason,
+                                      httpStatus, contentType, transport);
 }
 
 static void FBTSaveResponseBody(NSData *data, NSURLResponse *response, NSError *networkError,
@@ -402,6 +529,7 @@ void FBTMobileConfigResponseCaptureInstall(void) {
         sHookedSessionClasses = [NSMutableSet set];
     });
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    FBTMobileConfigResponseCaptureInstallTigon();
     Class sessionClass = objc_getClass("NSURLSession");
     SEL selector = @selector(dataTaskWithRequest:completionHandler:);
     if (!sessionClass || !selector) {
