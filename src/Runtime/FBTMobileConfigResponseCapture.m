@@ -5,6 +5,7 @@
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <QuartzCore/QuartzCore.h>
 
 static NSMutableDictionary<NSString *, NSValue *> *sOriginalSessionImpByClass;
 static NSMutableSet<NSString *> *sHookedSessionClasses;
