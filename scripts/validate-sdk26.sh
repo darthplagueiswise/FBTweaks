@@ -44,6 +44,10 @@ grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/Settings/FBTSettingsView
 grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/FBTDefaults.m || fail "preferência de captura QE-info sem default persistente"
 grep -q "fbt_fetch_diagnostics.json" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "relatorio de fetch nao persiste no AppGroup"
 grep -q "showFetchDiagnostics" src/Settings/FBTSettingsViewController.m || fail "UI sem acesso ao diagnóstico de fetch"
+grep -q "FBTMobileConfigResponseCaptureWriteRawBody" src/Runtime/FBTMobileConfigResponseCapture.m || fail "raw response body capture ausente"
+grep -q "FBTMobileConfigResponseCaptureInstallTigon" src/Runtime/FBTMobileConfigTigonCapture.mm || fail "Tigon callback instrumentation ausente"
+grep -q "name_download_completed" src/Runtime/FBTMobileConfigDebugUIHooks.mm || fail "Force name download sem evento de retorno"
+grep -q "credential_field_detected_not_persisted" src/Runtime/FBTMobileConfigResponseCapture.m || fail "guard de credenciais ausente no capture de resposta"
 grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m || fail "UI UIKit sem default Liquid Glass appearance"
 
 echo "[validate] OK"
