@@ -234,10 +234,24 @@ static NSString *FBTMCAPIDateNow(void) {
     NSArray<NSString *> *suiteIDs = FBTMCAPISuiteCandidates(bundleID);
     NSString *overridePath = FBTNativeMobileConfigOverridesFilePath();
     NSDictionary *overrides = nil;
+    BOOL overrideJSONValid = NO;
+    NSString *overrideJSONError = nil;
     if (overridePath.length) {
         NSData *jsonData = [NSData dataWithContentsOfFile:overridePath];
-        id jsonObject = jsonData.length ? [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil] : nil;
-        if ([jsonObject isKindOfClass:[NSDictionary class]]) overrides = jsonObject;
+        if (jsonData.length) {
+            NSError *jsonError = nil;
+            id jsonObject = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&jsonError];
+            if ([jsonObject isKindOfClass:[NSDictionary class]]) {
+                overrides = jsonObject;
+                overrideJSONValid = YES;
+            } else {
+                overrideJSONError = jsonError.localizedDescription ?: @"JSON root is not a dictionary";
+            }
+        } else {
+            overrideJSONError = @"File missing or empty";
+        }
+    } else {
+        overrideJSONError = @"Native mc_overrides path not resolved";
     }
 
     NSArray<NSString *> *paths = FBTMCAPICandidatePaths(bundleID, suiteIDs, overridePath);
@@ -343,6 +357,8 @@ static NSString *FBTMCAPIDateNow(void) {
         @"bundle_id": bundleID,
         @"derived_preferences_suite_candidates": suiteIDs,
         @"override_file_path": overridePath ?: @"not_found",
+        @"override_file_exists": @(overridePath.length && [[NSFileManager defaultManager] fileExistsAtPath:overridePath]),
+        @"override_json_valid": @(overrideJSONValid),
         @"preferences_plist_path": preferencesPath ?: @"not_found",
         @"preferences_plist_candidates_found": @(plistCandidatesFound),
         @"startup_config_entries": @(startupConfigs.count),
@@ -358,6 +374,7 @@ static NSString *FBTMCAPIDateNow(void) {
         @"plist_without_value_sample": noValueRows,
         @"interpretation": @"A mismatch means the override row and selected preferences plist disagree for the same config.param key. Parameters absent from FBMobileConfigStartupConfigs are not counted as mismatches and cannot be verified against this plist. This audits persisted preferences; it does not by itself prove that a runtime reader consumed the override."
     } mutableCopy];
+    if (overrideJSONError.length) report[@"override_json_error"] = overrideJSONError;
     if (reportPath.length) report[@"audit_report_path"] = reportPath;
 
     if (reportPath.length) {
