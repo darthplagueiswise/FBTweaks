@@ -52,8 +52,10 @@ static NSArray<NSString *> *FBTMCAPICandidatePaths(NSString *bundleID, NSArray<N
     for (NSString *relative in preferenceDirs) {
         NSString *dir = [home stringByAppendingPathComponent:relative];
         FBTMCAPIAddPath(paths, dir, [bundleID stringByAppendingPathExtension:@"plist"]);
+        FBTMCAPIAddPath(paths, dir, bundleID);
         for (NSString *suite in suiteIDs) {
             FBTMCAPIAddPath(paths, dir, [suite stringByAppendingPathExtension:@"plist"]);
+            FBTMCAPIAddPath(paths, dir, suite);
         }
     }
 
@@ -64,10 +66,14 @@ static NSArray<NSString *> *FBTMCAPICandidatePaths(NSString *bundleID, NSArray<N
         for (NSString *relative in @[@"Library/Preferences", @"Preferences", @"AppData/Preferences"]) {
             NSString *dir = [container.path stringByAppendingPathComponent:relative];
             FBTMCAPIAddPath(paths, dir, [suite stringByAppendingPathExtension:@"plist"]);
+            FBTMCAPIAddPath(paths, dir, suite);
             FBTMCAPIAddPath(paths, dir, [bundleID stringByAppendingPathExtension:@"plist"]);
+            FBTMCAPIAddPath(paths, dir, bundleID);
         }
         FBTMCAPIAddPath(paths, container.path, [suite stringByAppendingPathExtension:@"plist"]);
+        FBTMCAPIAddPath(paths, container.path, suite);
         FBTMCAPIAddPath(paths, container.path, [bundleID stringByAppendingPathExtension:@"plist"]);
+        FBTMCAPIAddPath(paths, container.path, bundleID);
     }
 
     // If the native override path is under AppGroup/Documents/mobileconfig,
@@ -83,12 +89,15 @@ static NSArray<NSString *> *FBTMCAPICandidatePaths(NSString *bundleID, NSArray<N
             for (NSString *relative in @[@"Preferences", @"AppData/Preferences", @"Library/Preferences"]) {
                 NSString *dir = [root stringByAppendingPathComponent:relative];
                 FBTMCAPIAddPath(paths, dir, [bundleID stringByAppendingPathExtension:@"plist"]);
+                FBTMCAPIAddPath(paths, dir, bundleID);
                 for (NSString *suite in suiteIDs) {
                     FBTMCAPIAddPath(paths, dir, [suite stringByAppendingPathExtension:@"plist"]);
+                    FBTMCAPIAddPath(paths, dir, suite);
                 }
             }
             for (NSString *suite in suiteIDs) {
                 FBTMCAPIAddPath(paths, root, [suite stringByAppendingPathExtension:@"plist"]);
+                FBTMCAPIAddPath(paths, root, suite);
             }
         }
     }
@@ -127,8 +136,10 @@ static NSDictionary *FBTMCAPISelectPlist(NSArray<NSString *> *paths,
         NSInteger score = startup ? (100000 + (NSInteger)startup.count) : 0;
         NSString *filename = path.lastPathComponent.lowercaseString;
         if (preferredSuite.length &&
-            [filename isEqualToString:[[preferredSuite stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 1000000;
-        if ([filename isEqualToString:[[bundleID stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 500000;
+            ([filename isEqualToString:preferredSuite.lowercaseString] ||
+             [filename isEqualToString:[[preferredSuite stringByAppendingPathExtension:@"plist"] lowercaseString]])) score += 1000000;
+        if ([filename isEqualToString:bundleID.lowercaseString] ||
+            [filename isEqualToString:[[bundleID stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 500000;
         for (NSString *suite in suiteIDs) {
             if ([filename isEqualToString:[[suite stringByAppendingPathExtension:@"plist"] lowercaseString]]) score += 1000;
             if ([path.lowercaseString containsString:suite.lowercaseString]) score += 50;
