@@ -133,7 +133,7 @@ static NSDictionary *FBTMCAPISelectPlist(NSArray<NSString *> *paths,
         found++;
         NSDictionary *startup = [plist[@"FBMobileConfigStartupConfigs"] isKindOfClass:[NSDictionary class]]
             ? plist[@"FBMobileConfigStartupConfigs"] : nil;
-        NSInteger score = startup ? (100000 + (NSInteger)startup.count) : 0;
+        NSInteger score = startup ? (10000000 + (NSInteger)startup.count) : 0;
         NSString *filename = path.lastPathComponent.lowercaseString;
         if (preferredSuite.length &&
             ([filename isEqualToString:preferredSuite.lowercaseString] ||
