@@ -92,7 +92,8 @@ static BOOL FBTRequestLooksLikeQEInfoOrNameFetch(NSURLRequest *request, NSString
     NSString *host = url.host ?: @"";
     NSString *path = url.path ?: @"";
     NSString *body = FBTRequestBodyTextForInspection(request);
-    NSString *probe = [NSString stringWithFormat:@"%@ %@ %@", host, path, body];
+    NSString *urlQuery = url.query ?: @"";
+    NSString *probe = [NSString stringWithFormat:@"%@ %@ %@ %@", host, path, urlQuery, body];
     BOOL hasMarker = FBTStringContainsOneOf(probe, @[
         @"qe_info", @"qeinfo", @"qce", @"mobileconfig",
         @"params_names", @"param_names", @"parameter_names",
@@ -105,7 +106,7 @@ static BOOL FBTRequestLooksLikeQEInfoOrNameFetch(NSURLRequest *request, NSString
     if (!hasMarker) return NO;
     if (hostOut) *hostOut = host;
     if (pathOut) *pathOut = path;
-    if (hashOut) *hashOut = FBTQueryHashState(body);
+    if (hashOut) *hashOut = FBTQueryHashState([NSString stringWithFormat:@"%@\n%@", urlQuery, body]);
     return YES;
 }
 
@@ -495,6 +496,7 @@ NSString *FBTMobileConfigResponseCaptureLastBodyString(void) {
     [sCaptureLock unlock];
     if (!path.length) {
         NSString *base = FBTResponseCaptureBasePath();
+        if (!base.length) return @"";
         NSArray<NSString *> *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:base error:nil] ?: @[];
         NSDate *bestDate = nil;
         NSString *bestPath = nil;
