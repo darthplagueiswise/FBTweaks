@@ -32,7 +32,8 @@ This patch targets the separate QE-info/name-metadata path used by the native Mo
 5. Choose test A (**legacy refresh OFF**). The tool restores the saved baseline before changing only this candidate. Restart Facebook, run the same action, and export the A snapshot.
 6. Choose test B (**builtin query hash OFF**). The saved baseline is reapplied first, so this test does not leave both candidates disabled. Restart Facebook, repeat the same action, and export the B snapshot.
 7. Use **Restaurar estado anterior** after the comparison to return both entries to the exact original tri-state values. `SYS` means the tool removes that explicit override entry rather than writing `false`.
-8. Open **FBTweak → Runtime → MobileConfig Live → Plist audit** and export the JSON report. Confirm the reported bundle ID and selected plist path before interpreting discrepancies.\n9. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**. Inspect:
+8. Open **FBTweak → Runtime → MobileConfig Live → Plist audit** and export the JSON report. Confirm the reported bundle ID and selected plist path before interpreting discrepancies.
+9. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**. Inspect:
    - `mobileconfig/fbt_fetch_diagnostics.json`
    - `mobileconfig/fbt_fetch_payloads/`
    - the timestamps and contents of `mc_sync_response_dump*.json`
