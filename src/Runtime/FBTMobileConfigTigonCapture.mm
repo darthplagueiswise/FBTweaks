@@ -85,10 +85,10 @@ static NSDictionary *FBTTigonQueryHashState(const std::string &query) {
     return state;
 }
 
-static NSDictionary *FBTTigonContextForObject(void *self) {
+static NSMutableDictionary *FBTTigonContextForObject(void *self) {
     if (!self || !sTigonCaptureLock) return nil;
     [sTigonCaptureLock lock];
-    NSDictionary *context = [sTigonCapturedRequests objectForKey:[NSValue valueWithPointer:self]];
+    NSMutableDictionary *context = [sTigonCapturedRequests objectForKey:[NSValue valueWithPointer:self]];
     [sTigonCaptureLock unlock];
     return context;
 }
@@ -206,7 +206,7 @@ static void FBTTigonOnStarted(void *self, const void *request) {
 }
 
 static void FBTTigonOnBody(void *self, void *uniquePtrArgument) {
-    NSDictionary *context = FBTTigonContextForObject(self);
+    NSMutableDictionary *context = FBTTigonContextForObject(self);
     if (context && uniquePtrArgument) {
         @try {
             void *head = *(void **)uniquePtrArgument; // ABI: move-only unique_ptr is passed indirectly.
