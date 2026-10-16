@@ -507,7 +507,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSArray<NSDictionary *> *mismatches = [report[@"mismatches"] isKindOfClass:[NSArray class]] ? report[@"mismatches"] : @[];
     NSMutableString *summary = [NSMutableString stringWithFormat:
         @"Bundle ID: %@\nOverride: %@\nEffective plist: %@\n\n"
-         "Rows inspected: %@\nMatch: %@ · Mismatch: %@\nNot represented in plist: %@\nPlist entries without value: %@\nMalformed: %@\nPlist candidates found: %@ · startup configs: %@\n\n",
+         @"Rows inspected: %@\nMatch: %@ · Mismatch: %@\nNot represented in plist: %@\nPlist entries without value: %@\nMalformed: %@\nPlist candidates found: %@ · startup configs: %@\n\n",
         report[@"bundle_id"] ?: @"unknown",
         report[@"override_file_path"] ?: @"not_found",
         report[@"preferences_plist_path"] ?: @"not_found",
