@@ -327,12 +327,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
                         paramIdx:4 name:@"use_builtin_query_hash"];
 
-    NSString *testedFlag = nil;
+    NSString *testedFlag = @"baseline (nenhuma flag alterada)";
     if ([variant isEqualToString:@"legacy"]) {
         [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQELegacyConfigKey
                             paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
         testedFlag = @"mobileconfig_use_legacy_refresh";
-    } else {
+    } else if ([variant isEqualToString:@"hash"]) {
         [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQEBuiltinHashConfigKey
                             paramIdx:4 name:@"use_builtin_query_hash"];
         testedFlag = @"use_builtin_query_hash";
@@ -340,14 +340,28 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
     FBTMCState currentLegacy = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
     FBTMCState currentHash = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+    BOOL stateWritten = [FBTMCOverridesFile fileExists] &&
+        (currentLegacy == ([variant isEqualToString:@"legacy"] ? FBTMCStateOff : legacyState)) &&
+        (currentHash == ([variant isEqualToString:@"hash"] ? FBTMCStateOff : hashState));
+    if (!stateWritten) {
+        [self showInfoTitle:@"Não consegui confirmar o ajuste"
+                    message:[NSString stringWithFormat:@"O estado esperado não foi relido de mc_overrides.json.\nPath: %@\nLegacy: %@ · query hash: %@\nNão execute a comparação até corrigir o path do arquivo.",
+                        [FBTMCOverridesFile path] ?: @"unknown",
+                        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash)]];
+        return;
+    }
     NSString *message = [NSString stringWithFormat:
         @"Teste isolado gravado em mc_overrides.json.\n\n"
          @"mobileconfig_use_legacy_refresh: %@\n"
          @"use_builtin_query_hash: %@\n\n"
          @"Reinicie o Facebook, ative o log QE-info e execute Force name download. Compare name_download_completed, qe_info_request_returned e query_hash_state.\n\n"
          @"Importante: isso confirma apenas o estado gravado no arquivo, não que a versão atual do app reconheça esses parâmetros. No AppGroup analisado, os dois configs não apareceram nos sidecars ativos de nomes; se não houver mudança, o próximo passo é confirmar resolução/schema, não desligar outras flags em lote.\n\n"
-         @"Flag isolada neste teste: %@",
-        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag];
+         @"Flag isolada neste teste: %@%@",
+        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag,
+        ([variant isEqualToString:@"legacy"] && legacyState == FBTMCStateOff) ?
+            @"\nATENÇÃO: legacy refresh já estava OFF na linha de base; a intervenção não muda esse valor." :
+        (([variant isEqualToString:@"hash"] && hashState == FBTMCStateOff) ?
+            @"\nATENÇÃO: builtin query hash já estava OFF na linha de base; a intervenção não muda esse valor." : @"")];
     [self showInfoTitle:@"Teste A/B QE-info preparado" message:message];
 }
 
@@ -410,6 +424,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
                     @"Estado atual gravado no arquivo:\nlegacy refresh: %@\nbuiltin query hash: %@\n\nEscolha uma hipótese. O teste anterior não é combinado com o atual; use Restaurar para voltar ao estado salvo.",
                     FBTMCStateLabel(legacyState), FBTMCStateLabel(hashState)]
                 preferredStyle:UIAlertControllerStyleActionSheet];
+            [a addAction:[UIAlertAction actionWithTitle:@"0 — Baseline (sem alteração)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"baseline"];
+            }]];
             [a addAction:[UIAlertAction actionWithTitle:@"A — legacy refresh OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
                 [self applyQEFlagABTest:@"legacy"];
             }]];
