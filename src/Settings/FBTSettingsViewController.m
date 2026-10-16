@@ -506,10 +506,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *report = [FBTMCOverridesFile auditAgainstEffectivePreferences] ?: @{};
     NSArray<NSDictionary *> *mismatches = [report[@"mismatches"] isKindOfClass:[NSArray class]] ? report[@"mismatches"] : @[];
     NSMutableString *summary = [NSMutableString stringWithFormat:
-        @"Bundle ID: %@\nOverride: %@\nEffective plist: %@\n\n"
+        @"Bundle ID: %@\nOverride: %@\nOverride JSON: %@ · file %@\nEffective plist: %@\n\n"
          @"Rows inspected: %@\nMatch: %@ · Mismatch: %@\nNot represented in plist: %@\nPlist entries without value: %@\nMalformed: %@\nPlist candidates found: %@ · startup configs: %@\n\n",
         report[@"bundle_id"] ?: @"unknown",
         report[@"override_file_path"] ?: @"not_found",
+        [report[@"override_json_valid"] boolValue] ? @"valid" : @"invalid / unavailable",
+        [report[@"override_file_exists"] boolValue] ? @"exists" : @"missing",
         report[@"preferences_plist_path"] ?: @"not_found",
         report[@"override_rows_total"] ?: @0,
         report[@"values_matching_plist"] ?: @0,
