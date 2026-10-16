@@ -284,6 +284,36 @@ static void FBTTigonOnError(void *self, const void *error, void *summary) {
     }
 }
 
+NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
+    if (!sTigonCaptureLock) {
+        return @{
+            @"tigon_hooks_installed": @NO,
+            @"tigon_request_hook_installed": @NO,
+            @"tigon_body_hook_installed": @NO,
+            @"tigon_response_hook_installed": @NO,
+            @"tigon_eom_hook_installed": @NO,
+            @"tigon_error_hook_installed": @NO,
+            @"tigon_rebind_status": @-999,
+            @"tigon_captured_body_count": @0,
+            @"tigon_context_count": @0
+        };
+    }
+    [sTigonCaptureLock lock];
+    NSDictionary *status = @{
+        @"tigon_hooks_installed": @(sTigonHooksInstalled),
+        @"tigon_request_hook_installed": @(sOrigTigonStarted != nullptr),
+        @"tigon_body_hook_installed": @(sOrigTigonBody != nullptr),
+        @"tigon_response_hook_installed": @(sOrigTigonResponse != nullptr),
+        @"tigon_eom_hook_installed": @(sOrigTigonEOM != nullptr),
+        @"tigon_error_hook_installed": @(sOrigTigonError != nullptr),
+        @"tigon_rebind_status": @(sTigonRebindStatus),
+        @"tigon_captured_body_count": @(sTigonBodyCount),
+        @"tigon_context_count": @(sTigonCapturedRequests.count)
+    };
+    [sTigonCaptureLock unlock];
+    return status;
+}
+
 void FBTMobileConfigResponseCaptureInstallTigon(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
