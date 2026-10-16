@@ -32,12 +32,21 @@ This patch targets the separate QE-info/name-metadata path used by the native Mo
 5. Choose test A (**legacy refresh OFF**). The tool restores the saved baseline before changing only this candidate. Restart Facebook, run the same action, and export the A snapshot.
 6. Choose test B (**builtin query hash OFF**). The saved baseline is reapplied first, so this test does not leave both candidates disabled. Restart Facebook, repeat the same action, and export the B snapshot.
 7. Use **Restaurar estado anterior** after the comparison to return both entries to the exact original tri-state values. `SYS` means the tool removes that explicit override entry rather than writing `false`.
-8. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**. Inspect:
+8. Open **FBTweak → Runtime → MobileConfig Live → Plist audit** and export the JSON report. Confirm the reported bundle ID and selected plist path before interpreting discrepancies.\n9. Open **FBTweak → Runtime → MobileConfig Live → Fetch log**. Inspect:
    - `mobileconfig/fbt_fetch_diagnostics.json`
    - `mobileconfig/fbt_fetch_payloads/`
    - the timestamps and contents of `mc_sync_response_dump*.json`
 
 The event fields `legacy_refresh_override_file_state` and `builtin_query_hash_override_file_state` report what was written in `mc_overrides.json` when QE-info/name-download events occurred. They are deliberately named *file_state*: they do not prove the current executable found the parameter in its active name map or consumed the override.
+
+## mc_overrides ↔ Preferences plist audit
+
+- **MobileConfig Live → Plist audit** reads the exact resolved `mc_overrides.json` path, obtains the running app's `NSBundle.mainBundle.bundleIdentifier`, and derives Preferences/App Group candidates from that bundle ID.
+- The `com.facebook.ota` bundle prefers `group.facebook.ota`; the full Facebook bundle prefers `group.com.facebook.Facebook`. Other candidates are used only if an actual plist exists. The audit checks app-container `Library/Preferences`, `Preferences`, and `AppData/Preferences` locations plus matching shared-container locations.
+- It selects the best matching plist containing `FBMobileConfigStartupConfigs`, then compares each override row `configName.paramName` with that plist entry's `v` value.
+- Results distinguish **match**, **value mismatch**, **not represented in plist**, and **plist entry without v**. A missing key is not reported as a value mismatch because that plist cannot verify the override row.
+- The report is saved beside the resolved override file as `fbt_mc_overrides_plist_audit.json`; the UI can copy the complete report as JSON.
+- This verifies that persisted preferences agree with the override file for comparable keys. It does not claim every parameter belongs in the startup plist or independently prove that a runtime reader consumed the override.
 
 ## Interpretation
 
