@@ -7,6 +7,7 @@
 #import "FBTFeatureParamsViewController.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
+#import "../Runtime/FBTMCOverridesFile.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
@@ -17,6 +18,11 @@ extern void FBTInstallLiquidGlassHooks(void);
 
 static NSString * const FBTCellID = @"FBTCell";
 static NSString * const FBTSwitchCellID = @"FBTSwitchCell";
+static NSString * const FBTQESnapshotValidKey = @"FBTQESnapshotValid";
+static NSString * const FBTQESnapshotLegacyStateKey = @"FBTQESnapshotLegacyState";
+static NSString * const FBTQESnapshotBuiltinHashStateKey = @"FBTQESnapshotBuiltinHashState";
+static NSString * const FBTQELegacyConfigKey = @"84491:mobile_config_internal_settings_features";
+static NSString * const FBTQEBuiltinHashConfigKey = @"4626:mobileconfig_session";
 
 static uint64_t FBTParseUInt64String(NSString *string) {
     if (![string isKindOfClass:[NSString class]] || !string.length) return 0;
@@ -54,6 +60,15 @@ static UILabel *FBTSecondaryLabel(NSString *text) {
 }
 
 static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
+
+static NSString *FBTMCStateLabel(FBTMCState state) {
+    switch (state) {
+        case FBTMCStateOff: return @"OFF";
+        case FBTMCStateOn: return @"ON";
+        case FBTMCStateSys:
+        default: return @"SYS (sem override explícito)";
+    }
+}
 
 static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack) {
     NSString *q = [query.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
@@ -171,6 +186,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
+            @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
         ],
     ];
@@ -287,6 +303,81 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
 }
 
+- (void)applyQEFlagABTest:(NSString *)variant {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    FBTMCState legacyState;
+    FBTMCState hashState;
+
+    if ([prefs boolForKey:FBTQESnapshotValidKey]) {
+        legacyState = (FBTMCState)[prefs integerForKey:FBTQESnapshotLegacyStateKey];
+        hashState = (FBTMCState)[prefs integerForKey:FBTQESnapshotBuiltinHashStateKey];
+    } else {
+        legacyState = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+        hashState = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+        [prefs setInteger:legacyState forKey:FBTQESnapshotLegacyStateKey];
+        [prefs setInteger:hashState forKey:FBTQESnapshotBuiltinHashStateKey];
+        [prefs setBool:YES forKey:FBTQESnapshotValidKey];
+        [prefs synchronize];
+    }
+
+    // Reapply the pre-test baseline first so switching A/B cannot leave both
+    // candidates disabled at once. SYS removes the explicit entry.
+    [FBTMCOverridesFile setState:legacyState forConfig:FBTQELegacyConfigKey
+                        paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+    [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
+                        paramIdx:4 name:@"use_builtin_query_hash"];
+
+    NSString *testedFlag = nil;
+    if ([variant isEqualToString:@"legacy"]) {
+        [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQELegacyConfigKey
+                            paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+        testedFlag = @"mobileconfig_use_legacy_refresh";
+    } else {
+        [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQEBuiltinHashConfigKey
+                            paramIdx:4 name:@"use_builtin_query_hash"];
+        testedFlag = @"use_builtin_query_hash";
+    }
+
+    FBTMCState currentLegacy = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+    FBTMCState currentHash = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+    NSString *message = [NSString stringWithFormat:
+        @"Teste isolado gravado em mc_overrides.json.\n\n"
+         "mobileconfig_use_legacy_refresh: %@\n"
+         "use_builtin_query_hash: %@\n\n"
+         "Reinicie o Facebook, ative o log QE-info e execute Force name download. Compare name_download_completed, qe_info_request_returned e query_hash_state.\n\n"
+         "Importante: isso confirma apenas o estado gravado no arquivo, não que a versão atual do app reconheça esses parâmetros. No AppGroup analisado, os dois configs não apareceram nos sidecars ativos de nomes; se não houver mudança, o próximo passo é confirmar resolução/schema, não desligar outras flags em lote.\n\n"
+         "Flag isolada neste teste: %@",
+        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag];
+    [self showInfoTitle:@"Teste A/B QE-info preparado" message:message];
+}
+
+- (void)restoreQEFlagABTest {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    if (![prefs boolForKey:FBTQESnapshotValidKey]) {
+        [self showInfoTitle:@"Sem snapshot A/B" message:@"Nenhum estado anterior foi salvo por este teste; não alterei o arquivo."];
+        return;
+    }
+
+    FBTMCState legacyState = (FBTMCState)[prefs integerForKey:FBTQESnapshotLegacyStateKey];
+    FBTMCState hashState = (FBTMCState)[prefs integerForKey:FBTQESnapshotBuiltinHashStateKey];
+    [FBTMCOverridesFile setState:legacyState forConfig:FBTQELegacyConfigKey
+                        paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+    [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
+                        paramIdx:4 name:@"use_builtin_query_hash"];
+
+    [prefs removeObjectForKey:FBTQESnapshotValidKey];
+    [prefs removeObjectForKey:FBTQESnapshotLegacyStateKey];
+    [prefs removeObjectForKey:FBTQESnapshotBuiltinHashStateKey];
+    [prefs synchronize];
+
+    [self showInfoTitle:@"Overrides restaurados"
+                message:[NSString stringWithFormat:
+                    @"Estado anterior restaurado em mc_overrides.json.\n"
+                     "mobileconfig_use_legacy_refresh: %@\n"
+                     "use_builtin_query_hash: %@",
+                    FBTMCStateLabel(legacyState), FBTMCStateLabel(hashState)]];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
@@ -310,6 +401,28 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             NSString *path = FBTNativeMobileConfigOverridesFilePath() ?: @"path ainda não capturado";
             UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"Arquivo pronto" : @"Sem path nativo" message:[NSString stringWithFormat:@"%@\n%@", path, FBTNativeMobileConfigStatus() ?: @""] preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+        } else if ([action isEqualToString:@"qe_ab"]) {
+            FBTMCState legacyState = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+            FBTMCState hashState = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Teste A/B QE-info"
+                message:[NSString stringWithFormat:
+                    @"Estado atual gravado no arquivo:\nlegacy refresh: %@\nbuiltin query hash: %@\n\nEscolha uma hipótese. O teste anterior não é combinado com o atual; use Restaurar para voltar ao estado salvo.",
+                    FBTMCStateLabel(legacyState), FBTMCStateLabel(hashState)]
+                preferredStyle:UIAlertControllerStyleActionSheet];
+            [a addAction:[UIAlertAction actionWithTitle:@"A — legacy refresh OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"legacy"];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"B — builtin query hash OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"hash"];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"Restaurar estado anterior" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) {
+                [self restoreQEFlagABTest];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
+            UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+            a.popoverPresentationController.sourceView = cell;
+            a.popoverPresentationController.sourceRect = cell.bounds;
             [self presentViewController:a animated:YES completion:nil];
         } else if ([action isEqualToString:@"clear"]) {
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Limpar overrides?" message:@"Remove overrides MobileConfig e Runtime BOOL salvos. Hooks já instalados continuam chamando orig quando não houver override." preferredStyle:UIAlertControllerStyleActionSheet];
