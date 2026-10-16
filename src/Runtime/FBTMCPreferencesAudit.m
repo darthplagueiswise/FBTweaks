@@ -238,9 +238,7 @@ static NSString *FBTMCAPIDateNow(void) {
     @synchronized (formatter) { return [formatter stringFromDate:[NSDate date]] ?: @""; }
 }
 
-@implementation FBTMCOverridesFile (EffectivePreferencesAudit)
-
-+ (NSDictionary *)auditAgainstEffectivePreferences {
+NSDictionary *FBTMCPreferencesAuditRun(void) {
     NSString *bundleID = FBTMCAPIBundleID();
     NSArray<NSString *> *suiteIDs = FBTMCAPISuiteCandidates(bundleID);
     NSString *overridePath = FBTNativeMobileConfigOverridesFilePath();
@@ -398,5 +396,3 @@ static NSString *FBTMCAPIDateNow(void) {
     }
     return [report copy];
 }
-
-@end
