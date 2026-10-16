@@ -580,6 +580,30 @@ NSString *FBTMobileConfigResponseCaptureLastBodyString(void) {
     [sCaptureLock lock];
     NSString *path = [sLastBodyPath copy];
     [sCaptureLock unlock];
+    if (!path.length) {
+        NSString *base = FBTResponseCaptureBasePath();
+        NSArray<NSString *> *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:base error:nil] ?: @[];
+        NSDate *bestDate = nil;
+        NSString *bestPath = nil;
+        for (NSString *name in names) {
+            if (![name hasPrefix:@"qe_payload_"] ||
+                !([name hasSuffix:@".json"] || [name hasSuffix:@".txt"])) continue;
+            NSString *candidate = [base stringByAppendingPathComponent:name];
+            NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:candidate error:nil];
+            NSDate *date = attrs[NSFileModificationDate];
+            if (date && (!bestDate || [date compare:bestDate] == NSOrderedDescending)) {
+                bestDate = date;
+                bestPath = candidate;
+            }
+        }
+        path = bestPath;
+        if (path.length) {
+            [sCaptureLock lock];
+            sLastBodyPath = path;
+            sLastBodyRelativePath = [@"fbt_fetch_payloads/" stringByAppendingString:path.lastPathComponent];
+            [sCaptureLock unlock];
+        }
+    }
     if (!path.length) return @"";
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data.length) return @"";
@@ -596,8 +620,11 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void) {
         @"last_capture_status": sLastCaptureStatus ?: @"unknown",
         @"last_payload_file": sLastBodyRelativePath ?: @"",
         @"captured_body_count": @(sCapturedBodyCount),
-        @"surface": @"NSURLSession only; native Tigon traffic may not pass through this hook"
+        @"surface": @"NSURLSession callbacks; native Tigon hook status is reported separately"
     };
     [sCaptureLock unlock];
-    return status;
+    NSMutableDictionary *combined = [status mutableCopy];
+    NSDictionary *tigon = FBTMobileConfigTigonCaptureStatus();
+    if (tigon) [combined addEntriesFromDictionary:tigon];
+    return [combined copy];
 }
