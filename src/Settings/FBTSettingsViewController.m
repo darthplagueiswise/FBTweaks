@@ -8,6 +8,7 @@
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
+#import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
@@ -246,6 +247,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         if (sender.isOn) {
+            FBTMobileConfigResponseCaptureInstall();
             FBTInstallMobileConfigDebugUIBootstrap();
             FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
             [self showInfoTitle:@"QE-info diagnostics ativado"
@@ -409,6 +411,45 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             lastError[@"http_status"] ?: @"—",
             lastError[@"message"] ?: lastError[@"alert_message"] ?: lastError[@"alert"] ?: @"sem mensagem"];
     }
+    NSDictionary *bodyStatus = FBTMobileConfigResponseCaptureStatus();
+    [summary appendFormat:@"\nRaw response capture: hook %@ · state %@ · payload %@ · saved bodies %@\n",
+        [bodyStatus[@"hook_installed"] boolValue] ? @"INSTALLED" : @"NOT INSTALLED",
+        bodyStatus[@"last_capture_status"] ?: @"unknown",
+        bodyStatus[@"last_payload_file"] ?: @"none",
+        bodyStatus[@"captured_body_count"] ?: @0];
+    NSDictionary *lastNameDownload = nil;
+    NSDictionary *lastResponseBody = nil;
+    NSDictionary *lastRequest = nil;
+    for (NSDictionary *event in [events.reverseObjectEnumerator allObjects]) {
+        if (!lastNameDownload && ([event[@"event"] isEqualToString:@"name_download_completed"] ||
+                                  [event[@"event"] isEqualToString:@"name_download_started"])) lastNameDownload = event;
+        if (!lastResponseBody && ([event[@"event"] isEqualToString:@"network_response_body_captured"] ||
+                                  [event[@"event"] isEqualToString:@"network_response_body_skipped"])) lastResponseBody = event;
+        if (!lastRequest && [event[@"event"] isEqualToString:@"network_request_candidate"]) lastRequest = event;
+        if (lastNameDownload && lastResponseBody && lastRequest) break;
+    }
+    if (lastNameDownload) {
+        [summary appendFormat:@"Force name download: %@ · force %@ · success %@\n",
+            lastNameDownload[@"event"] ?: @"unknown",
+            lastNameDownload[@"force"] ?: @"—",
+            lastNameDownload[@"download_success"] ?: @"pending"];
+    }
+    if (lastRequest) {
+        [summary appendFormat:@"Request boundary: %@ %@ · query_hash %@ (%@ chars) · one_query_hash %@ (%@ chars)\n",
+            lastRequest[@"request_method"] ?: @"?",
+            [NSString stringWithFormat:@"%@%@", lastRequest[@"request_host"] ?: @"", lastRequest[@"request_path"] ?: @""],
+            lastRequest[@"query_hash_state"] ?: @"missing",
+            lastRequest[@"query_hash_length"] ?: @0,
+            lastRequest[@"one_query_hash_state"] ?: @"missing",
+            lastRequest[@"one_query_hash_length"] ?: @0];
+    }
+    if (lastResponseBody) {
+        [summary appendFormat:@"Last response body: %@ · HTTP %@ · %@ bytes · %@\n",
+            lastResponseBody[@"body_capture_status"] ?: lastResponseBody[@"event"] ?: @"unknown",
+            lastResponseBody[@"http_status"] ?: @"—",
+            lastResponseBody[@"response_bytes"] ?: @0,
+            lastResponseBody[@"payload_file"] ?: @"no file saved"];
+    }
     [summary appendString:@"\nQE-info cache:\n"];
     if (!qce.count) [summary appendString:@"  nenhum store QCE encontrado\n"];
     [qce enumerateObjectsUsingBlock:^(NSDictionary *store, NSUInteger idx, __unused BOOL *stop) {
@@ -429,6 +470,30 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Diagnóstico de fetch" message:summary preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Copiar JSON completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar última resposta bruta" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSString *body = FBTMobileConfigResponseCaptureLastBodyString();
+        if (body.length) {
+            [UIPasteboard generalPasteboard].string = body;
+        } else {
+            FBTLog(@"No captured text response body available; inspect AppGroup/mobileconfig/fbt_fetch_payloads and capture status.");
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Ver última resposta bruta" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSString *body = FBTMobileConfigResponseCaptureLastBodyString();
+        if (!body.length) body = @"Nenhum corpo de resposta textual foi capturado. Veja o estado do hook, o evento network_request_candidate e o arquivo do App Group.";
+        NSString *preview = body.length > 4500
+            ? [[body substringToIndex:4500] stringByAppendingString:@"\n\n[Prévia limitada; use Copiar última resposta bruta para o corpo completo.]"]
+            : body;
+        UIAlertController *detail = [UIAlertController alertControllerWithTitle:@"Última resposta bruta" message:preview preferredStyle:UIAlertControllerStyleAlert];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Copiar corpo completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *copyAction) {
+            NSString *complete = FBTMobileConfigResponseCaptureLastBodyString();
+            if (complete.length) [UIPasteboard generalPasteboard].string = complete;
+        }]];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self presentViewController:detail animated:YES completion:nil];
+        });
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
