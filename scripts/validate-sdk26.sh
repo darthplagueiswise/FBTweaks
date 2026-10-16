@@ -45,6 +45,7 @@ grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/FBTDefaults.m || fail "p
 grep -q "fbt_fetch_diagnostics.json" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "relatorio de fetch nao persiste no AppGroup"
 grep -q "showFetchDiagnostics" src/Settings/FBTSettingsViewController.m || fail "UI sem acesso ao diagnóstico de fetch"
 grep -q "A/B QE-info: isolar refresh/hash" src/Settings/FBTSettingsViewController.m || fail "UI sem teste A/B isolado das flags QE-info"
+grep -q "0 — Baseline (sem alteração)" src/Settings/FBTSettingsViewController.m || fail "teste QE-info sem baseline A/B"
 grep -q "restoreQEFlagABTest" src/Settings/FBTSettingsViewController.m || fail "teste QE-info sem restauração do estado anterior"
 grep -q "legacy_refresh_override_file_state" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "diagnóstico QE-info sem estado gravado das flags suspeitas"
 grep -q "FBTMobileConfigResponseCaptureWriteRawBody" src/Runtime/FBTMobileConfigResponseCapture.m || fail "raw response body capture ausente"
