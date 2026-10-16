@@ -379,6 +379,16 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
                         paramIdx:4 name:@"use_builtin_query_hash"];
 
+    FBTMCState restoredLegacy = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+    FBTMCState restoredHash = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+    if (![FBTMCOverridesFile fileExists] || restoredLegacy != legacyState || restoredHash != hashState) {
+        [self showInfoTitle:@"Restauração não confirmada"
+                    message:[NSString stringWithFormat:@"O estado anterior não foi relido do arquivo. O snapshot foi mantido para tentar novamente.\nPath: %@\nLegacy: %@ · query hash: %@",
+                        [FBTMCOverridesFile path] ?: @"unknown",
+                        FBTMCStateLabel(restoredLegacy), FBTMCStateLabel(restoredHash)]];
+        return;
+    }
+
     [prefs removeObjectForKey:FBTQESnapshotValidKey];
     [prefs removeObjectForKey:FBTQESnapshotLegacyStateKey];
     [prefs removeObjectForKey:FBTQESnapshotBuiltinHashStateKey];
