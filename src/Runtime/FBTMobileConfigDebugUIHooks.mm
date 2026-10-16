@@ -191,7 +191,7 @@ static bool fbt_FBMobileConfigQEInfoFetch(void *manager, void *query,
         @"fetch_result": @(result), @"duration_ms": @((CACurrentMediaTime() - started) * 1000.0),
         @"output_universe_nonempty": @(FBTStdVectorHasElements(universeInfos)),
         @"output_gk_nonempty": @(FBTStdVectorHasElements(gkInfos)),
-        @"metamap_present": @((metaMap != NULL) && (*(const void * const *)metaMap != NULL))
+        @"metamap_argument_present": @(metaMap != NULL)
     });
     return result;
 }
