@@ -95,7 +95,7 @@ static NSString *FBTDiagFilePath(void) {
 }
 
 static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
-    NSSet *allowed = [NSSet setWithArray:@[@"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message"]];
+    NSSet *allowed = [NSSet setWithArray:@[@"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"capture_reason", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface"]];
     NSMutableDictionary *safe = [NSMutableDictionary dictionary];
     for (NSString *key in allowed) {
         id value = details[key];
@@ -222,7 +222,10 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
         [sDiagEvents removeObjectsInRange:NSMakeRange(0, sDiagEvents.count - kFBTDiagEventLimit)];
     }
     BOOL refreshCache = [event isEqualToString:@"capture_started"] ||
-                        [event isEqualToString:@"qe_info_request_returned"];
+                        [event isEqualToString:@"qe_info_request_returned"] ||
+                        [event isEqualToString:@"name_download_completed"] ||
+                        [event isEqualToString:@"network_response_body_captured"] ||
+                        [event isEqualToString:@"network_response_body_skipped"];
     if (!sDiagCacheState || refreshCache) sDiagCacheState = FBTDiagCacheSummary();
     NSDictionary *report = @{ @"schema_version": @2,
                              @"updated_at_utc": FBTDiagISODate([NSDate date]),
