@@ -1,5 +1,6 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMCOverridesFile.h"
 #import "../FBTDefaults.h"
 #import "FBTPrefix.h"
 #import <pthread.h>
@@ -25,6 +26,15 @@ static NSString *FBTDiagRedactText(NSString *input) {
     }
     if (text.length > 500) text = [[text substringToIndex:500] stringByAppendingString:@"…"];
     return text;
+}
+
+static NSString *FBTDiagMCStateLabel(FBTMCState state) {
+    switch (state) {
+        case FBTMCStateOff: return @"OFF";
+        case FBTMCStateOn: return @"ON";
+        case FBTMCStateSys:
+        default: return @"SYS";
+    }
 }
 
 static NSString *FBTDiagISODate(NSDate *date) {
@@ -95,7 +105,7 @@ static NSString *FBTDiagFilePath(void) {
 }
 
 static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
-    NSSet *allowed = [NSSet setWithArray:@[@"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_captured_body_count", @"tigon_context_count"]];
+    NSSet *allowed = [NSSet setWithArray:@[@"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"legacy_refresh_override_file_state", @"builtin_query_hash_override_file_state", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_captured_body_count", @"tigon_context_count"]];
     NSMutableDictionary *safe = [NSMutableDictionary dictionary];
     for (NSString *key in allowed) {
         id value = details[key];
@@ -109,6 +119,18 @@ static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
             value = label;
         }
         if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]]) safe[key] = value;
+    }
+    BOOL annotateQEFlags = [event isEqualToString:@"qe_info_request_started"] ||
+                           [event isEqualToString:@"qe_info_request_returned"] ||
+                           [event isEqualToString:@"name_download_started"] ||
+                           [event isEqualToString:@"name_download_completed"];
+    if (annotateQEFlags) {
+        // These are the tri-state values currently written in mc_overrides.json,
+        // not proof the running binary resolved or consumed either flag.
+        FBTMCState legacyState = [FBTMCOverridesFile stateForConfig:@"84491:mobile_config_internal_settings_features" paramIdx:2];
+        FBTMCState hashState = [FBTMCOverridesFile stateForConfig:@"4626:mobileconfig_session" paramIdx:4];
+        safe[@"legacy_refresh_override_file_state"] = FBTDiagMCStateLabel(legacyState);
+        safe[@"builtin_query_hash_override_file_state"] = FBTDiagMCStateLabel(hashState);
     }
     safe[@"event"] = event ?: @"unknown";
     safe[@"time_utc"] = FBTDiagISODate([NSDate date]);
