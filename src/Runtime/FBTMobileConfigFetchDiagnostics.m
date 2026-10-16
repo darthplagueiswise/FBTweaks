@@ -73,32 +73,60 @@ static NSUInteger FBTDiagStoreScore(NSURL *url) {
 
 static NSURL *FBTDiagAppGroupURL(void) {
     NSString *nativePath = FBTNativeMobileConfigOverridesFilePath();
-    NSURL *nativeContainer = nil;
     if (nativePath.length && [[nativePath.lastPathComponent lowercaseString] isEqualToString:@"mc_overrides.json"]) {
         NSString *mobileConfigDir = [nativePath stringByDeletingLastPathComponent];
         NSString *containerDir = [mobileConfigDir stringByDeletingLastPathComponent];
-        if (containerDir.length) nativeContainer = [NSURL fileURLWithPath:containerDir isDirectory:YES];
+        if (containerDir.length) {
+            // This is the folder that contains sibling "mobileconfig" and
+            // "mobileconfig_qce" stores. If nativePath is under Documents,
+            // keep Documents as the diagnostics base instead of jumping to
+            // the shared-container root.
+            return [NSURL fileURLWithPath:containerDir isDirectory:YES];
+        }
     }
-    NSArray<NSString *> *groups = @[
-        @"group.com.facebook.dogfood.internal",
+
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    NSMutableOrderedSet<NSString *> *groups = [NSMutableOrderedSet orderedSet];
+    if ([bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]) {
+        [groups addObject:@"group.facebook.ota"];
+        [groups addObject:@"group.com.facebook.ota"];
+    } else if ([bundleID.lowercaseString isEqualToString:@"com.facebook.facebook"]) {
+        [groups addObject:@"group.com.facebook.Facebook"];
+        [groups addObject:@"group.facebook.Facebook"];
+    }
+    if (bundleID.length) [groups addObject:[@"group." stringByAppendingString:bundleID]];
+    if ([bundleID hasPrefix:@"com."] && bundleID.length > 4) {
+        [groups addObject:[@"group." stringByAppendingString:[bundleID substringFromIndex:4]]];
+    }
+    [groups addObjectsFromArray:@[
         @"group.com.facebook.Facebook",
+        @"group.facebook.ota",
+        @"group.com.facebook.ota",
+        @"group.com.facebook.dogfood.internal",
         @"group.com.facebook.family"
-    ];
+    ]];
+
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSURL *fallback = nativeContainer;
-    NSURL *best = nil;
-    NSUInteger bestScore = 0;
     for (NSString *group in groups) {
         NSURL *url = [fm containerURLForSecurityApplicationGroupIdentifier:group];
         if (!url.path.length) continue;
-        if (!fallback) fallback = url;
-        NSUInteger score = FBTDiagStoreScore(url);
-        if (score > bestScore) { bestScore = score; best = url; }
+        BOOL hasDocumentsMC = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"Documents/mobileconfig"]];
+        BOOL hasRootMC = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"mobileconfig"]];
+        BOOL hasDocumentsQCE = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"Documents/mobileconfig_qce"]];
+        BOOL hasRootQCE = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"mobileconfig_qce"]];
+        if (hasDocumentsMC || hasDocumentsQCE) {
+            return [url URLByAppendingPathComponent:@"Documents" isDirectory:YES];
+        }
+        if (hasRootMC || hasRootQCE) return url;
     }
-    return best ?: fallback;
+    return nil;
 }
 
 static NSString *FBTDiagFilePath(void) {
+    NSString *nativePath = FBTNativeMobileConfigOverridesFilePath();
+    if (nativePath.length && [[nativePath.lastPathComponent lowercaseString] isEqualToString:@"mc_overrides.json"]) {
+        return [[nativePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"fbt_fetch_diagnostics.json"];
+    }
     NSURL *group = FBTDiagAppGroupURL();
     if (!group.path.length) return nil;
     return [[[group URLByAppendingPathComponent:@"mobileconfig"] URLByAppendingPathComponent:@"fbt_fetch_diagnostics.json"] path];
