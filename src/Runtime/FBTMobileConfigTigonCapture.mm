@@ -324,7 +324,7 @@ static void FBTTigonCaptureBody(void *self, void *uniquePtrArgument) {
                 [body appendData:chunk];
             }
         } @catch (__unused NSException *exception) {
-            [context[@"body"] setLength:0];
+            [(NSMutableData *)context[@"body"] setLength:0];
             context[@"body_capture_status"] = @"iobuf_copy_exception";
         } }
     }
