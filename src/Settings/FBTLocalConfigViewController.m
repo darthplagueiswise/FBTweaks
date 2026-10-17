@@ -95,9 +95,10 @@
     NSDictionary *reading = self.readings[pid];
     NSString *state = fileValue ? [@"Override no arquivo: " stringByAppendingString:fileValue] : @"SYS (sem override no arquivo)";
     if (![reading[@"available"] boolValue]) return [NSString stringWithFormat:@"%@\n%@", state, reading[@"reason"] ?: @"Consultando o leitor nativo…"];
-    return [NSString stringWithFormat:@"%@\nEm uso: %@ · SYS: %@\nOrigem SYS: %@ · Em uso: %@",
+    NSString *systemText = [reading[@"system_available"] boolValue] ? FBTMobileConfigValueText(reading[@"system_value"], type) : @"não confirmado";
+    return [NSString stringWithFormat:@"%@\nEm uso: %@ · SYS: %@\nOrigem SYS: %@ · Em uso: %@\n%@",
         state, FBTMobileConfigValueText(reading[@"effective_value"], type),
-        FBTMobileConfigValueText(reading[@"system_value"], type), reading[@"source"], reading[@"effective_source"]];
+        systemText, reading[@"source"], reading[@"effective_source"], reading[@"source_hint"] ?: @""];
 }
 - (void)shareValues {
     NSMutableArray *parameters = [NSMutableArray array];

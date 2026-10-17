@@ -98,7 +98,7 @@ jobs:
       - name: Test native SYS and effective value inspection
         run: |
           cd main
-          clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/MobileConfigValueReaderTests.m src/Runtime/FBTMobileConfigValueReader.m -o /tmp/fbt-value-tests
+          clang -fobjc-arc -Wno-incomplete-implementation -Wl,-export_dynamic -framework Foundation tests/MobileConfigValueReaderTests.m src/Runtime/FBTMobileConfigValueReader.m -o /tmp/fbt-value-tests
           /tmp/fbt-value-tests
 
       - name: Test compiled descriptor and map validation

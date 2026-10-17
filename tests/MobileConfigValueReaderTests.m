@@ -9,7 +9,11 @@ static NSArray *sContexts;
 static BOOL sForced, sThrow;
 static id sSystemValue;
 static int sUnit = 1;
+static NSInteger sBypassSource = 2;
 static NSUInteger sChecks;
+NSString *NSStringFromFBMobileConfigOptionsValueSource(NSInteger value) {
+    return @{@(-1): @"UNKNOWN_SOURCE", @0: @"SERVER", @1: @"OVERRIDE", @2: @"DEFAULT__SERVER_RETURNED_NULL", @9: @"MCS_CLIENT_OVERRIDE"}[@(value)] ?: @"UNKNOWN_SOURCE";
+}
 NSArray *FBTNativeMobileConfigReaderContexts(void) { return sContexts; }
 NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key) {
     return sForced && !FBTMobileConfigIsInspectingSystemValue() ? @{@"t": @"bool", @"v": @YES} : nil;
@@ -45,7 +49,7 @@ static void VerifyOptions(FBMobileConfigOptions *options) {
     Check(options.noLogging && options.requestSource, @"inspection requests source without exposure logging");
     Check(options.ignore == FBTMobileConfigIsInspectingSystemValue(), @"native bypass and thread-local bypass agree");
     if (sThrow) @throw [NSException exceptionWithName:@"FixtureRead" reason:@"fixture" userInfo:nil];
-    options.valueSource = options.ignore ? 2 : 3;
+    options.valueSource = options.ignore ? sBypassSource : 3;
 }
 @implementation FixtureReader
 - (int)getUnitType { return sUnit; }
@@ -68,6 +72,7 @@ int main(void) { @autoreleasepool {
     NSDictionary *r = Read(@"bool");
     Check([r[@"available"] boolValue] && ![r[@"system_value"] boolValue] && [r[@"effective_value"] boolValue], @"SYS false and active override true remain separate");
     Check([r[@"effective_source"] isEqual:@"Override da tweak"] && [r[@"source_raw"] integerValue] == 2, @"source recorded without claiming overridden value is server");
+    Check([r[@"system_available"] boolValue] && [r[@"source"] hasPrefix:@"DEFAULT"], @"native default stays distinct from a server value");
     Check(!FBTMobileConfigIsInspectingSystemValue(), @"inspection scope restored");
     sForced = NO; sSystemValue = @YES; r = Read(@"bool");
     Check([r[@"system_value"] boolValue] && [r[@"effective_value"] boolValue], @"SYS true observed independently of an override");
@@ -84,6 +89,12 @@ int main(void) { @autoreleasepool {
     Check(![Read(@"bool")[@"available"] boolValue] && !FBTMobileConfigIsInspectingSystemValue(), @"exception restores bypass scope");
     sThrow = NO; sSystemValue = @NO;
     Check([Read(@"bool")[@"available"] boolValue], @"reading recovers after an exception");
+    sBypassSource = 0; r = Read(@"bool");
+    Check([r[@"system_available"] boolValue] && [r[@"source"] isEqual:@"SERVER"], @"server source decoded by native formatter");
+    for (NSNumber *source in @[@(-1), @1, @9]) {
+        sBypassSource = source.integerValue; r = Read(@"bool");
+        Check([r[@"available"] boolValue] && ![r[@"system_available"] boolValue] && r[@"system_value"] == NSNull.null, @"unknown or still-overridden value is not presented as SYS");
+    }
     Check([FBTMobileConfigValueText(@NO, @"bool") isEqual:@"false"], @"false displayed explicitly");
     Check([FBTMobileConfigValueText(@YES, @"bool") isEqual:@"true"], @"true displayed explicitly");
     Check([FBTMobileConfigValueText(@"", @"string") isEqual:@"\"\""], @"empty string differs from missing");

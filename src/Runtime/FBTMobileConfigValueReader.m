@@ -50,6 +50,16 @@ static NSString *FBTNativeSourceName(NSInteger source) {
     if (formatter && source >= -1 && source <= 25) return formatter(source) ?: @"Origem não informada";
     return [NSString stringWithFormat:@"Origem não decodificada (%ld)", (long)source];
 }
+static NSString *FBTSourceHint(NSString *source) {
+    if ([source isEqualToString:@"SERVER"]) return @"Valor de servidor disponível no mecanismo nativo; esta leitura pode usar o cache.";
+    if ([source containsString:@"SCHEMAHASH_MISMATCH"]) return @"O app usou default porque o hash do schema RN não corresponde ao mapa.";
+    if ([source containsString:@"MISSING_SERVER_VALUE"]) return @"O app usou default porque não encontrou um valor de servidor válido para este parâmetro.";
+    if ([source containsString:@"NO_DATA_ON_DISK"]) return @"O app usou default porque não encontrou dados em disco.";
+    if ([source containsString:@"ACCESSED_BEFORE_MC_INIT"]) return @"O app usou default porque MobileConfig ainda não estava inicializado.";
+    if ([source containsString:@"MISMATCH_"] || [source containsString:@"INVALID_"]) return @"O app informou incompatibilidade de descritor, tipo, escopo ou mapa; o valor retornado é fallback.";
+    if ([source hasPrefix:@"DEFAULT"]) return @"O leitor retornou um default/fallback, não um valor confirmado de servidor.";
+    return @"A origem informada não confirma um valor SYS independente de overrides.";
+}
 static id FBTOptions(BOOL system) {
     Class cls = NSClassFromString(@"FBMobileConfigOptions");
     id options = [[cls alloc] init];
@@ -99,6 +109,8 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
         @try { systemValue = FBTRead(selected, selector, key, type, sysOptions); }
         @finally { --sSystemReadDepth; }
         NSInteger source = ((NSInteger (*)(id, SEL))objc_msgSend)(sysOptions, NSSelectorFromString(@"valueSource"));
+        NSString *sourceName = FBTNativeSourceName(source);
+        BOOL systemAvailable = [sourceName isEqualToString:@"SERVER"] || [sourceName hasPrefix:@"DEFAULT"];
         NSDictionary *runtimeOverride = FBTMobileConfigOverrideForKey(key);
         id effective = FBTRead(selected, selector, key, type, effectiveOptions);
         NSInteger effectiveSource = ((NSInteger (*)(id, SEL))objc_msgSend)(effectiveOptions, NSSelectorFromString(@"valueSource"));
@@ -107,8 +119,10 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             @"key_hex": [NSString stringWithFormat:@"0x%016llx", (unsigned long long)key],
             @"unit": @(unit), @"type": type,
             @"descriptor_slot": @(key & 0xffff), @"catalog_slot": parameter[@"slot"] ?: NSNull.null,
-            @"system_value": systemValue ?: NSNull.null, @"effective_value": effective ?: NSNull.null,
-            @"source_raw": @(source), @"source": FBTNativeSourceName(source),
+            @"system_available": @(systemAvailable),
+            @"system_value": systemAvailable ? (systemValue ?: NSNull.null) : NSNull.null,
+            @"observed_bypass_value": systemValue ?: NSNull.null, @"effective_value": effective ?: NSNull.null,
+            @"source_raw": @(source), @"source": sourceName, @"source_hint": FBTSourceHint(sourceName),
             @"effective_source": runtimeOverride ? @"Override da tweak" : FBTNativeSourceName(effectiveSource),
             @"reader": NSStringFromClass([selected class]), @"read_at": @([NSDate date].timeIntervalSince1970)};
     } @catch (NSException *exception) {
