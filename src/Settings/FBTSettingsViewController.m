@@ -1,4 +1,5 @@
 #import "FBTSettingsViewController.h"
+#import "FBTLocalConfigViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
@@ -14,6 +15,8 @@
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
+#include <errno.h>
+#include <math.h>
 
 extern void FBTInstallLiquidGlassHooks(void);
 extern void FBTOpenNativeWhitehatSettings(void);
@@ -179,6 +182,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
         @[
+            @{ @"kind": @"nav", @"title": @"MobileConfig local — todos os mapas", @"subtitle": @"Busca por nome/ID e edição de overrides sem depender de QE-info.", @"dest": @"localconfig" },
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
             @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
             @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
@@ -413,7 +417,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if ([kind isEqualToString:@"nav"]) {
         NSString *dest = item[@"dest"];
         UIViewController *vc = nil;
-        if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        if ([dest isEqualToString:@"localconfig"]) vc = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
+        else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
         else if ([dest hasPrefix:@"feat:"]) vc = [[FBTFeatureParamsViewController alloc] initWithFeatureId:[dest substringFromIndex:5]];
         else if ([dest isEqualToString:@"headline"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = YES; vc = f; }
@@ -625,6 +630,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         bodyStatus[@"captured_body_count"] ?: @0,
         bodyStatus[@"tigon_completed_response_count"] ?: @0,
         bodyStatus[@"tigon_context_count"] ?: @0];
+    [summary appendFormat:@"MobileConfig fetcher direto: %@ · requests %@ · respostas %@ · falhas %@\n",
+        [bodyStatus[@"native_mc_fetcher_installed"] boolValue] ? @"INSTALLED" : (bodyStatus[@"native_mc_fetcher_failure"] ?: @"indisponível"),
+        bodyStatus[@"native_mc_requests"] ?: @0, bodyStatus[@"native_mc_responses"] ?: @0, bodyStatus[@"native_mc_failures"] ?: @0];
+    NSDictionary *nativeHooks = report[@"native_hooks"];
+    [summary appendFormat:@"Hooks QE/nomes disponíveis agora: %@ / %@\nContextos: %@\n", nativeHooks[@"qe_info_hook_available"] ?: @NO,
+        nativeHooks[@"name_download_hook_available"] ?: @NO, nativeHooks[@"contexts"] ?: @{}];
     NSDictionary *lastNameDownload = nil;
     NSDictionary *lastResponseBody = nil;
     NSDictionary *lastRequest = nil;
@@ -634,7 +645,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         if (!lastResponseBody && ([event[@"event"] isEqualToString:@"network_response_body_captured"] ||
                                   [event[@"event"] isEqualToString:@"network_response_body_skipped"] ||
                                   [event[@"event"] isEqualToString:@"tigon_response_body_unavailable"])) lastResponseBody = event;
-        if (!lastRequest && ([event[@"event"] isEqualToString:@"network_request_candidate"] ||
+        if (!lastRequest && ([event[@"event"] isEqualToString:@"native_mc_fetch_started"] ||
+                             [event[@"event"] isEqualToString:@"network_request_candidate"] ||
                              [event[@"event"] isEqualToString:@"tigon_request_started"])) lastRequest = event;
         if (lastNameDownload && lastResponseBody && lastRequest) break;
     }
@@ -769,9 +781,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         [a addAction:[UIAlertAction actionWithTitle:@"Force TRUE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTMobileConfigSetOverride(key, @"bool", @YES); [self reloadSnapshot]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force FALSE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTMobileConfigSetOverride(key, @"bool", @NO); [self reloadSnapshot]; }]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:@"Force int64…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self promptValueForKey:key type:@"int64" title:@"Force int64"]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force double…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self promptValueForKey:key type:@"double" title:@"Force double"]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force string…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self promptValueForKey:key type:@"string" title:@"Force string"]; }]];
+    if (! [type isEqualToString:@"bool"] && [@[@"int64", @"double", @"string"] containsObject:type]) {
+        [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Force %@…", type] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+            [self promptValueForKey:key type:type title:[@"Force " stringByAppendingString:type]];
+        }]];
+    }
     [a addAction:[UIAlertAction actionWithTitle:@"Limpar override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTMobileConfigClearOverride(key); [self reloadSnapshot]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
@@ -786,8 +800,14 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [a addAction:[UIAlertAction actionWithTitle:@"Aplicar" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
         NSString *s = a.textFields.firstObject.text ?: @"";
         id value = s;
-        if ([type isEqualToString:@"int64"]) value = @(FBTParseLongLongString(s));
-        else if ([type isEqualToString:@"double"]) value = @([s doubleValue]);
+        if ([type isEqualToString:@"int64"] || [type isEqualToString:@"double"]) {
+            NSString *trimmed = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            const char *start = trimmed.UTF8String; char *end = NULL; errno = 0;
+            if ([type isEqualToString:@"int64"]) value = @(strtoll(start, &end, 0));
+            else value = @(strtod(start, &end));
+            if (errno == ERANGE || end == start || *end != '\0' ||
+                ([type isEqualToString:@"double"] && !isfinite([value doubleValue]))) return;
+        }
         FBTMobileConfigSetOverride(key, type, value);
         [self reloadSnapshot];
     }]];

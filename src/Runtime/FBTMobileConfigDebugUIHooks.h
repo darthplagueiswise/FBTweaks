@@ -1,5 +1,6 @@
 #ifndef FBT_MOBILECONFIG_DEBUG_UI_HOOKS_H
 #define FBT_MOBILECONFIG_DEBUG_UI_HOOKS_H
+#import <Foundation/Foundation.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -7,6 +8,7 @@ extern "C" {
 
 void FBTInstallMobileConfigDebugUIBootstrap(void);
 void FBTInstallMobileConfigDebugUIHooks(void);
+NSDictionary *FBTMobileConfigDebugUIHookStatus(void);
 
 #ifdef __cplusplus
 }

@@ -87,6 +87,12 @@ def objc_methods(binary, raw, wanted):
 main, main_raw = load('Facebook')
 shared, shared_raw = load('Frameworks/FBSharedFramework.framework/FBSharedFramework')
 rare, rare_raw = load('Frameworks/FBRarelyUsedFramework.framework/FBRarelyUsedFramework')
+section = next(s for s in shared.sections if s.virtual_address <= 0x8161f88 < s.virtual_address+s.size)
+slot_offset = section.offset + 0x8161f88 - section.virtual_address
+slot_value = struct.unpack_from('<Q', shared_raw, slot_offset)[0] & 0xfffffffff
+check('native_fetcher_data_slot', section.name == '__const' and section.segment_name == '__DATA_CONST' and slot_value == 0xa17f70)
+check('shared_uuid', bytes(shared.uuid.uuid).hex() == '4c4c44fe55553144a1c26ccae4ed2597')
+check('native_fetcher_callback_rtti', b'asyncFetchERKNS_12basic_string' in shared_raw and b'functionIFvbSB_EEE' in shared_raw)
 expected_uuid = bytes([76,76,68,170,85,85,49,68,161,142,1,71,65,237,25,11])
 check('main_uuid', bytes(main.uuid.uuid) == expected_uuid, uuid=bytes(main.uuid.uuid).hex())
 for address, name in [(0x101010370, '10onResponse'), (0x101010378, '6onBody')]:
@@ -103,7 +109,7 @@ for relative in ['src/Runtime/FBTNativeMobileConfigOverrides.mm', 'src/Runtime/F
         check('dlsym_export', '_' + name in exports, symbol=name)
 main_classes = objc_methods(main, main_raw, {'RCDMobileConfigParams'})
 shared_classes = objc_methods(shared, shared_raw, {'FBNavigationInfo', 'FBBugReportConfiguration', 'FBTabBarViewController', 'FBMobileConfigContextManager'})
-rare_classes = objc_methods(rare, rare_raw, {'_TtC31FBSettingsMenuItemHandlerPlugin25FBSettingsMenuItemHandler', 'FBWhitehatSettingsMenuItemHandler'})
+rare_classes = objc_methods(rare, rare_raw, {'_TtC31FBSettingsMenuItemHandlerPlugin25FBSettingsMenuItemHandler', 'FBWhitehatSettingsMenuItemHandler', 'FBMobileConfigDebugViewController'})
 expected = [
     (shared_classes, 'FBMobileConfigContextManager', 'getCurrentManager', '{shared_ptr<mobileconfig::FBMobileConfigManager>=^{FBMobileConfigManager}^{__shared_weak_count}}16@0:8'),
     (main_classes, 'RCDMobileConfigParams', 'initWithClassesString:trackNSObjectBaseClass:isEventBasedTrigger:maxCycleLen:ignoreAppleClassesWithPrefix:peopleSampling:isEmployee:isEnabledProduction:shouldUseSwiftABITraversal:', '@68@0:8@16B24B28q32@40q48B56B60B64'),

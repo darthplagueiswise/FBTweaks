@@ -1,4 +1,5 @@
 #import "FBTFlagCatalog.h"
+#import "FBTLocalConfigCatalog.h"
 #include <stdlib.h>
 
 @implementation FBTFlagCatalog
@@ -63,22 +64,9 @@ static uint64_t FBTFlagUInt64FromNumber(NSNumber *n) {
 }
 
 + (NSDictionary *)bestMatchForMobileConfigKey:(uint64_t)key {
-    if (!key) return nil;
-    uint64_t low48 = key & 0x0000FFFFFFFFFFFFULL;
-    uint64_t low32 = key & 0xFFFFFFFFULL;
-    for (NSDictionary *f in [self allFlags]) {
-        NSNumber *sidN = f[@"sid"];
-        NSNumber *pidN = f[@"pid"];
-        if (![sidN isKindOfClass:[NSNumber class]]) continue;
-        uint64_t sid = FBTFlagUInt64FromNumber(sidN);
-        if (sid == key || sid == low48 || sid == low32) return f;
-        // Fallback fraco: alguns dumps antigos expõem só paramId. Não usamos
-        // para aplicar override, só para rotular a linha capturada.
-        if ([pidN isKindOfClass:[NSNumber class]] && FBTFlagUInt64FromNumber(pidN) == low32) {
-            return f;
-        }
-    }
-    return nil;
+    // Match unit, native config ordinal, parameter ID, type and slot together.
+    // RN slotId alone is not a native packed specifier and must not label it.
+    return [FBTLocalConfigCatalog labelForPackedKey:key];
 }
 
 + (NSArray<NSDictionary *> *)queryConfigs {

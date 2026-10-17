@@ -4,6 +4,7 @@
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTMobileConfigDebugUIHooks.h"
+#import "../Settings/FBTLocalConfigViewController.h"
 #import "FBTMobileConfigResponseCapture.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
@@ -70,6 +71,7 @@ static FBTQEInfoFetchOrig orig_FBMobileConfigQEInfoFetch = NULL;
 static FBTQEInfoRefreshNamesOrig orig_FBMobileConfigQEInfoRefreshNames = NULL;
 static FBTNSErrorInitOrig orig_NSError_initWithDomain = NULL;
 static char kFBTMCSelectionKey;
+static NSDictionary *sLatestNativeUIContexts;
 
 @interface FBTMobileConfigViewController : UITableViewController
 @end
@@ -299,8 +301,9 @@ static void FBTCallOriginalSelection(id controller, SEL selector, FBTMCSelection
 }
 
 static void FBTOpenLocalMobileConfigFallback(UIViewController *presenter) {
-    FBTMobileConfigViewController *local =
-        [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    FBTMCSelection *selection = objc_getAssociatedObject(presenter, &kFBTMCSelectionKey);
+    NSString *query = selection ? FBTStringFromStdString(selection->_configName) : @"";
+    FBTLocalConfigViewController *local = [[FBTLocalConfigViewController alloc] initWithSearchQuery:query];
     if (!local) return;
 
     if (presenter.navigationController) {
@@ -315,6 +318,10 @@ static void FBTOpenLocalMobileConfigFallback(UIViewController *presenter) {
                                                      target:nav
                                                      action:@selector(fbt_closeMobileConfigFallback)];
     [presenter presentViewController:nav animated:YES completion:nil];
+}
+
+static void FBTOpenNativeLocalCatalog(id controller, SEL selector) {
+    FBTOpenLocalMobileConfigFallback(controller);
 }
 
 static BOOL FBTIsTransientParamInfoAlert(UIViewController *controller) {
@@ -335,11 +342,60 @@ static void FBTAddLocalFallbackAction(UIAlertController *alert, UIViewController
     }]];
 }
 
+// Capture the managers already owned by the native UI without enabling readers.
+// The six-object struct is present in the supplied initializer's ObjC encoding.
+static void FBTCaptureNativeUIManagers(id controller) {
+    for (Class cls = [controller class]; cls && cls != [UIViewController class]; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Ivar *ivars = class_copyIvarList(cls, &count);
+        for (unsigned int i = 0; i < count; ++i) {
+            const char *type = ivar_getTypeEncoding(ivars[i]);
+            if (!type) continue;
+            NSUInteger encodedSize = 0;
+            const char *structPrefix = "{_FBMobileConfigContextManagers=";
+            BOOL managersStruct = strcmp(ivar_getName(ivars[i]), "_contextManagers") == 0 &&
+                strncmp(type, structPrefix, strlen(structPrefix)) == 0;
+            if (managersStruct) NSGetSizeAndAlignment(type, &encodedSize, NULL);
+            if (managersStruct && encodedSize == 6 * sizeof(void *)) {
+                ptrdiff_t offset = ivar_getOffset(ivars[i]);
+                if (offset < 0 || (size_t)offset + 6 * sizeof(void *) > class_getInstanceSize([controller class])) continue;
+                __unsafe_unretained id managers[6] = {};
+                memcpy((void *)managers, (const char *)(__bridge const void *)controller + offset, sizeof(managers));
+                NSMutableDictionary *status = [NSMutableDictionary dictionary];
+                NSArray *labels = @[@"sessionless", @"session", @"admin_id", @"ad_account_id", @"page_id", @"wearable_owner_id"];
+                for (unsigned int j = 0; j < 6; ++j) {
+                    id manager = managers[j];
+                    FBTNativeMobileConfigRegisterContext(manager);
+                    FBTNativeMobileConfigRegisterOverrideObject(manager);
+                    Method valid = manager ? class_getInstanceMethod([manager class], sel_registerName("hasValidManager")) : NULL;
+                    BOOL ready = valid && strcmp(method_getTypeEncoding(valid), "B16@0:8") == 0 &&
+                        ((BOOL (*)(id, SEL))objc_msgSend)(manager, sel_registerName("hasValidManager"));
+                    status[labels[j]] = @{@"context_present": @(manager != nil), @"manager_ready": @(ready)};
+                }
+                @synchronized([FBTMCSelection class]) { sLatestNativeUIContexts = [status copy]; }
+            } else if (type[0] == '@' && strstr(type, "MobileConfig") && strstr(type, "Manager")) {
+                id manager = object_getIvar(controller, ivars[i]);
+                FBTNativeMobileConfigRegisterContext(manager);
+                FBTNativeMobileConfigRegisterOverrideObject(manager);
+            }
+        }
+        free(ivars);
+    }
+}
+
 static void fbt_FBMobileConfigDebug_viewDidLoad(id self, SEL _cmd) {
+    FBTCaptureNativeUIManagers(self);
     FBTMobileConfigDebugWarmup();
     if (orig_FBMobileConfigDebug_viewDidLoad) {
         orig_FBMobileConfigDebug_viewDidLoad(self, _cmd);
     }
+    UIViewController *controller = self;
+    NSMutableArray *items = [controller.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
+    UIBarButtonItem *local = [[UIBarButtonItem alloc] initWithTitle:@"Mapa local" style:UIBarButtonItemStylePlain
+        target:controller action:sel_registerName("fbt_openLocalConfigCatalog")];
+    local.accessibilityIdentifier = @"fbtweak.mobileconfig.local";
+    [items addObject:local];
+    controller.navigationItem.rightBarButtonItems = items;
 }
 
 static void fbt_FBMobileConfigDebug_selectParam(id self,
@@ -349,6 +405,7 @@ static void fbt_FBMobileConfigDebug_selectParam(id self,
                                                  const std::string &configName,
                                                  long long backendType,
                                                  NSString *backendName) {
+    FBTCaptureNativeUIManagers(self);
     FBTMobileConfigDebugWarmup();
 
     FBTMCSelection *selection = [[FBTMCSelection alloc] initWithParam:param
@@ -429,10 +486,7 @@ static void fbt_FBMobileConfigDebug_present(id self,
 
         // Preserve the native second failure and add a local path that does not
         // depend on the employee-only QE names/info endpoint.
-        if (warmupEnabled) {
-            FBTAddLocalFallbackAction((UIAlertController *)controller,
-                                      (UIViewController *)self);
-        }
+        FBTAddLocalFallbackAction((UIAlertController *)controller, (UIViewController *)self);
     }
 
     if (orig_FBMobileConfigDebug_present) {
@@ -452,6 +506,7 @@ void FBTInstallMobileConfigDebugUIHooks(void) {
     if (!cls) return;
 
     @synchronized(cls) {
+        class_addMethod(cls, sel_registerName("fbt_openLocalConfigCatalog"), (IMP)FBTOpenNativeLocalCatalog, "v@:");
         SEL viewDidLoadSel = sel_registerName("viewDidLoad");
         if (!orig_FBMobileConfigDebug_viewDidLoad &&
             FBTMCUIEncodingEquals(cls, viewDidLoadSel, "v16@0:8")) {
@@ -507,4 +562,14 @@ void FBTInstallMobileConfigDebugUIBootstrap(void) {
             FBTInstallMobileConfigDebugUIHooks();
         }
     }];
+}
+
+NSDictionary *FBTMobileConfigDebugUIHookStatus(void) {
+    NSDictionary *contexts;
+    @synchronized([FBTMCSelection class]) { contexts = [sLatestNativeUIContexts copy] ?: @{}; }
+    return @{@"qe_info_hook_available": @(orig_FBMobileConfigQEInfoFetch != NULL),
+        @"name_download_hook_available": @(orig_FBMobileConfigQEInfoRefreshNames != NULL),
+        @"selection_hook_available": @(orig_FBMobileConfigDebug_selectParam != NULL),
+        @"error_metadata_hook_available": @(orig_NSError_initWithDomain != NULL),
+        @"contexts": contexts};
 }

@@ -10,6 +10,8 @@ extern "C" {
 // Request headers, authorization values and request bodies are never persisted.
 void FBTMobileConfigResponseCaptureInstall(void);
 void FBTMobileConfigResponseCaptureInstallTigon(void);
+void FBTMobileConfigFetcherCaptureInstall(void);
+NSDictionary *FBTMobileConfigFetcherCaptureStatus(void);
 NSDictionary *FBTMobileConfigTigonCaptureStatus(void);
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void);
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *host, NSString *path, NSString *reason);

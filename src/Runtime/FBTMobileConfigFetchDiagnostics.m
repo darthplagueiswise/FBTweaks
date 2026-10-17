@@ -3,6 +3,8 @@
 #import "FBTMobileConfigRuntime.h"
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMCOverridesFile.h"
+#import "FBTMobileConfigDebugUIHooks.h"
+#import "FBTFlagCatalog.h"
 #import "../FBTDefaults.h"
 #import "FBTPrefix.h"
 #import <pthread.h>
@@ -10,7 +12,8 @@
 static pthread_mutex_t sDiagLock = PTHREAD_MUTEX_INITIALIZER;
 static NSMutableArray<NSDictionary *> *sDiagEvents;
 static NSDictionary *sDiagCacheState;
-static const NSUInteger kFBTDiagEventLimit = 40;
+static NSMutableDictionary *sDiagInstallStates;
+static const NSUInteger kFBTDiagEventLimit = 256;
 
 static NSString *FBTDiagRedactText(NSString *input) {
     if (![input isKindOfClass:[NSString class]] || !input.length) return @"";
@@ -135,7 +138,7 @@ static NSString *FBTDiagFilePath(void) {
 }
 
 static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
-    NSSet *allowed = [NSSet setWithArray:@[@"bool_reader_available", @"int64_reader_available", @"double_reader_available", @"string_reader_available", @"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"legacy_refresh_override_file_state", @"builtin_query_hash_override_file_state", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_completed_response_count", @"tigon_context_count"]];
+    NSSet *allowed = [NSSet setWithArray:@[@"request_id", @"request_param_count", @"account_argument_present", @"native_transport_success", @"bool_reader_available", @"int64_reader_available", @"double_reader_available", @"string_reader_available", @"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"legacy_refresh_override_file_state", @"builtin_query_hash_override_file_state", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_completed_response_count", @"tigon_context_count"]];
     NSMutableDictionary *safe = [NSMutableDictionary dictionary];
     for (NSString *key in allowed) {
         id value = details[key];
@@ -259,6 +262,20 @@ static NSDictionary *FBTDiagCacheSummary(void) {
              @"response_dumps": dumps[@"response_dumps"] ?: @[]};
 }
 
+static NSDictionary *FBTDiagSessionSettings(void) {
+    NSMutableDictionary *settings = [NSMutableDictionary dictionary];
+    for (NSString *key in @[FBTKeyMasterEnabled, FBTKeyMobileConfigRuntimeEnabled,
+            FBTKeyMobileConfigNativeUIWarmupEnabled, FBTKeyMobileConfigCaptureEnabled,
+            FBTKeyMobileConfigOverridesEnabled, FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        settings[key] = @([[NSUserDefaults standardUserDefaults] boolForKey:key]);
+    }
+    NSURL *info = [FBTFlagCatalog bundleURLForResource:@"FBTBuildInfo" extension:@"json"];
+    NSData *data = info ? [NSData dataWithContentsOfURL:info] : nil;
+    id build = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    if ([build isKindOfClass:[NSDictionary class]]) settings[@"build"] = build;
+    return settings;
+}
+
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSDictionary *safeEvent = FBTDiagSafeEvent(event, details ?: @{});
@@ -268,6 +285,17 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
         NSArray *events = [existing[@"events"] isKindOfClass:[NSArray class]] ? existing[@"events"] : @[];
         sDiagEvents = [events mutableCopy];
         sDiagCacheState = [existing[@"cache_state"] isKindOfClass:[NSDictionary class]] ? existing[@"cache_state"] : nil;
+    }
+    BOOL installEvent = [event hasSuffix:@"_hook"] || [event hasSuffix:@"_hooks"];
+    if (installEvent) {
+        NSMutableDictionary *state = [safeEvent mutableCopy];
+        [state removeObjectForKey:@"time_utc"];
+        if (!sDiagInstallStates) sDiagInstallStates = [NSMutableDictionary dictionary];
+        if ([sDiagInstallStates[event] isEqual:state]) {
+            pthread_mutex_unlock(&sDiagLock);
+            return;
+        }
+        sDiagInstallStates[event] = [state copy];
     }
     [sDiagEvents addObject:safeEvent];
     if (sDiagEvents.count > kFBTDiagEventLimit) {
@@ -279,13 +307,15 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
                         [event isEqualToString:@"network_response_body_captured"] ||
                         [event isEqualToString:@"network_response_body_skipped"];
     if (!sDiagCacheState || refreshCache) sDiagCacheState = FBTDiagCacheSummary();
-    NSDictionary *report = @{ @"schema_version": @2,
+    NSDictionary *report = @{ @"schema_version": @3,
                              @"updated_at_utc": FBTDiagISODate([NSDate date]),
                              @"events": [sDiagEvents copy],
                              @"capture_enabled": @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] && ![event isEqualToString:@"capture_paused"]),
                              @"cache_state": sDiagCacheState ?: @{},
                              @"runtime": FBTMobileConfigRuntimeStatus(),
-                             @"transport": FBTMobileConfigResponseCaptureStatus() };
+                             @"transport": FBTMobileConfigResponseCaptureStatus(),
+                             @"native_hooks": FBTMobileConfigDebugUIHookStatus(),
+                             @"session_settings": FBTDiagSessionSettings() };
     NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     NSString *path = FBTDiagFilePath();
     if (path.length && json.length) {
@@ -306,6 +336,9 @@ NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void) {
     report[@"events"] = events;
     report[@"capture_enabled"] = @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]);
     report[@"cache_state"] = FBTDiagCacheSummary();
+    report[@"schema_version"] = @3;
+    report[@"native_hooks"] = FBTMobileConfigDebugUIHookStatus();
+    report[@"session_settings"] = FBTDiagSessionSettings();
     report[@"runtime"] = FBTMobileConfigRuntimeStatus();
     report[@"transport"] = FBTMobileConfigResponseCaptureStatus();
     report[@"updated_at_utc"] = FBTDiagISODate([NSDate date]);

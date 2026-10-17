@@ -455,6 +455,7 @@ void FBTMobileConfigResponseCaptureInstall(void) {
     });
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     FBTMobileConfigResponseCaptureInstallTigon();
+    FBTMobileConfigFetcherCaptureInstall();
     Class sessionClass = objc_getClass("NSURLSession");
     SEL selector = @selector(dataTaskWithRequest:completionHandler:);
     if (!sessionClass || !selector) {
@@ -552,5 +553,6 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void) {
     NSMutableDictionary *combined = [status mutableCopy];
     NSDictionary *tigon = FBTMobileConfigTigonCaptureStatus();
     if (tigon) [combined addEntriesFromDictionary:tigon];
+    [combined addEntriesFromDictionary:FBTMobileConfigFetcherCaptureStatus()];
     return [combined copy];
 }

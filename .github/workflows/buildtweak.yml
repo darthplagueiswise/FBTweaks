@@ -71,6 +71,12 @@ jobs:
         env:
           THEOS: ${{ github.workspace }}/theos
 
+      - name: Test override file preservation
+        run: |
+          cd main
+          clang -fobjc-arc -framework Foundation tests/MCOverridesFileTests.m src/Runtime/FBTMCOverridesFile.m -o /tmp/fbt-mc-file-tests
+          /tmp/fbt-mc-file-tests
+
       - name: Build rootless
         run: |
           cd main

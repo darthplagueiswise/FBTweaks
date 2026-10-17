@@ -1,5 +1,6 @@
 #import "FBTMobileConfigRuntime.h"
 #import "FBTFlagCatalog.h"
+#import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "../FBTDefaults.h"
@@ -98,6 +99,12 @@ static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSS
             sSeen[ks] = entry;
         }
         NSUInteger c = [entry[@"count"] unsignedIntegerValue];
+        if (flag) {
+            entry[@"config"] = flag[@"c"] ?: @"";
+            entry[@"param"] = flag[@"p"] ?: @"";
+            entry[@"staticType"] = flag[@"t"] ?: @"";
+            entry[@"slotId"] = flag[@"sid"] ?: @0;
+        }
         entry[@"count"] = @(c + 1);
         entry[@"type"] = type ?: entry[@"type"] ?: @"?";
         entry[@"default"] = defaultDesc ?: @"";
@@ -282,6 +289,7 @@ static BOOL FBTMCHookDirect(const char *name, void *replacement, void **orig) {
 void FBTInstallMobileConfigRuntime(void) {
     if (sInstalled) return;
     sInstalled = YES;
+    [FBTLocalConfigCatalog prepare];
     FBTMobileConfigReloadPrefs();
     FBTInstallNativeMobileConfigContextCapture();
 

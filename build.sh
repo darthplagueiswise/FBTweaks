@@ -60,6 +60,14 @@ case "$MODE" in
       make clean || true
     fi
 
+    python3 - <<'PYINFO'
+import json, os, subprocess
+from pathlib import Path
+info = {"source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        "run_number": os.environ.get("GITHUB_RUN_NUMBER", "local")}
+Path("layout/Library/Application Support/FBTweak.bundle/FBTBuildInfo.json").write_text(json.dumps(info))
+PYINFO
+
     echo "[FBTweak] make FINALPACKAGE=1 package (rootless, SDK 26.2)"
     make FINALPACKAGE=1 package \
       THEOS_PACKAGE_SCHEME=rootless \
