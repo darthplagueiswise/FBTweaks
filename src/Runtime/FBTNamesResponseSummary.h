@@ -7,6 +7,8 @@ extern "C" {
 NSData *FBTNamesDecodeResponse(NSData *data, NSString **status);
 NSDictionary *FBTNamesResponseSummary(NSData *data);
 NSString *FBTNamesRedactMessage(NSString *message);
+// Evidence-based UI classification. Code 100 alone is not an employee error.
+NSDictionary *FBTNamesDiagnosticAdvice(NSDictionary *event);
 #ifdef __cplusplus
 }
 #endif

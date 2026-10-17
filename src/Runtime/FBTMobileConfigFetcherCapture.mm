@@ -146,10 +146,14 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             }
             if (observation && response[@"http_status"]) observation->httpStatus.store([response[@"http_status"] intValue]);
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_completed", response);
-            if (success && body.size() <= 2 * 1024 * 1024) {
+            // The terminal observer already persisted/diagnosed these exact bytes.
+            // Avoid duplicate files and an artificial HTTP=0 event after HTTP=200.
+            BOOL capturedAtTerminal = [nativeResponse[@"response_body_bytes"] unsignedIntegerValue] > 0 &&
+                [nativeResponse[@"native_tigon_correlation"] hasPrefix:@"native_mc_completion_inside_simple_"];
+            if (success && !capturedAtTerminal && body.size() <= 2 * 1024 * 1024) {
                 NSData *data = [NSData dataWithBytes:body.data() length:body.size()];
                 FBTMobileConfigResponseCaptureWriteRawBody(data, @"", @"", requestMethod, response,
-                    requestLabel, 0, @"", @"FBMobileConfigTigonFetcher");
+                    requestLabel, [response[@"http_status"] integerValue], @"", @"FBMobileConfigTigonFetcher");
             }
         } @catch (__unused NSException *exception) {
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_capture_exception", @{});

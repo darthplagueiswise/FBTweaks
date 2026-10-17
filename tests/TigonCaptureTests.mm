@@ -67,6 +67,8 @@ static void CompletionFromNativeError(void *, const void *, void *summary) {
     Check(summary == sExpectedSummary, @"onError summary forwarded unchanged");
     sDeferredCompletion(false, sNativeBody);
 }
+static const std::string sSuccessBody = "{\"id_to_names\":[\"1:test:0:flag\"]}";
+static void SuccessFromNativeEOM(void *, void *) { sDeferredCompletion(true, sSuccessBody); }
 int main(void) { @autoreleasepool {
     sSaved = [NSMutableArray array]; sEvents = [NSMutableArray array];
     sTigonCaptureLock = [NSLock new]; sTigonCapturedRequests = [NSMutableDictionary dictionary];
@@ -176,6 +178,17 @@ int main(void) { @autoreleasepool {
     // Broken null-ended chains must not be accepted as complete bodies.
     first.length = 0; first.next = nullptr;
     Check(FBTCopyIOBufChain(&first, &tooLarge, &invalid) == nil && invalid, @"null-ended IOBuf chain rejected");
+    before = sSaved.count;
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params,
+        [](bool ok, const std::string &body) { Check(ok && body == sSuccessBody, @"successful native completion forwarded unchanged"); }, "", 0);
+    memset(nativeState, 0, sizeof(nativeState));
+    uint16_t okStatus = 200; memcpy(nativeState + 0x48, &okStatus, sizeof(okStatus));
+    sExpectedResponse = &okStatus; FBTSimpleOnResponse(nativeState, &okStatus);
+    first.length = sSuccessBody.size(); first.data = (const uint8_t *)sSuccessBody.data(); first.next = &first;
+    head = &first; sExpectedBodyArgument = &head; FBTSimpleOnBody(nativeState, &head);
+    sSimpleEOM = SuccessFromNativeEOM; FBTSimpleOnEOM(nativeState, &summary); sDeferredCompletion = nullptr;
+    Check(sSaved.count == before + 1 && [sSaved.lastObject[@"status"] intValue] == 200,
+        @"successful response saved once with HTTP 200 instead of a duplicate HTTP 0");
     sEnabled = NO;
     Check(FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO).count == 0, @"logging off disables native correlation");
     NSLog(@"PASS: HTTP error body/status, move ownership, callback forwarding, endpoint filter, logging-off and copy limits");

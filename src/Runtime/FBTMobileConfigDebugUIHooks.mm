@@ -4,6 +4,8 @@
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTMobileConfigDebugUIHooks.h"
+#import "FBTNamesResponseSummary.h"
+#import "../Settings/FBTNamesDiagnosticsViewController.h"
 #import "../Settings/FBTLocalConfigViewController.h"
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMobileConfigQueryContext.h"
@@ -340,6 +342,54 @@ static void FBTOpenNativeLocalCatalog(id controller, SEL selector) {
     FBTOpenLocalMobileConfigFallback(controller);
 }
 
+// Add a route to the in-app diagnostics while preserving native actions.
+static void FBTAddNamesDiagnosticsAction(UIAlertController *alert) {
+    for (UIAlertAction *action in alert.actions) if ([action.title isEqual:@"Diagnóstico detalhado"]) return;
+    __weak UIAlertController *weakAlert = alert;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Diagnóstico detalhado" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        UIViewController *presenter = weakAlert.presentingViewController;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (presenter.presentedViewController == weakAlert && weakAlert) {
+                [presenter dismissViewControllerAnimated:YES completion:^{ FBTPresentNamesDiagnostics(presenter); }];
+            } else FBTPresentNamesDiagnostics(presenter);
+        });
+    }]];
+}
+
+typedef UIAlertController *(*FBTNamesAlertFactoryFn)(id, SEL, NSString *, NSString *, UIAlertControllerStyle);
+static FBTNamesAlertFactoryFn sOriginalNamesAlertFactory;
+static UIAlertController *FBTNamesAlertFactory(id cls, SEL selector, NSString *title, NSString *message, UIAlertControllerStyle style) {
+    UIAlertController *alert = sOriginalNamesAlertFactory(cls, selector, title, message, style);
+    if (![FBTDefaults boolForKey:FBTKeyMasterEnabled] ||
+        [message rangeOfString:@"Failed to download names. Please try again."].location == NSNotFound || !message.length) return alert;
+    NSDictionary *snapshot = FBTMobileConfigFetchDiagnosticsSnapshot();
+    NSDictionary *latest = nil;
+    for (NSDictionary *event in [snapshot[@"events"] reverseObjectEnumerator]) {
+        if ([event[@"process_session_id"] isEqual:snapshot[@"process_session_id"]] &&
+            [event[@"event"] isEqual:@"names_transport_diagnostic"] &&
+            [event[@"capture_reason"] isEqual:@"mobileconfig_qe_info"]) { latest = event; break; }
+    }
+    alert.title = @"Download de nomes não concluído";
+    NSDictionary *advice = FBTNamesDiagnosticAdvice(latest ?: @{});
+    NSString *extra = @"Abra o diagnóstico para conferir a resposta do servidor. O mapa local continua disponível.";
+    if ([advice[@"classification"] isEqual:@"server_eligibility"]) {
+        extra = [NSString stringWithFormat:@"Última rejeição capturada (pedido %@):\n%@\n\n%@", latest[@"request_id"] ?: @"?", latest[@"server_error_message"] ?: @"", advice[@"explanation"]];
+    }
+    alert.message = [message stringByAppendingFormat:@"\n\n%@", extra];
+    FBTAddNamesDiagnosticsAction(alert);
+    return alert;
+}
+static void FBTInstallNamesAlertReporting(void) {
+    @synchronized(UIAlertController.class) {
+        if (sOriginalNamesAlertFactory) return;
+        Class meta = object_getClass(UIAlertController.class);
+        SEL selector = @selector(alertControllerWithTitle:message:preferredStyle:);
+        Method method = class_getInstanceMethod(meta, selector);
+        if (method && method_getNumberOfArguments(method) == 5)
+            MSHookMessageEx(meta, selector, (IMP)FBTNamesAlertFactory, (IMP *)&sOriginalNamesAlertFactory);
+    }
+}
+
 static BOOL FBTIsTransientParamInfoAlert(UIViewController *controller) {
     if (![controller isKindOfClass:[UIAlertController class]]) return NO;
     NSString *title = ((UIAlertController *)controller).title ?: @"";
@@ -485,6 +535,7 @@ static void fbt_FBMobileConfigDebug_present(id self,
                                              BOOL animated,
                                              void (^completion)(void)) {
     if (FBTIsTransientParamInfoAlert(controller)) {
+        FBTAddNamesDiagnosticsAction((UIAlertController *)controller);
         FBTMCSelection *selection = objc_getAssociatedObject(self, &kFBTMCSelectionKey);
         FBTMobileConfigQueryContext *queryContext = [FBTMobileConfigQueryContext contextForOwner:self];
         FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_failure_alert", @{
@@ -543,6 +594,7 @@ void FBTInstallMobileConfigDebugUIHooks(void) {
     FBTMobileConfigResponseCaptureInstall();
     FBTInstallQEInfoFetchImportHook();
     FBTInstallQEInfoRefreshNamesImportHook();
+    FBTInstallNamesAlertReporting();
 
     Class cls = objc_getClass("FBMobileConfigDebugViewController");
     if (!cls) return;
@@ -614,10 +666,11 @@ void FBTInstallMobileConfigDebugUIBootstrap(void) {
 NSDictionary *FBTMobileConfigDebugUIHookStatus(void) {
     NSDictionary *contexts;
     @synchronized([FBTMCSelection class]) { contexts = [sLatestNativeUIContexts copy] ?: @{}; }
-    return @{@"qe_info_hook_available": @(orig_FBMobileConfigQEInfoFetch != NULL),
+    return @{@"native_names_alert_reporting_available": @(sOriginalNamesAlertFactory != NULL), @"qe_info_hook_available": @(orig_FBMobileConfigQEInfoFetch != NULL),
         @"name_download_hook_available": @(orig_FBMobileConfigQEInfoRefreshNames != NULL),
         @"selection_hook_available": @(orig_FBMobileConfigDebug_selectParam != NULL),
         @"item_selection_hook_available": @(orig_FBMobileConfigDebug_selectItem != NULL),
         @"error_metadata_hook_available": @(orig_NSError_initWithDomain != NULL),
         @"contexts": contexts};
 }
+

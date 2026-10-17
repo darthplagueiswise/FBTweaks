@@ -33,5 +33,12 @@ int main(void) { @autoreleasepool {
     Check(FBTNamesDecodeResponse([gzip subdataWithRange:NSMakeRange(0, gzip.length-2)], &state) == nil && [state isEqual:@"gzip_decode_failed"], @"truncated gzip rejected");
     NSData *bomb = Gzip([NSMutableData dataWithLength:2 * 1024 * 1024 + 1]);
     Check(FBTNamesDecodeResponse(bomb, &state) == nil && [state isEqual:@"gzip_expanded_over_2mb_limit"], @"decompression limit enforced");
+    NSDictionary *advice = FBTNamesDiagnosticAdvice(@{@"http_status": @400, @"server_error_code": @100, @"server_error_type": @"OAuthException", @"server_error_message": @"(#100) Employee Account or Specific App Conditions"});
+    Check([advice[@"classification"] isEqual:@"server_eligibility"], @"exact observed eligibility error classified");
+    advice = FBTNamesDiagnosticAdvice(@{@"http_status": @400, @"server_error_code": @100, @"server_error_type": @"OAuthException", @"server_error_message": @"Invalid parameter"});
+    Check([advice[@"classification"] isEqual:@"remote_rejection"], @"generic code 100 is not misclassified as employee rejection");
+    Check([FBTNamesDiagnosticAdvice(@{@"body_status": @"not_delivered_to_observed_callback"})[@"classification"] isEqual:@"body_unavailable"], @"missing body remains unknown");
+    Check([FBTNamesDiagnosticAdvice(@{@"id_to_names_valid": @YES, @"id_to_names_count": @0})[@"classification"] isEqual:@"empty_names"], @"empty names are not treated as populated");
+    Check([FBTNamesDiagnosticAdvice(@{})[@"classification"] isEqual:@"undetermined"], @"no evidence is not reported as success");
     NSLog(@"PASS: %lu response summary checks", (unsigned long)count);
 } return 0; }

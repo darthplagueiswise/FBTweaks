@@ -1,5 +1,8 @@
 #import "FBTNamesDiagnosticsViewController.h"
 #import "../FBTDefaults.h"
+#import "../FBTUtils.h"
+#import "FBTLocalConfigViewController.h"
+#import "../Runtime/FBTNamesResponseSummary.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
@@ -7,6 +10,7 @@
 @interface FBTNamesDiagnosticsViewController ()
 @property (nonatomic, strong) NSTimer *timer;
 @property (nonatomic, copy) NSDictionary *report;
+@property (nonatomic, copy) NSArray<NSDictionary *> *history;
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows;
 @end
 
@@ -38,43 +42,69 @@
     self.report = FBTMobileConfigFetchDiagnosticsSnapshot();
     NSDictionary *transport = self.report[@"transport"] ?: @{};
     NSArray *events = self.report[@"events"] ?: @[];
-    NSDictionary *request = nil, *diagnostic = nil, *completion = nil;
+    NSString *process = self.report[@"process_session_id"];
+    NSMutableArray *requests = [NSMutableArray array];
+    NSDictionary *lastDownload = nil;
     for (NSDictionary *event in events.reverseObjectEnumerator) {
-        if (!request && [event[@"event"] isEqual:@"native_mc_fetch_started"] &&
-            [event[@"capture_reason"] isEqual:@"mobileconfig_qe_info"]) request = event;
+        if (![event[@"process_session_id"] isEqual:process]) continue;
+        if (!lastDownload && [event[@"event"] isEqual:@"name_download_completed"]) lastDownload = event;
+        if ([event[@"event"] isEqual:@"native_mc_fetch_started"] &&
+            [event[@"capture_reason"] isEqual:@"mobileconfig_qe_info"]) [requests addObject:event];
     }
-    // Show a single exact request, never the last body from an unrelated sync.
-    for (NSDictionary *event in events.reverseObjectEnumerator) {
-        if (!request || ![event[@"request_id"] isEqual:request[@"request_id"]] ||
-            ![event[@"process_session_id"] isEqual:request[@"process_session_id"]]) continue;
-        if (!diagnostic && [event[@"event"] isEqual:@"names_transport_diagnostic"]) diagnostic = event;
-        if (!completion && [event[@"event"] isEqual:@"native_mc_fetch_completed"]) completion = event;
+    NSMutableArray *history = [NSMutableArray array];
+    for (NSDictionary *request in requests) {
+        NSDictionary *diagnostic = nil, *completion = nil;
+        for (NSDictionary *event in events.reverseObjectEnumerator) {
+            if (![event[@"process_session_id"] isEqual:process] || ![event[@"request_id"] isEqual:request[@"request_id"]]) continue;
+            if ([event[@"event"] isEqual:@"native_mc_fetch_completed"] && !completion) completion = event;
+            if ([event[@"event"] isEqual:@"names_transport_diagnostic"] &&
+                (!diagnostic || ([diagnostic[@"http_status"] integerValue] == 0 && [event[@"http_status"] integerValue] > 0))) diagnostic = event;
+        }
+        [history addObject:@{@"request": request, @"diagnostic": diagnostic ?: @{}, @"completion": completion ?: @{}}];
+        if (history.count == 8) break;
     }
+    self.history = history;
+    NSDictionary *entry = history.firstObject ?: @{};
+    NSDictionary *request = entry[@"request"], *diagnostic = entry[@"diagnostic"], *completion = entry[@"completion"];
+    NSDictionary *advice = FBTNamesDiagnosticAdvice(diagnostic ?: @{});
     BOOL enabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
-    NSString *hooks = [NSString stringWithFormat:@"Captura %@\nFetcher nativo: %@\nCallbacks de transporte: %@%@",
-        enabled ? @"ligada" : @"pausada",
-        [transport[@"native_mc_fetcher_installed"] boolValue] ? @"instalado" : (transport[@"native_mc_fetcher_failure"] ?: @"aguardando"),
-        [transport[@"simple_callback_hooks_installed"] boolValue] ? @"instalados" : @"indisponíveis: ",
-        [transport[@"simple_callback_hooks_installed"] boolValue] ? @"" : (transport[@"simple_callback_failure"] ?: @"não iniciados")];
-    NSString *requestText = request ? [NSString stringWithFormat:@"Pedido %@ · %@\n%@",
-        request[@"request_id"], request[@"request_method"] ?: @"?", request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa de Force name download.";
-    NSString *result = diagnostic ? [NSString stringWithFormat:@"HTTP %@ · %@\n%@ bytes recebidos\nCódigo remoto: %@ · subcódigo: %@\nTipo: %@\n%@",
-        diagnostic[@"http_status"] ?: @"não observado", diagnostic[@"body_status"] ?: @"sem estado",
+    BOOL installed = [transport[@"native_mc_fetcher_installed"] boolValue] && [transport[@"simple_callback_hooks_installed"] boolValue];
+    NSString *readiness = !enabled ? @"Captura pausada" : installed ? @"Captura nativa pronta" : @"Captura incompleta — verifique os hooks";
+    NSString *status = [NSString stringWithFormat:@"%@\nPedidos nativos: %@ · conclusões: %@\nCorrelações de transporte: %@\n%@%@",
+        readiness, transport[@"native_mc_requests"] ?: @0, transport[@"native_mc_responses"] ?: @0,
+        transport[@"native_tigon_correlations"] ?: @0,
+        [transport[@"native_mc_fetcher_installed"] boolValue] ? @"" : (transport[@"native_mc_fetcher_failure"] ?: @"Fetcher não instalado. "),
+        [transport[@"simple_callback_hooks_installed"] boolValue] ? @"" : (transport[@"simple_callback_failure"] ?: @"Callbacks não instalados.")];
+    NSString *requestText = request ? [NSString stringWithFormat:@"Pedido %@ · %@ · %@\n%@",
+        request[@"request_id"], request[@"request_method"] ?: @"?", request[@"time_utc"] ?: @"", request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa pelo menu nativo.";
+    NSString *result = diagnostic.count ? [NSString stringWithFormat:@"HTTP %@ · %@\n%@ bytes recebidos\nCódigo %@ · subcódigo %@ · %@\n%@",
+        [diagnostic[@"http_status"] integerValue] ? diagnostic[@"http_status"] : @"não observado", diagnostic[@"body_status"] ?: @"sem estado",
         diagnostic[@"response_bytes"] ?: @0, diagnostic[@"server_error_code"] ?: @"não fornecido",
-        diagnostic[@"server_error_subcode"] ?: @"não fornecido", diagnostic[@"server_error_type"] ?: @"não fornecido",
-        diagnostic[@"server_error_message"] ?: @"Nenhuma mensagem remota disponível nessa superfície."] :
-        (completion ? [NSString stringWithFormat:@"Conclusão nativa: %@\n%@\nCorpo HTTP não capturado; confira os hooks acima.",
+        diagnostic[@"server_error_subcode"] ?: @"não fornecido", diagnostic[@"server_error_type"] ?: @"tipo não fornecido",
+        diagnostic[@"server_error_message"] ?: @"Nenhuma mensagem remota disponível."] :
+        (completion.count ? [NSString stringWithFormat:@"Conclusão nativa: %@\n%@\nCorpo HTTP não capturado.",
             [completion[@"native_transport_success"] boolValue] ? @"sucesso" : @"falha", completion[@"message"] ?: @""] : @"Aguardando conclusão do pedido.");
-    if ([diagnostic[@"id_to_names_valid"] boolValue]) result = [result stringByAppendingFormat:@"\nid_to_names válido: %@ registros. A gravação do arquivo é uma etapa separada.", diagnostic[@"id_to_names_count"] ?: @0];
-    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON"],
-                  @[hooks, requestText, result],
-                  @[@"1. Inicie a captura aqui.\n2. Volte ao Internal Settings → MobileConfig → Advanced Settings → Force name download e tente uma vez.\n3. Retorne a esta tela e use Compartilhar para enviar o JSON pelo iPhone.\n\nA captura continua enquanto esta tela está fechada. Não precisa de Frida nem de computador."]];
+    if ([diagnostic[@"id_to_names_valid"] boolValue]) result = [result stringByAppendingFormat:@"\nid_to_names: %@ registros.", diagnostic[@"id_to_names_count"] ?: @0];
+    NSString *localState = [NSString stringWithFormat:@"Estados no arquivo local, não prova de autorização remota:\nLegacy refresh: %@\nBuiltin query hash: %@\nÚltima conclusão do download de nomes: %@",
+        lastDownload[@"legacy_refresh_override_file_state"] ?: @"não observado", lastDownload[@"builtin_query_hash_override_file_state"] ?: @"não observado",
+        lastDownload ? ([lastDownload[@"download_success"] boolValue] ? @"sucesso nativo" : @"falha nativa") : @"não observada"];
+    NSMutableArray *historyText = [NSMutableArray array];
+    for (NSDictionary *item in history) {
+        NSDictionary *r = item[@"request"], *d = item[@"diagnostic"];
+        [historyText addObject:[NSString stringWithFormat:@"Pedido %@ · HTTP %@ · %@\n%@", r[@"request_id"],
+            [d[@"http_status"] integerValue] ? d[@"http_status"] : @"?", r[@"time_utc"] ?: @"", d[@"server_error_message"] ?: d[@"body_status"] ?: @"aguardando"]];
+    }
+    if (!historyText.count) [historyText addObject:@"Nenhum pedido QE-info registrado nesta sessão."];
+    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local"],
+        @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
+        @[requestText, result, localState], historyText,
+        @[@"1. Inicie a captura aqui.\n2. Execute Internal Settings → MobileConfig → Advanced Settings → Force name download uma vez.\n3. Retorne e use Compartilhar.\n\nA captura continua com esta tela fechada e funciona sem Frida ou computador. O mapa local funciona sem o serviço QE-info e não anuncia sucesso remoto."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows[section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[@"Controles", @"Pedido e resultado", @"Como usar"][section];
+    return @[@"Controles", @"Diagnóstico", @"Evidências", @"Histórico da sessão — toque para detalhes", @"Como usar"][section];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"NamesDiagnostic"];
@@ -83,11 +113,19 @@
     cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     cell.textLabel.text = self.rows[path.section][path.row];
     cell.textLabel.textColor = path.section == 0 ? UIColor.systemBlueColor : UIColor.labelColor;
-    cell.selectionStyle = path.section == 0 ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    cell.selectionStyle = (path.section == 0 || (path.section == 3 && self.history.count)) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];
+    if (path.section == 3 && path.row < self.history.count) {
+        NSData *data = [NSJSONSerialization dataWithJSONObject:self.history[path.row] options:NSJSONWritingPrettyPrinted error:nil];
+        NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        UIAlertController *detail = [UIAlertController alertControllerWithTitle:@"Detalhes do pedido" message:text preferredStyle:UIAlertControllerStyleAlert];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = text; }]];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:detail animated:YES completion:nil]; return;
+    }
     if (path.section != 0) return;
     if (path.row == 0) {
         [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
@@ -99,7 +137,8 @@
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMobileConfigResponseCaptureDisarm();
-    } else [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    } else if (path.row == 2) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    else [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
     [self refreshReport];
 }
 - (void)shareReport {
@@ -127,3 +166,22 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 @end
+
+@interface FBTNamesDiagnosticsNavigationController : UINavigationController
+- (void)closeDiagnostics;
+@end
+@implementation FBTNamesDiagnosticsNavigationController
+- (void)closeDiagnostics { [self dismissViewControllerAnimated:YES completion:nil]; }
+@end
+
+void FBTPresentNamesDiagnostics(UIViewController *presenter) {
+    if (![NSThread isMainThread]) { dispatch_async(dispatch_get_main_queue(), ^{ FBTPresentNamesDiagnostics(presenter); }); return; }
+    if (!presenter) presenter = [FBTUtils topMostController];
+    if (!presenter) return;
+    FBTNamesDiagnosticsViewController *panel = [[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    if (presenter.navigationController) { [presenter.navigationController pushViewController:panel animated:YES]; return; }
+    FBTNamesDiagnosticsNavigationController *nav = [[FBTNamesDiagnosticsNavigationController alloc] initWithRootViewController:panel];
+    panel.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:nav action:@selector(closeDiagnostics)];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    [presenter presentViewController:nav animated:YES completion:nil];
+}
