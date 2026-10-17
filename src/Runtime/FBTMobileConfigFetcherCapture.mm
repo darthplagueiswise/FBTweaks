@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 #include <atomic>
+#include <algorithm>
 #import <QuartzCore/QuartzCore.h>
 
 using FBTMCCompletion = std::function<void(bool, const std::string &)>;
@@ -22,31 +23,70 @@ static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
 
+struct FBTMCFetchObservation { std::atomic<int> httpStatus{0}; };
+static thread_local std::shared_ptr<FBTMCFetchObservation> sObservation;
+struct FBTMCFetchScope {
+    std::shared_ptr<FBTMCFetchObservation> previous, current;
+};
+void *FBTMobileConfigFetcherCaptureBeginScope(void) {
+    auto scope = new FBTMCFetchScope{sObservation, std::make_shared<FBTMCFetchObservation>()};
+    sObservation = scope->current;
+    return scope;
+}
+NSInteger FBTMobileConfigFetcherCaptureCurrentHTTPStatus(void) {
+    return sObservation ? sObservation->httpStatus.load() : 0;
+}
+NSInteger FBTMobileConfigFetcherCaptureEndScope(void *opaque) {
+    if (!opaque) return 0;
+    auto scope = static_cast<FBTMCFetchScope *>(opaque);
+    int status = scope->current->httpStatus.load();
+    sObservation = scope->previous;
+    delete scope;
+    return status;
+}
+
 static NSString *FBTMCText(const std::string &s) {
     if (s.size() > 2 * 1024 * 1024) return @"<over_2mb_limit>";
     return [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding] ?: @"<non_utf8>";
 }
 
-static void FBTMCAsyncFetch(const void *fetcher, const std::string &url,
+static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         const std::string &purpose, const FBTMCRequestPairs &params,
-        FBTMCCompletion completion, const std::string &account, uint64_t target) {
+        FBTMCCompletion completion, const std::string &routingHint, uint64_t target) {
     if (!sOriginalFetch) return;
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
-        sOriginalFetch(fetcher, url, purpose, params, std::move(completion), account, target);
+        sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
-    NSURLComponents *components = [NSURLComponents componentsWithString:FBTMCText(url)];
-    NSString *host = components.host ?: @"";
-    NSString *path = components.path ?: @"";
+    // Binary TigonRequest constructor and device logs prove argument 1 is the
+    // HTTP method. Endpoint URL is constructed inside the fetcher, not passed here.
+    NSString *requestMethod = FBTMCText(method);
     NSMutableDictionary *details = [@{@"request_id": @(requestID),
-        @"request_host": host, @"request_path": path, @"capture_reason": requestLabel,
+        @"request_method": requestMethod, @"capture_reason": requestLabel,
+        @"request_metadata_source": @"native_fetcher_arguments",
         @"transport": @"FBMobileConfigTigonFetcher", @"request_param_count": @(params.size()),
-        @"account_argument_present": @(!account.empty()),
+        @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
+    NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
     for (const auto &pair : params) {
+        // Only public protocol field names are allowed; account/token values and
+        // regex/name contents are never serialized. Booleans are useful for 400s.
+        static const std::vector<std::string> allowed = {"api_version", "locale",
+            "universe_regex", "param", "gatekeeper", "with_universe_params",
+            "with_current_experiment_group", "with_only_current_experiment_group",
+            "with_all_experiment_groups", "with_experiment_params",
+            "with_experiment_universes", "with_gatekeepers", "needs_name", "skip_qe",
+            "query_hash", "one_query_hash"};
+        if (std::find(allowed.begin(), allowed.end(), pair.first) != allowed.end()) {
+            NSString *key = FBTMCText(pair.first);
+            if (pair.first == "needs_name" || pair.first == "skip_qe" || pair.first.find("with_") == 0) {
+                BOOL valid = pair.second == "true" || pair.second == "false" || pair.second == "0" || pair.second == "1";
+                parameterShape[key] = valid ? FBTMCText(pair.second) : @"unexpected_boolean_encoding";
+            } else parameterShape[key] = [NSString stringWithFormat:@"%llu_bytes", (unsigned long long)pair.second.size()];
+        }
         if (pair.first == "query_hash" || pair.first == "one_query_hash") {
             NSString *prefix = FBTMCText(pair.first);
             BOOL empty = pair.second.empty() || pair.second == "null" || pair.second == "none";
@@ -54,11 +94,14 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &url,
             details[[prefix stringByAppendingString:@"_length"]] = @(pair.second.size());
         }
     }
+    NSData *shapeJSON = [NSJSONSerialization dataWithJSONObject:parameterShape options:NSJSONWritingSortedKeys error:nil];
+    details[@"request_parameter_summary"] = [[NSString alloc] initWithData:shapeJSON encoding:NSUTF8StringEncoding] ?: @"{}";
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_started", details);
     auto original = std::make_shared<FBTMCCompletion>(std::move(completion));
     NSDictionary *request = [details copy];
     CFTimeInterval started = CACurrentMediaTime();
-    FBTMCCompletion wrapped = [original, request, requestLabel, host, path, started]
+    auto observation = purpose == "mobileconfig_qe_info" ? sObservation : nullptr;
+    FBTMCCompletion wrapped = [original, request, requestLabel, requestMethod, started, observation]
             (bool success, const std::string &body) {
         ++sResponses;
         if (!success) ++sFailures;
@@ -67,11 +110,27 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &url,
             response[@"native_transport_success"] = @(success);
             response[@"response_bytes"] = @(body.size());
             response[@"duration_ms"] = @((CACurrentMediaTime() - started) * 1000.0);
-            if (!success) response[@"message"] = FBTMCText(body);
+            response[@"payload_provenance"] = success ? @"native_decoded_completion" : @"native_formatted_transport_error";
+            if (!success) {
+                response[@"message"] = FBTMCText(body);
+                // This callback contains Tigon's formatted error, not the HTTP body.
+                const std::string marker = "domain: FBHTTPErrorDomain code: ";
+                size_t at = body.find(marker);
+                if (at != std::string::npos) {
+                    at += marker.size();
+                    if (at + 3 <= body.size() && body[at] >= '1' && body[at] <= '5' &&
+                        body[at+1] >= '0' && body[at+1] <= '9' && body[at+2] >= '0' && body[at+2] <= '9' &&
+                        (at+3 == body.size() || body[at+3] == ' ')) {
+                        response[@"http_status"] = @((body[at]-'0')*100 + (body[at+1]-'0')*10 + body[at+2]-'0');
+                        response[@"http_status_source"] = @"native_formatted_transport_error";
+                        if (observation) observation->httpStatus.store([response[@"http_status"] intValue]);
+                    }
+                }
+            }
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_completed", response);
-            if (body.size() <= 2 * 1024 * 1024) {
+            if (success && body.size() <= 2 * 1024 * 1024) {
                 NSData *data = [NSData dataWithBytes:body.data() length:body.size()];
-                FBTMobileConfigResponseCaptureWriteRawBody(data, host, path, @"", request,
+                FBTMobileConfigResponseCaptureWriteRawBody(data, @"", @"", requestMethod, response,
                     requestLabel, 0, @"", @"FBMobileConfigTigonFetcher");
             }
         } @catch (__unused NSException *exception) {
@@ -80,7 +139,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &url,
         // Native callback receives exactly the original status and bytes.
         if (original && *original) (*original)(success, body);
     };
-    sOriginalFetch(fetcher, url, purpose, params, std::move(wrapped), account, target);
+    sOriginalFetch(fetcher, method, purpose, params, std::move(wrapped), routingHint, target);
 }
 
 void FBTMobileConfigFetcherCaptureInstall(void) {

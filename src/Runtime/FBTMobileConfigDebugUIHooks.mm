@@ -94,6 +94,7 @@ static NSDictionary *sLatestNativeUIContexts;
     long long _backendType;
     NSString *_backendName;
     NSUInteger _retryCount;
+    NSInteger _lastHTTPStatus;
 }
 - (instancetype)initWithParam:(const std::string &)param
                           key:(int)key
@@ -291,13 +292,19 @@ static void FBTMobileConfigDebugWarmup(void) {
 
 static void FBTCallOriginalSelection(id controller, SEL selector, FBTMCSelection *selection) {
     if (!controller || !selection || !orig_FBMobileConfigDebug_selectParam) return;
-    orig_FBMobileConfigDebug_selectParam(controller,
-                                         selector,
-                                         selection->_param,
-                                         selection->_key,
-                                         selection->_configName,
-                                         selection->_backendType,
-                                         selection->_backendName);
+    void *scope = FBTMobileConfigFetcherCaptureBeginScope();
+    @try {
+        try {
+            orig_FBMobileConfigDebug_selectParam(controller, selector, selection->_param,
+                selection->_key, selection->_configName, selection->_backendType, selection->_backendName);
+        } catch (...) {
+            selection->_lastHTTPStatus = FBTMobileConfigFetcherCaptureEndScope(scope);
+            scope = nullptr;
+            throw;
+        }
+    } @finally {
+        if (scope) selection->_lastHTTPStatus = FBTMobileConfigFetcherCaptureEndScope(scope);
+    }
 }
 
 static void FBTOpenLocalMobileConfigFallback(UIViewController *presenter) {
@@ -467,8 +474,20 @@ static void fbt_FBMobileConfigDebug_present(id self,
             @"retry": @(selection ? selection->_retryCount : 0),
             @"context_count": @(FBTNativeMobileConfigContextCount())
         });
+        NSInteger httpStatus = FBTMobileConfigFetcherCaptureCurrentHTTPStatus();
+        if (!httpStatus && selection) httpStatus = selection->_lastHTTPStatus;
+        BOOL rejected = httpStatus == 400 || httpStatus == 401 || httpStatus == 403 ||
+                        httpStatus == 404 || httpStatus == 410 || httpStatus == 422;
+        if (rejected) {
+            FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_retry_skipped", @{
+                @"http_status": @(httpStatus), @"capture_reason": @"selection_scoped_http_rejection"
+            });
+            UIAlertController *alert = (UIAlertController *)controller;
+            NSString *explanation = [NSString stringWithFormat:@"O servidor recusou a consulta (HTTP %ld). Você pode editar os parâmetros no mapa local.", (long)httpStatus];
+            alert.message = alert.message.length ? [alert.message stringByAppendingFormat:@"\n\n%@", explanation] : explanation;
+        }
         BOOL warmupEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled];
-        if (warmupEnabled && selection && selection->_retryCount == 0 && orig_FBMobileConfigDebug_selectParam) {
+        if (!rejected && warmupEnabled && selection && selection->_retryCount == 0 && orig_FBMobileConfigDebug_selectParam) {
             selection->_retryCount = 1;
             FBTLog(@"native MC transient param-info failure; retrying key=%d once", selection->_key);
 
@@ -484,7 +503,7 @@ static void fbt_FBMobileConfigDebug_present(id self,
             return;
         }
 
-        // Preserve the native second failure and add a local path that does not
+        // Preserve the native failure and add a local path that does not
         // depend on the employee-only QE names/info endpoint.
         FBTAddLocalFallbackAction((UIAlertController *)controller, (UIViewController *)self);
     }

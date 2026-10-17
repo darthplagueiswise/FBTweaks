@@ -224,6 +224,8 @@ static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSSt
         @"transport": transport ?: @"unknown",
         @"body_capture_status": @"not_saved"
     } mutableCopy];
+    NSString *provenance = queryHashState[@"payload_provenance"] ?: @"http_response_body";
+    event[@"payload_provenance"] = provenance;
     if (!data.length) {
         event[@"body_capture_status"] = @"empty_body";
         FBTSetCaptureStatus(@"empty_body", nil, nil);
@@ -280,6 +282,8 @@ static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSSt
     NSString *sha = FBTSHA256(data);
     NSDictionary *metadata = @{
         @"captured_at_utc": FBTUTCNow(),
+        @"payload_provenance": provenance,
+        @"http_status_source": queryHashState[@"http_status_source"] ?: (httpStatus ? @"transport_response" : @"not_observed"),
         @"capture_reason": captureReason ?: @"qe_info",
         @"request_host": host ?: @"",
         @"request_path": path ?: @"",

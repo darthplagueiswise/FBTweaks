@@ -2,12 +2,12 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
-#import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
 #include <dlfcn.h>
 #include <string>
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 
 typedef void (*FBTTigonStartedOrig)(void *, const void *);
 typedef void (*FBTTigonBodyOrig)(void *, void *);
@@ -23,6 +23,16 @@ static FBTTigonBodyOrig sOrigTigonBody = nullptr;
 static FBTTigonResponseOrig sOrigTigonResponse = nullptr;
 static FBTTigonEndOrig sOrigTigonEOM = nullptr;
 static FBTTigonErrorOrig sOrigTigonError = nullptr;
+// MobileConfig uses this FBSharedFramework vtable, bypassing the main
+// executable's forwarding callbacks. Keep each original separate.
+static FBTTigonStartedOrig sSimpleStarted;
+static FBTTigonBodyOrig sSimpleBody;
+static FBTTigonResponseOrig sSimpleResponse;
+static FBTTigonEndOrig sSimpleEOM;
+static FBTTigonErrorOrig sSimpleError;
+static BOOL sSimpleHooksInstalled;
+static NSString *sSimpleFailure;
+static void FBTInstallSimpleHooks(void);
 
 static FBTTigonRequestURLFn sTigonRequestURL = nullptr;
 static FBTTigonStringGetterFn sTigonRequestMethod = nullptr;
@@ -108,7 +118,7 @@ static void FBTTigonRecordContextEvent(NSString *event, NSDictionary *context, N
         }
     }
     if (extra) [details addEntriesFromDictionary:extra];
-    details[@"transport"] = @"TigonForwardingRequestCallbacks";
+    details[@"transport"] = context[@"transport"] ?: @"TigonForwardingRequestCallbacks";
     FBTMobileConfigResponseCaptureRecordTransportEvent(event, details);
 }
 
@@ -147,11 +157,12 @@ static NSData *FBTCopyIOBufChain(void *rawHead, BOOL *tooLarge, BOOL *invalid) {
     return [copy copy];
 }
 
-static void FBTTigonCaptureStarted(void *self, const void *request) {
+static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple) {
     if (!self || !request || ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSDictionary *arm = FBTMobileConfigResponseCaptureArmInfo();
     NSString *reason = [arm[@"reason"] isKindOfClass:[NSString class]] ? arm[@"reason"] : @"";
-    if (!reason.length) return;
+    if (!reason.length && !simple) return;
+    if (simple) reason = @"mobileconfig_transport";
 
     if (!sTigonRequestURL || !sTigonURLHost || !sTigonURLPath || !sTigonRequestMethod) {
         FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_request_metadata_unavailable", @{
@@ -168,7 +179,12 @@ static void FBTTigonCaptureStarted(void *self, const void *request) {
         NSString *path = FBTTigonString(sTigonURLPath(url));
         NSString *method = FBTTigonString(sTigonRequestMethod(request));
         if ([host hasPrefix:@"<non-UTF8>"] || [path hasPrefix:@"<non-UTF8>"]) return;
-        if (!FBTMobileConfigResponseCaptureShouldCaptureRequest(host, path, reason)) return;
+        if (simple) {
+            // Shared callbacks serve other products too. Restrict to the MC
+            // endpoint, regardless of a broad force-download capture window.
+            if ([path.lowercaseString rangeOfString:@"mobileconfig"].location == NSNotFound) return;
+            reason = path.lastPathComponent;
+        } else if (!FBTMobileConfigResponseCaptureShouldCaptureRequest(host, path, reason)) return;
 
         NSDictionary *hashState = @{};
         if (sTigonURLQuery) {
@@ -178,6 +194,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request) {
             hashState = FBTTigonQueryHashState(std::string());
         }
         NSMutableDictionary *context = [@{
+            @"transport": simple ? @"TigonSimpleCallbacks" : @"TigonForwardingRequestCallbacks",
             @"request_host": host ?: @"",
             @"request_path": path ?: @"",
             @"request_method": method ?: @"",
@@ -189,7 +206,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request) {
 
         [sTigonCaptureLock lock];
         NSValue *key = [NSValue valueWithPointer:self];
-        if (sTigonCapturedRequests.count >= 8) {
+        if (sTigonCapturedRequests.count >= 32) {
             NSValue *oldestKey = sTigonCapturedRequests.allKeys.firstObject;
             if (oldestKey) [sTigonCapturedRequests removeObjectForKey:oldestKey];
         }
@@ -210,11 +227,11 @@ static void FBTTigonCaptureStarted(void *self, const void *request) {
 
 static void FBTTigonOnStarted(void *self, const void *request) {
     // Capture before forwarding: the original can invoke downstream callbacks.
-    FBTTigonCaptureStarted(self, request);
+    FBTTigonCaptureStarted(self, request, NO);
     if (sOrigTigonStarted) sOrigTigonStarted(self, request);
 }
 
-static void FBTTigonOnBody(void *self, void *uniquePtrArgument) {
+static void FBTTigonCaptureBody(void *self, void *uniquePtrArgument) {
     NSMutableDictionary *context = FBTTigonContextForObject(self);
     if (context && uniquePtrArgument &&
         [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
@@ -237,6 +254,10 @@ static void FBTTigonOnBody(void *self, void *uniquePtrArgument) {
             context[@"body_capture_status"] = @"iobuf_copy_exception";
         }
     }
+}
+
+static void FBTTigonOnBody(void *self, void *uniquePtrArgument) {
+    FBTTigonCaptureBody(self, uniquePtrArgument);
     if (sOrigTigonBody) sOrigTigonBody(self, uniquePtrArgument);
 }
 
@@ -251,14 +272,13 @@ static void FBTTigonOnResponse(void *self, void *response) {
     if (sOrigTigonResponse) sOrigTigonResponse(self, response);
 }
 
-static void FBTTigonOnEOM(void *self, void *summary) {
+static void FBTTigonFinishCapture(void *self) {
     NSDictionary *context = FBTTigonContextForObject(self);
     if (context) {
         [sTigonCaptureLock lock];
         [sTigonCapturedRequests removeObjectForKey:[NSValue valueWithPointer:self]];
         [sTigonCaptureLock unlock];
     }
-    if (sOrigTigonEOM) sOrigTigonEOM(self, summary);
     if (!context) return;
 
     NSMutableData *body = [context[@"body"] isKindOfClass:[NSMutableData class]] ? context[@"body"] : nil;
@@ -274,11 +294,91 @@ static void FBTTigonOnEOM(void *self, void *summary) {
     } else {
         FBTMobileConfigResponseCaptureWriteRawBody(body ?: [NSData data],
             context[@"request_host"], context[@"request_path"], context[@"request_method"],
-            context, context[@"capture_reason"], 0, @"", @"TigonForwardingRequestCallbacks");
+            context, context[@"capture_reason"], [context[@"http_status"] integerValue], @"",
+            context[@"transport"] ?: @"TigonForwardingRequestCallbacks");
     }
     [sTigonCaptureLock lock];
     sTigonBodyCount++;
     [sTigonCaptureLock unlock];
+}
+
+static void FBTTigonOnEOM(void *self, void *summary) {
+    FBTTigonFinishCapture(self);
+    if (sOrigTigonEOM) sOrigTigonEOM(self, summary);
+}
+
+// All shared callbacks forward the same pointer/ownership to their own
+// original exactly once. No status conversion or native retry is changed.
+static void FBTSimpleOnStarted(void *self, const void *request) {
+    FBTTigonCaptureStarted(self, request, YES);
+    if (sSimpleStarted) sSimpleStarted(self, request);
+}
+static void FBTSimpleOnBody(void *self, void *body) {
+    FBTTigonCaptureBody(self, body);
+    if (sSimpleBody) sSimpleBody(self, body);
+}
+static void FBTSimpleOnResponse(void *self, void *response) {
+    NSMutableDictionary *context = FBTTigonContextForObject(self);
+    if (context && response && [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        // TigonResponse move constructor at 0xfde234 loads status with ldrh
+        // from +0; SimpleCallbacks EOM reads the moved status at self+0x48.
+        uint16_t status = 0;
+        memcpy(&status, response, sizeof(status));
+        if (status >= 100 && status <= 599) {
+            context[@"http_status"] = @(status);
+            context[@"http_status_source"] = @"verified_tigon_response_status";
+        }
+        context[@"payload_provenance"] = @"http_response_body_before_native_status_conversion";
+        FBTTigonRecordContextEvent(@"tigon_response_received", context, @{
+            @"http_status": context[@"http_status"] ?: @0,
+            @"http_status_source": context[@"http_status_source"] ?: @"not_observed"
+        });
+    }
+    if (sSimpleResponse) sSimpleResponse(self, response);
+}
+static void FBTSimpleOnEOM(void *self, void *summary) {
+    // Save the copied error body before native EOM replaces it with the
+    // formatted FBHTTPErrorDomain string in its failure callback.
+    FBTTigonFinishCapture(self);
+    if (sSimpleEOM) sSimpleEOM(self, summary);
+}
+static void FBTSimpleOnError(void *self, const void *error, void *summary) {
+    NSDictionary *context = FBTTigonContextForObject(self);
+    if (context) {
+        FBTTigonRecordContextEvent(@"tigon_network_error", context, @{
+            @"error_object_present": @(error != nullptr)
+        });
+        FBTTigonFinishCapture(self);
+    }
+    if (sSimpleError) sSimpleError(self, error, summary);
+}
+
+static void FBTInstallSimpleHooks(void) {
+    if (sSimpleHooksInstalled) return;
+    static const unsigned char uuid[16] = {76,76,68,254,85,85,49,68,161,194,108,202,228,237,37,151};
+    struct Slot { uint64_t address, target; void *replacement; void **original; };
+    Slot slots[] = {
+        {0x8100558ULL, 0x29324ULL, (void *)FBTSimpleOnStarted, (void **)&sSimpleStarted},
+        {0x8100588ULL, 0xfde218ULL, (void *)FBTSimpleOnResponse, (void **)&sSimpleResponse},
+        {0x8100590ULL, 0xfde24cULL, (void *)FBTSimpleOnBody, (void **)&sSimpleBody},
+        {0x81005a0ULL, 0xfde27cULL, (void *)FBTSimpleOnEOM, (void **)&sSimpleEOM},
+        {0x81005b0ULL, 0x3fdda18ULL, (void *)FBTSimpleOnError, (void **)&sSimpleError}
+    };
+    BOOL complete = YES;
+    NSMutableArray *failures = [NSMutableArray array];
+    for (const Slot &slot : slots) {
+        NSString *failure = nil;
+        BOOL ok = FBTRebindVerifiedImageConstSlot("FBSharedFramework", slot.address,
+            uuid, slot.target, slot.replacement, slot.original, &failure);
+        complete = complete && ok;
+        if (!ok) [failures addObject:[NSString stringWithFormat:@"0x%llx:%@", (unsigned long long)slot.address, failure ?: @"unknown"]];
+    }
+    sSimpleHooksInstalled = complete;
+    sSimpleFailure = [failures componentsJoinedByString:@"; "];
+    FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_simple_callback_hooks", @{
+        @"hook_installed": @(complete), @"message": sSimpleFailure ?: @"",
+        @"capture_surface": @"UUID-verified shared TigonSimpleCallbacks data slots; HTTP status/body before native error conversion"
+    });
 }
 
 static void FBTTigonOnError(void *self, const void *error, void *summary) {
@@ -312,6 +412,8 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
     }
     [sTigonCaptureLock lock];
     NSDictionary *status = @{
+        @"simple_callback_hooks_installed": @(sSimpleHooksInstalled),
+        @"simple_callback_failure": sSimpleFailure ?: @"not_attempted",
         @"tigon_hooks_installed": @(sTigonHooksInstalled),
         @"tigon_request_hook_installed": @(sOrigTigonStarted != nullptr),
         @"tigon_body_hook_installed": @(sTigonConstBodyInstalled),
@@ -340,6 +442,7 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (!sTigonURLHost) sTigonURLHost = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getHostEv");
     if (!sTigonURLPath) sTigonURLPath = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getPathEv");
     if (!sTigonURLQuery) sTigonURLQuery = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl8getQueryEv");
+    FBTInstallSimpleHooks();
     if (sTigonHooksInstalled) return;
 
     struct rebinding bindings[] = {

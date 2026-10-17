@@ -12,6 +12,12 @@ void FBTMobileConfigResponseCaptureInstall(void);
 void FBTMobileConfigResponseCaptureInstallTigon(void);
 void FBTMobileConfigFetcherCaptureInstall(void);
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void);
+// Selection-scoped correlation: begin/end on the same thread, in LIFO order.
+// Async callbacks own shared state, so a late response cannot touch a dead scope.
+void *FBTMobileConfigFetcherCaptureBeginScope(void);
+NSInteger FBTMobileConfigFetcherCaptureCurrentHTTPStatus(void);
+NSInteger FBTMobileConfigFetcherCaptureEndScope(void *scope);
+
 NSDictionary *FBTMobileConfigTigonCaptureStatus(void);
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void);
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *host, NSString *path, NSString *reason);

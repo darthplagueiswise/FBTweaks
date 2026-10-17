@@ -93,6 +93,18 @@ slot_value = struct.unpack_from('<Q', shared_raw, slot_offset)[0] & 0xfffffffff
 check('native_fetcher_data_slot', section.name == '__const' and section.segment_name == '__DATA_CONST' and slot_value == 0xa17f70)
 check('shared_uuid', bytes(shared.uuid.uuid).hex() == '4c4c44fe55553144a1c26ccae4ed2597')
 check('native_fetcher_callback_rtti', b'asyncFetchERKNS_12basic_string' in shared_raw and b'functionIFvbSB_EEE' in shared_raw)
+# Shared SimpleCallbacks is the path actually used by the supplied runtime.
+for address, target in [(0x8100558,0x29324),(0x8100588,0xfde218),
+                        (0x8100590,0xfde24c),(0x81005a0,0xfde27c),(0x81005b0,0x3fdda18)]:
+    section = next((s for s in shared.sections if s.virtual_address <= address < s.virtual_address+s.size), None)
+    value = struct.unpack('<Q', bytes(shared.get_content_from_virtual_address(address,8)))[0] & 0xfffffffff
+    check('simple_callback_slot', section and section.segment_name == '__DATA_CONST' and
+          section.name == '__const' and value == target, address=hex(address), target=hex(value))
+status_reader = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+status_instruction = next(status_reader.disasm(bytes(shared.get_content_from_virtual_address(0xfde234,4)),0xfde234))
+check('tigon_response_status_layout', status_instruction.mnemonic == 'ldrh' and status_instruction.op_str == 'w8, [x1], #8')
+started_dispatch = next(status_reader.disasm(bytes(shared.get_content_from_virtual_address(0x591360,4)),0x591360))
+check('simple_started_virtual_offset', started_dispatch.mnemonic == 'ldr' and started_dispatch.op_str == 'x2, [x8, #0x28]')
 expected_uuid = bytes([76,76,68,170,85,85,49,68,161,142,1,71,65,237,25,11])
 check('main_uuid', bytes(main.uuid.uuid) == expected_uuid, uuid=bytes(main.uuid.uuid).hex())
 for address, name in [(0x101010370, '10onResponse'), (0x101010378, '6onBody')]:
