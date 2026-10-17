@@ -9,6 +9,7 @@
 #import "Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "Features/Employee/FBTInternalImports.h"
 #import "Features/ReactNative/FBTReactNativeInternal.h"
+#import "Settings/FBTEntryPoints.h"
 
 // =====================================================================
 // FBTweak — entrypoint
@@ -51,6 +52,9 @@ static void FBTInstallEnabledKnownFamilies(void) {
         FBTInstallInternalImportHooks();
     }
 
+    if ([FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled]) {
+        FBTInstallMobileConfigRuntime();
+    }
     if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled]) {
         FBTInstallMobileConfigDebugUIHooks();
     }
@@ -65,33 +69,19 @@ static void FBTInstallEnabledKnownFamilies(void) {
 
     @try {
         id session = [self session];
-        if (session) [FBTUtils setStoredSession:session];
+        [FBTUtils setStoredSession:session];
     } @catch (__unused NSException *e) {}
 
     // Retry exato e idempotente para Swift/Dynamic/RN/RarelyUsed que podem ser
     // carregados depois do constructor. Não enumera classes globalmente.
     FBTInstallEnabledKnownFamilies();
 
-    static char kFBTGestureAttachedKey;
-    if (objc_getAssociatedObject(self, &kFBTGestureAttachedKey)) return;
-    objc_setAssociatedObject(self, &kFBTGestureAttachedKey, @(YES),
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    UILongPressGestureRecognizer *lp =
-        [[UILongPressGestureRecognizer alloc] initWithTarget:self
-                                                      action:@selector(fbt_handleLongPress:)];
-    lp.minimumPressDuration = 0.6;
-    [self.view addGestureRecognizer:lp];
+    FBTRetryEntryPoints();
 }
 
-%new
-- (void)fbt_handleLongPress:(UILongPressGestureRecognizer *)sender {
-    if (sender.state != UIGestureRecognizerStateBegan) return;
-    if (![FBTDefaults boolForKey:FBTKeyOpenLongPress]) return;
-
-    id session = nil;
-    @try { session = [self session]; } @catch (__unused NSException *e) {}
-    [FBTUtils presentSettingsFromView:sender.view session:session];
+- (void)setSession:(id)session {
+    %orig;
+    [FBTUtils setStoredSession:session];
 }
 
 %end
@@ -102,6 +92,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
         [FBTDefaults registerDefaultsOnce];
 
         %init(FBTHost);
+        FBTInstallEntryPoints();
         FBTInstallDogfoodObserver();
 
         FBTInstallEnabledKnownFamilies();
@@ -131,6 +122,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
                         object:nil
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(__unused NSNotification *note) {
+                        if (![FBTDefaults boolForKey:FBTKeyMasterEnabled]) FBTMobileConfigSetSessionActive(NO);
                         FBTMobileConfigReloadPrefs();
                         FBTRuntimeBoolReloadPrefs();
                         FBTInternalImportReloadPrefs();

@@ -4,11 +4,13 @@
 // Sessão do host (FBSession), atualizada pelo Tweak.x quando o tab bar aparece.
 // Usada pelo opener de "Internal Settings nativo" (Dogfood).
 static id gFBTStoredSession = nil;
+static BOOL gFBTPresentingSettings = NO;
+static char kFBTSettingsPresentationKey;
 
 @implementation FBTUtils
 
 + (void)setStoredSession:(id)session {
-    if (session) gFBTStoredSession = session;
+    gFBTStoredSession = session;
 }
 
 + (id)storedSession {
@@ -68,10 +70,17 @@ static id gFBTStoredSession = nil;
 }
 
 + (void)presentSettingsFromView:(UIView *)sourceView session:(id)session {
-    [self setStoredSession:session];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self presentSettingsFromView:sourceView session:session]; });
+        return;
+    }
+    if (session) [self setStoredSession:session];
 
     UIViewController *presenter = [self topMostController];
-    if (!presenter) return;
+    if (!presenter || gFBTPresentingSettings || presenter.isBeingDismissed) return;
+    for (UIViewController *vc = presenter; vc; vc = vc.parentViewController ?: vc.presentingViewController) {
+        if (objc_getAssociatedObject(vc, &kFBTSettingsPresentationKey)) return;
+    }
 
     UIViewController *root = [self buildSettingsRootController];
 
@@ -90,6 +99,7 @@ static id gFBTStoredSession = nil;
 
     // O bridge UIKit já retorna um controller pronto (normalmente UINavigationController).
     root.modalPresentationStyle = UIModalPresentationPageSheet;
+    objc_setAssociatedObject(root, &kFBTSettingsPresentationKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     if (@available(iOS 15.0, *)) {
         UISheetPresentationController *sheet = root.sheetPresentationController;
@@ -108,7 +118,19 @@ static id gFBTStoredSession = nil;
         pop.sourceRect = sourceView.bounds;
     }
 
-    [presenter presentViewController:root animated:YES completion:nil];
+    gFBTPresentingSettings = YES;
+    [presenter presentViewController:root animated:YES completion:^{ gFBTPresentingSettings = NO; }];
+}
+
++ (void)showMessage:(NSString *)message title:(NSString *)title {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *presenter = [self topMostController];
+        if (!presenter || [presenter isKindOfClass:[UIAlertController class]]) return;
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [presenter presentViewController:alert animated:YES completion:nil];
+    });
 }
 
 @end

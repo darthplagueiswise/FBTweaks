@@ -14,7 +14,7 @@ NSString * const FBTKeyEasyGatingInternalEnabled = @"fbt_easygating_internal_ena
 NSString * const FBTKeyLiquidGlassEnabled    = @"fbt_liquidglass_enabled";
 NSString * const FBTKeyFloatingTabBarEnabled = @"fbt_floating_tabbar_enabled";
 NSString * const FBTKeyDatingEnabled         = @"fbt_dating_enabled";
-NSString * const FBTKeyOpenLongPress         = @"fbt_open_longpress_enabled";
+NSString * const FBTKeyOpenThreeFingerDoubleTap         = @"fbt_open_three_finger_double_tap_enabled";
 
 NSString * const FBTKeyMobileConfigRuntimeEnabled   = @"fbt_mobileconfig_runtime_enabled";
 NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled = @"fbt_mobileconfig_native_ui_warmup_enabled";
@@ -48,7 +48,7 @@ static NSDictionary *gRegistered = nil;
         FBTKeyLiquidGlassEnabled:               @(NO),
         FBTKeyFloatingTabBarEnabled:            @(NO),
         FBTKeyDatingEnabled:                    @(NO),
-        FBTKeyOpenLongPress:                    @(YES),
+        FBTKeyOpenThreeFingerDoubleTap:                    @(YES),
 
         // Runtime browsers ficam ON por padrão. v3.1 mantém MobileConfig em fishhook-only
         // para não tocar __TEXT assinado; varredura pesada é on-demand.
@@ -78,7 +78,7 @@ static NSDictionary *gRegistered = nil;
 
 + (BOOL)isMasterExemptKey:(NSString *)key {
     return [key isEqualToString:FBTKeyMasterEnabled] ||
-           [key isEqualToString:FBTKeyOpenLongPress];
+           [key isEqualToString:FBTKeyOpenThreeFingerDoubleTap];
 }
 
 + (BOOL)boolForKey:(NSString *)key {

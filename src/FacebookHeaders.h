@@ -35,11 +35,6 @@
 @interface FBBugReportConfiguration : NSObject
 - (BOOL)isEmployee;
 - (void)setIsEmployee:(BOOL)value;
-- (void)setEnableInternalSettingsOption:(BOOL)value;
-- (void)setEnableInternalToolsSubmenu:(BOOL)value;
-- (void)setForceShowingInternalTools:(BOOL)value;
-- (void)setShowTriageToDogfoodingAssistantSession:(BOOL)value;
-- (void)setDisableEmployeeProductionReports:(BOOL)value;
 @end
 
 @interface FBProductTagCreationLogger : NSObject

@@ -39,22 +39,8 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 - (void)setIsEmployee:(BOOL)value {
     %orig(FBTEmployeeIdentityOn() ? YES : value);
 }
-// Native Internal Settings explicitly accepts employees OR test accounts.
-- (void)setEnableInternalSettingsOption:(BOOL)value {
-    %orig(FBTTestUserOn() ? YES : value);
-}
-- (void)setEnableInternalToolsSubmenu:(BOOL)value {
-    %orig(FBTTestUserOn() ? YES : value);
-}
-- (void)setForceShowingInternalTools:(BOOL)value {
-    %orig(FBTTestUserOn() ? YES : value);
-}
-- (void)setShowTriageToDogfoodingAssistantSession:(BOOL)value {
-    %orig(FBTKnownDogfoodOn() ? YES : value);
-}
-- (void)setDisableEmployeeProductionReports:(BOOL)value {
-    %orig(FBTEmployeeIdentityOn() ? NO : value);
-}
+// Internal Settings is gated through FBShouldEnableInternalSettings.
+// The removed setters do not exist on FBBugReportConfiguration in build 583.
 %end
 
 %hook FBProductTagCreationLogger

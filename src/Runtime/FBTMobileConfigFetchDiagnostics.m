@@ -1,5 +1,8 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMobileConfigRuntime.h"
+#import "FBTMobileConfigResponseCapture.h"
+#import "FBTMCOverridesFile.h"
 #import "../FBTDefaults.h"
 #import "FBTPrefix.h"
 #import <pthread.h>
@@ -25,6 +28,15 @@ static NSString *FBTDiagRedactText(NSString *input) {
     }
     if (text.length > 500) text = [[text substringToIndex:500] stringByAppendingString:@"…"];
     return text;
+}
+
+static NSString *FBTDiagMCStateLabel(FBTMCState state) {
+    switch (state) {
+        case FBTMCStateOff: return @"OFF";
+        case FBTMCStateOn: return @"ON";
+        case FBTMCStateSys:
+        default: return @"SYS";
+    }
 }
 
 static NSString *FBTDiagISODate(NSDate *date) {
@@ -63,39 +75,67 @@ static NSUInteger FBTDiagStoreScore(NSURL *url) {
 
 static NSURL *FBTDiagAppGroupURL(void) {
     NSString *nativePath = FBTNativeMobileConfigOverridesFilePath();
-    NSURL *nativeContainer = nil;
     if (nativePath.length && [[nativePath.lastPathComponent lowercaseString] isEqualToString:@"mc_overrides.json"]) {
         NSString *mobileConfigDir = [nativePath stringByDeletingLastPathComponent];
         NSString *containerDir = [mobileConfigDir stringByDeletingLastPathComponent];
-        if (containerDir.length) nativeContainer = [NSURL fileURLWithPath:containerDir isDirectory:YES];
+        if (containerDir.length) {
+            // This is the folder that contains sibling "mobileconfig" and
+            // "mobileconfig_qce" stores. If nativePath is under Documents,
+            // keep Documents as the diagnostics base instead of jumping to
+            // the shared-container root.
+            return [NSURL fileURLWithPath:containerDir isDirectory:YES];
+        }
     }
-    NSArray<NSString *> *groups = @[
-        @"group.com.facebook.dogfood.internal",
+
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    NSMutableOrderedSet<NSString *> *groups = [NSMutableOrderedSet orderedSet];
+    if ([bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]) {
+        [groups addObject:@"group.facebook.ota"];
+        [groups addObject:@"group.com.facebook.ota"];
+    } else if ([bundleID.lowercaseString isEqualToString:@"com.facebook.facebook"]) {
+        [groups addObject:@"group.com.facebook.Facebook"];
+        [groups addObject:@"group.facebook.Facebook"];
+    }
+    if (bundleID.length) [groups addObject:[@"group." stringByAppendingString:bundleID]];
+    if ([bundleID hasPrefix:@"com."] && bundleID.length > 4) {
+        [groups addObject:[@"group." stringByAppendingString:[bundleID substringFromIndex:4]]];
+    }
+    [groups addObjectsFromArray:@[
         @"group.com.facebook.Facebook",
+        @"group.facebook.ota",
+        @"group.com.facebook.ota",
+        @"group.com.facebook.dogfood.internal",
         @"group.com.facebook.family"
-    ];
+    ]];
+
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSURL *fallback = nativeContainer;
-    NSURL *best = nil;
-    NSUInteger bestScore = 0;
     for (NSString *group in groups) {
         NSURL *url = [fm containerURLForSecurityApplicationGroupIdentifier:group];
         if (!url.path.length) continue;
-        if (!fallback) fallback = url;
-        NSUInteger score = FBTDiagStoreScore(url);
-        if (score > bestScore) { bestScore = score; best = url; }
+        BOOL hasDocumentsMC = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"Documents/mobileconfig"]];
+        BOOL hasRootMC = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"mobileconfig"]];
+        BOOL hasDocumentsQCE = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"Documents/mobileconfig_qce"]];
+        BOOL hasRootQCE = [fm fileExistsAtPath:[url.path stringByAppendingPathComponent:@"mobileconfig_qce"]];
+        if (hasDocumentsMC || hasDocumentsQCE) {
+            return [url URLByAppendingPathComponent:@"Documents" isDirectory:YES];
+        }
+        if (hasRootMC || hasRootQCE) return url;
     }
-    return best ?: fallback;
+    return nil;
 }
 
 static NSString *FBTDiagFilePath(void) {
+    NSString *nativePath = FBTNativeMobileConfigOverridesFilePath();
+    if (nativePath.length && [[nativePath.lastPathComponent lowercaseString] isEqualToString:@"mc_overrides.json"]) {
+        return [[nativePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"fbt_fetch_diagnostics.json"];
+    }
     NSURL *group = FBTDiagAppGroupURL();
     if (!group.path.length) return nil;
     return [[[group URLByAppendingPathComponent:@"mobileconfig"] URLByAppendingPathComponent:@"fbt_fetch_diagnostics.json"] path];
 }
 
 static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
-    NSSet *allowed = [NSSet setWithArray:@[@"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message"]];
+    NSSet *allowed = [NSSet setWithArray:@[@"bool_reader_available", @"int64_reader_available", @"double_reader_available", @"string_reader_available", @"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"legacy_refresh_override_file_state", @"builtin_query_hash_override_file_state", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_completed_response_count", @"tigon_context_count"]];
     NSMutableDictionary *safe = [NSMutableDictionary dictionary];
     for (NSString *key in allowed) {
         id value = details[key];
@@ -109,6 +149,18 @@ static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
             value = label;
         }
         if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]]) safe[key] = value;
+    }
+    BOOL annotateQEFlags = [event isEqualToString:@"qe_info_request_started"] ||
+                           [event isEqualToString:@"qe_info_request_returned"] ||
+                           [event isEqualToString:@"name_download_started"] ||
+                           [event isEqualToString:@"name_download_completed"];
+    if (annotateQEFlags) {
+        // These are the tri-state values currently written in mc_overrides.json,
+        // not proof the running binary resolved or consumed either flag.
+        FBTMCState legacyState = [FBTMCOverridesFile stateForConfig:@"84491:mobile_config_internal_settings_features" paramIdx:2];
+        FBTMCState hashState = [FBTMCOverridesFile stateForConfig:@"4626:mobileconfig_session" paramIdx:4];
+        safe[@"legacy_refresh_override_file_state"] = FBTDiagMCStateLabel(legacyState);
+        safe[@"builtin_query_hash_override_file_state"] = FBTDiagMCStateLabel(hashState);
     }
     safe[@"event"] = event ?: @"unknown";
     safe[@"time_utc"] = FBTDiagISODate([NSDate date]);
@@ -222,13 +274,18 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
         [sDiagEvents removeObjectsInRange:NSMakeRange(0, sDiagEvents.count - kFBTDiagEventLimit)];
     }
     BOOL refreshCache = [event isEqualToString:@"capture_started"] ||
-                        [event isEqualToString:@"qe_info_request_returned"];
+                        [event isEqualToString:@"qe_info_request_returned"] ||
+                        [event isEqualToString:@"name_download_completed"] ||
+                        [event isEqualToString:@"network_response_body_captured"] ||
+                        [event isEqualToString:@"network_response_body_skipped"];
     if (!sDiagCacheState || refreshCache) sDiagCacheState = FBTDiagCacheSummary();
     NSDictionary *report = @{ @"schema_version": @2,
                              @"updated_at_utc": FBTDiagISODate([NSDate date]),
                              @"events": [sDiagEvents copy],
                              @"capture_enabled": @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] && ![event isEqualToString:@"capture_paused"]),
-                             @"cache_state": sDiagCacheState ?: @{} };
+                             @"cache_state": sDiagCacheState ?: @{},
+                             @"runtime": FBTMobileConfigRuntimeStatus(),
+                             @"transport": FBTMobileConfigResponseCaptureStatus() };
     NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     NSString *path = FBTDiagFilePath();
     if (path.length && json.length) {
@@ -249,6 +306,8 @@ NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void) {
     report[@"events"] = events;
     report[@"capture_enabled"] = @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]);
     report[@"cache_state"] = FBTDiagCacheSummary();
+    report[@"runtime"] = FBTMobileConfigRuntimeStatus();
+    report[@"transport"] = FBTMobileConfigResponseCaptureStatus();
     report[@"updated_at_utc"] = FBTDiagISODate([NSDate date]);
     pthread_mutex_unlock(&sDiagLock);
     return [report copy];

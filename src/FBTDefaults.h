@@ -18,7 +18,7 @@ extern NSString * const FBTKeyEasyGatingInternalEnabled;
 extern NSString * const FBTKeyLiquidGlassEnabled;
 extern NSString * const FBTKeyFloatingTabBarEnabled;
 extern NSString * const FBTKeyDatingEnabled;
-extern NSString * const FBTKeyOpenLongPress;
+extern NSString * const FBTKeyOpenThreeFingerDoubleTap;
 
 extern NSString * const FBTKeyMobileConfigRuntimeEnabled;
 extern NSString * const FBTKeyMobileConfigNativeUIWarmupEnabled;

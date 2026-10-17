@@ -12,6 +12,8 @@ extern NSString * const FBTMobileConfigDidUpdateNotification;
 
 void FBTInstallMobileConfigRuntime(void);
 void FBTMobileConfigReloadPrefs(void);
+void FBTMobileConfigSetSessionActive(BOOL active);
+NSDictionary *FBTMobileConfigRuntimeStatus(void);
 NSArray<NSDictionary *> *FBTMobileConfigSnapshot(void);
 NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key);
 void FBTMobileConfigSetOverride(uint64_t key, NSString *type, id value);

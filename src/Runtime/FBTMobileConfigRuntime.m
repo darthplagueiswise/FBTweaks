@@ -1,6 +1,7 @@
 #import "FBTMobileConfigRuntime.h"
 #import "FBTFlagCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMobileConfigFetchDiagnostics.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
@@ -23,6 +24,7 @@ static FBTMCDoubleFn orig_MSGCSessionedMobileConfigGetDouble  = NULL;
 static FBTMCStringFn orig_MSGCSessionedMobileConfigGetString  = NULL;
 
 static BOOL sInstalled = NO;
+static BOOL sManualSessionActive = NO;
 static BOOL sCaptureEnabled = NO;
 static BOOL sOverridesEnabled = NO;
 static NSDictionary *sOverrides = nil;       // decimal key -> {t,v}
@@ -64,7 +66,10 @@ static void FBTMCPostUpdateThrottled(void) {
 }
 
 static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
-    if (!sCaptureEnabled && !overridden) return;
+    pthread_mutex_lock(&sLock);
+    BOOL capture = sCaptureEnabled;
+    pthread_mutex_unlock(&sLock);
+    if (!capture && !overridden) return;
     @autoreleasepool {
         NSString *ks = FBTMCKeyString(key);
         NSDictionary *flag = [FBTFlagCatalog bestMatchForMobileConfigKey:key];
@@ -110,16 +115,47 @@ void FBTMobileConfigRecordAccess(uint64_t key, NSString *type, id defaultValue, 
 
 void FBTMobileConfigReloadPrefs(void) {
     @autoreleasepool {
-        sCaptureEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigCaptureEnabled];
-        sOverridesEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigOverridesEnabled];
+        BOOL master = [FBTDefaults boolForKey:FBTKeyMasterEnabled];
+        BOOL runtime = [FBTDefaults boolForKey:FBTKeyMobileConfigRuntimeEnabled];
+        BOOL capture = [FBTDefaults boolForKey:FBTKeyMobileConfigCaptureEnabled];
+        BOOL overrides = [FBTDefaults boolForKey:FBTKeyMobileConfigOverridesEnabled];
         NSDictionary *raw = [FBTDefaults dictForKey:FBTKeyMobileConfigOverrides];
+        pthread_mutex_lock(&sLock);
+        BOOL active = master && (runtime || sManualSessionActive);
+        sCaptureEnabled = active && capture;
+        sOverridesEnabled = active && overrides;
         sOverrides = [raw copy] ?: @{};
+        pthread_mutex_unlock(&sLock);
     }
 }
 
+void FBTMobileConfigSetSessionActive(BOOL active) {
+    pthread_mutex_lock(&sLock);
+    sManualSessionActive = active;
+    pthread_mutex_unlock(&sLock);
+    FBTMobileConfigReloadPrefs();
+    if (active) FBTInstallMobileConfigRuntime();
+}
+
+NSDictionary *FBTMobileConfigRuntimeStatus(void) {
+    pthread_mutex_lock(&sLock);
+    NSDictionary *status = @{
+        @"registration_requested": @(sInstalled),
+        @"bool_reader_available": @(orig_MSGCSessionedMobileConfigGetBoolean != NULL),
+        @"int64_reader_available": @(orig_MSGCSessionedMobileConfigGetInt64 != NULL),
+        @"double_reader_available": @(orig_MSGCSessionedMobileConfigGetDouble != NULL),
+        @"string_reader_available": @(orig_MSGCSessionedMobileConfigGetString != NULL),
+        @"capture_active": @(sCaptureEnabled), @"fallback_active": @(sOverridesEnabled),
+        @"observed_key_count": @(sSeen.count)
+    };
+    pthread_mutex_unlock(&sLock);
+    return status;
+}
+
 static NSDictionary *FBTMCOverride(uint64_t key, NSString *expectedType) {
-    if (!sOverridesEnabled) return nil;
-    NSDictionary *ov = [sOverrides objectForKey:FBTMCKeyString(key)];
+    pthread_mutex_lock(&sLock);
+    NSDictionary *ov = sOverridesEnabled ? [sOverrides objectForKey:FBTMCKeyString(key)] : nil;
+    pthread_mutex_unlock(&sLock);
     if (![ov isKindOfClass:[NSDictionary class]]) return nil;
     NSString *t = ov[@"t"];
     if (expectedType && ![t isEqualToString:expectedType]) return nil;
@@ -158,10 +194,11 @@ void FBTMobileConfigClearAllOverrides(void) {
 
 NSArray<NSDictionary *> *FBTMobileConfigSnapshot(void) {
     pthread_mutex_lock(&sLock);
-    NSArray *values = [[sSeen allValues] copy] ?: @[];
+    NSMutableArray *values = [NSMutableArray arrayWithCapacity:sSeen.count];
+    for (NSDictionary *entry in sSeen.allValues) [values addObject:[entry copy]];
+    NSDictionary *overrides = sOverrides ?: @{};
     pthread_mutex_unlock(&sLock);
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:values.count];
-    NSDictionary *overrides = sOverrides ?: @{};
     for (NSDictionary *e in values) {
         NSMutableDictionary *m = [e mutableCopy];
         NSDictionary *ov = overrides[e[@"key"]];
@@ -260,6 +297,15 @@ void FBTInstallMobileConfigRuntime(void) {
         { "MSGCSessionedMobileConfigGetDouble",  (void *)fbt_MSGCSessionedMobileConfigGetDouble,  (void **)&orig_MSGCSessionedMobileConfigGetDouble },
         { "MSGCSessionedMobileConfigGetString",  (void *)fbt_MSGCSessionedMobileConfigGetString,  (void **)&orig_MSGCSessionedMobileConfigGetString },
     };
-    rebind_symbols(rbs, 4);
-    FBTLog(@"MobileConfig runtime instalado: fishhook imports + native override context capture");
+    int status = rebind_symbols(rbs, 4);
+    NSDictionary *available = @{
+        @"bool_reader_available": @(orig_MSGCSessionedMobileConfigGetBoolean != NULL),
+        @"int64_reader_available": @(orig_MSGCSessionedMobileConfigGetInt64 != NULL),
+        @"double_reader_available": @(orig_MSGCSessionedMobileConfigGetDouble != NULL),
+        @"string_reader_available": @(orig_MSGCSessionedMobileConfigGetString != NULL),
+        @"rebind_status": @(status),
+        @"capture_surface": @"import pointers only; registration does not prove a reader was called"
+    };
+    FBTMobileConfigFetchDiagnosticsRecord(@"runtime_import_hooks", available);
+    FBTLog(@"MobileConfig runtime: requested import registration; %@", available);
 }

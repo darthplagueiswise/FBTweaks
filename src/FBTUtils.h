@@ -19,6 +19,7 @@
 // Sessão (FBSession) do host, p/ chamadas baseadas em sessão (internal settings).
 + (void)setStoredSession:(id)session;
 + (id)storedSession;
++ (void)showMessage:(NSString *)message title:(NSString *)title;
 
 @end
 

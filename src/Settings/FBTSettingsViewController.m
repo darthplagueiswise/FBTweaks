@@ -7,15 +7,24 @@
 #import "FBTFeatureParamsViewController.h"
 #import "../Runtime/FBTFlagCatalog.h"
 #import "../Runtime/FBTNativeMobileConfigOverrides.h"
+#import "../Runtime/FBTMCOverridesFile.h"
+#import "../Runtime/FBTMCPreferencesAudit.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
+#import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
 
 extern void FBTInstallLiquidGlassHooks(void);
+extern void FBTOpenNativeWhitehatSettings(void);
 
 static NSString * const FBTCellID = @"FBTCell";
 static NSString * const FBTSwitchCellID = @"FBTSwitchCell";
+static NSString * const FBTQESnapshotValidKey = @"FBTQESnapshotValid";
+static NSString * const FBTQESnapshotLegacyStateKey = @"FBTQESnapshotLegacyState";
+static NSString * const FBTQESnapshotBuiltinHashStateKey = @"FBTQESnapshotBuiltinHashState";
+static NSString * const FBTQELegacyConfigKey = @"84491:mobile_config_internal_settings_features";
+static NSString * const FBTQEBuiltinHashConfigKey = @"4626:mobileconfig_session";
 
 static uint64_t FBTParseUInt64String(NSString *string) {
     if (![string isKindOfClass:[NSString class]] || !string.length) return 0;
@@ -53,6 +62,15 @@ static UILabel *FBTSecondaryLabel(NSString *text) {
 }
 
 static NSString *FBTBoolText(BOOL v) { return v ? @"ON" : @"OFF"; }
+
+static NSString *FBTMCStateLabel(FBTMCState state) {
+    switch (state) {
+        case FBTMCStateOff: return @"OFF";
+        case FBTMCStateOn: return @"ON";
+        case FBTMCStateSys:
+        default: return @"SYS (sem override explícito)";
+    }
+}
 
 static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack) {
     NSString *q = [query.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
@@ -137,7 +155,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.sections = @[
         @[
             @{ @"kind": @"switch", @"title": @"Tweak ativada", @"subtitle": @"Kill switch global.", @"key": FBTKeyMasterEnabled },
-            @{ @"kind": @"switch", @"title": @"Long-press abre ajustes", @"subtitle": @"Segura a tab bar por ~0,6s.", @"key": FBTKeyOpenLongPress },
+            @{ @"kind": @"switch", @"title": @"Toque duplo com três dedos", @"subtitle": @"Abre a FBTweak em qualquer tela. O ícone em Configurações continua disponível.", @"key": FBTKeyOpenThreeFingerDoubleTap },
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
@@ -154,9 +172,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"nav", @"title": @"Dating / Gemstone — gates", @"subtitle": @"Gates employee/test-user/internal via mc_overrides.json nativo.", @"dest": @"feat:DatingGemstone" },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"fishhook nos imports + captura ObjC/RCT MobileConfig pós-launch. Abrir MobileConfig Live também instala manualmente na sessão.", @"key": FBTKeyMobileConfigRuntimeEnabled },
-            @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Guarda chave viva, tipo, default, resultado e contador.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Log de fetch QE-info (ON/OFF)", @"subtitle": @"Ligue aqui antes de reproduzir. Captura retorno nativo e erro/status HTTP/Tigon disponíveis; nunca grava cookies nem corpo da resposta.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
+            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
+            @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
+            @{ @"kind": @"switch", @"title": @"Log de fetch QE-info (ON/OFF)", @"subtitle": @"Registra eventos, erros e payloads nas rotas capturadas. Não ativa o aquecimento; veja a cobertura no diagnóstico exportado.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
@@ -169,7 +187,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
+            @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
+            @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
         ],
     ];
@@ -187,7 +207,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"MobileConfig runtime instala fishhook nos imports e hooks ObjC/RCT leves pós-launch. O novo build importa FBMobileConfigSetSkipOverrideCheckEnabled; quando presente a tweak chama essa API antes de aplicar override nativo.";
+    if (section == 2) return @"Ativar a instrumentação ou o log não confirma que o fetch funcionou. Confira os hooks disponíveis, leituras observadas e respostas no diagnóstico.";
     if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
     return nil;
 }
@@ -238,6 +258,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
+        FBTMobileConfigSetSessionActive(sender.isOn);
         if (sender.isOn) {
             FBTInstallMobileConfigRuntime();
             FBTInstallNativeMobileConfigContextCapture();
@@ -246,6 +267,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         if (sender.isOn) {
+            FBTMobileConfigResponseCaptureInstall();
             FBTInstallMobileConfigDebugUIBootstrap();
             FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
             [self showInfoTitle:@"QE-info diagnostics ativado"
@@ -285,6 +307,105 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
 }
 
+- (void)applyQEFlagABTest:(NSString *)variant {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    FBTMCState legacyState;
+    FBTMCState hashState;
+
+    if ([prefs boolForKey:FBTQESnapshotValidKey]) {
+        legacyState = (FBTMCState)[prefs integerForKey:FBTQESnapshotLegacyStateKey];
+        hashState = (FBTMCState)[prefs integerForKey:FBTQESnapshotBuiltinHashStateKey];
+    } else {
+        legacyState = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+        hashState = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+        [prefs setInteger:legacyState forKey:FBTQESnapshotLegacyStateKey];
+        [prefs setInteger:hashState forKey:FBTQESnapshotBuiltinHashStateKey];
+        [prefs setBool:YES forKey:FBTQESnapshotValidKey];
+        [prefs synchronize];
+    }
+
+    // Reapply the pre-test baseline first so switching A/B cannot leave both
+    // candidates disabled at once. SYS removes the explicit entry.
+    [FBTMCOverridesFile setState:legacyState forConfig:FBTQELegacyConfigKey
+                        paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+    [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
+                        paramIdx:4 name:@"use_builtin_query_hash"];
+
+    NSString *testedFlag = @"baseline (nenhuma flag alterada)";
+    if ([variant isEqualToString:@"legacy"]) {
+        [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQELegacyConfigKey
+                            paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+        testedFlag = @"mobileconfig_use_legacy_refresh";
+    } else if ([variant isEqualToString:@"hash"]) {
+        [FBTMCOverridesFile setState:FBTMCStateOff forConfig:FBTQEBuiltinHashConfigKey
+                            paramIdx:4 name:@"use_builtin_query_hash"];
+        testedFlag = @"use_builtin_query_hash";
+    }
+
+    FBTMCState currentLegacy = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+    FBTMCState currentHash = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+    BOOL stateWritten = [FBTMCOverridesFile fileExists] &&
+        (currentLegacy == ([variant isEqualToString:@"legacy"] ? FBTMCStateOff : legacyState)) &&
+        (currentHash == ([variant isEqualToString:@"hash"] ? FBTMCStateOff : hashState));
+    if (!stateWritten) {
+        [self showInfoTitle:@"Não consegui confirmar o ajuste"
+                    message:[NSString stringWithFormat:@"O estado esperado não foi relido de mc_overrides.json.\nPath: %@\nLegacy: %@ · query hash: %@\nNão execute a comparação até corrigir o path do arquivo.",
+                        [FBTMCOverridesFile path] ?: @"unknown",
+                        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash)]];
+        return;
+    }
+    NSString *message = [NSString stringWithFormat:
+        @"Teste isolado gravado em mc_overrides.json.\n\n"
+         @"mobileconfig_use_legacy_refresh: %@\n"
+         @"use_builtin_query_hash: %@\n\n"
+         @"Reinicie o Facebook, ative o log QE-info e execute Force name download. Compare name_download_completed, qe_info_request_returned e query_hash_state.\n\n"
+         @"Importante: isso confirma apenas o estado gravado no arquivo, não que a versão atual do app reconheça esses parâmetros. No AppGroup analisado, os dois configs não apareceram nos sidecars ativos de nomes; se não houver mudança, o próximo passo é confirmar resolução/schema, não desligar outras flags em lote.\n\n"
+         @"Flag isolada neste teste: %@%@",
+        FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag,
+        ([variant isEqualToString:@"legacy"] && legacyState == FBTMCStateOff) ?
+            @"\nATENÇÃO: legacy refresh já estava OFF na linha de base; a intervenção não muda esse valor." :
+        (([variant isEqualToString:@"hash"] && hashState == FBTMCStateOff) ?
+            @"\nATENÇÃO: builtin query hash já estava OFF na linha de base; a intervenção não muda esse valor." : @"")];
+    [self showInfoTitle:@"Teste A/B QE-info preparado" message:message];
+}
+
+- (void)restoreQEFlagABTest {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    if (![prefs boolForKey:FBTQESnapshotValidKey]) {
+        [self showInfoTitle:@"Sem snapshot A/B" message:@"Nenhum estado anterior foi salvo por este teste; não alterei o arquivo."];
+        return;
+    }
+
+    FBTMCState legacyState = (FBTMCState)[prefs integerForKey:FBTQESnapshotLegacyStateKey];
+    FBTMCState hashState = (FBTMCState)[prefs integerForKey:FBTQESnapshotBuiltinHashStateKey];
+    [FBTMCOverridesFile setState:legacyState forConfig:FBTQELegacyConfigKey
+                        paramIdx:2 name:@"mobileconfig_use_legacy_refresh"];
+    [FBTMCOverridesFile setState:hashState forConfig:FBTQEBuiltinHashConfigKey
+                        paramIdx:4 name:@"use_builtin_query_hash"];
+
+    FBTMCState restoredLegacy = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+    FBTMCState restoredHash = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+    if (![FBTMCOverridesFile fileExists] || restoredLegacy != legacyState || restoredHash != hashState) {
+        [self showInfoTitle:@"Restauração não confirmada"
+                    message:[NSString stringWithFormat:@"O estado anterior não foi relido do arquivo. O snapshot foi mantido para tentar novamente.\nPath: %@\nLegacy: %@ · query hash: %@",
+                        [FBTMCOverridesFile path] ?: @"unknown",
+                        FBTMCStateLabel(restoredLegacy), FBTMCStateLabel(restoredHash)]];
+        return;
+    }
+
+    [prefs removeObjectForKey:FBTQESnapshotValidKey];
+    [prefs removeObjectForKey:FBTQESnapshotLegacyStateKey];
+    [prefs removeObjectForKey:FBTQESnapshotBuiltinHashStateKey];
+    [prefs synchronize];
+
+    [self showInfoTitle:@"Overrides restaurados"
+                message:[NSString stringWithFormat:
+                    @"Estado anterior restaurado em mc_overrides.json.\n"
+                     @"mobileconfig_use_legacy_refresh: %@\n"
+                     @"use_builtin_query_hash: %@",
+                    FBTMCStateLabel(legacyState), FBTMCStateLabel(hashState)]];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
@@ -303,11 +424,38 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         NSString *action = item[@"action"];
         if ([action isEqualToString:@"native"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
+        } else if ([action isEqualToString:@"whitehat"]) {
+            FBTOpenNativeWhitehatSettings();
         } else if ([action isEqualToString:@"ensure_mc_file"]) {
             BOOL ok = FBTNativeMobileConfigEnsureOverridesFile();
             NSString *path = FBTNativeMobileConfigOverridesFilePath() ?: @"path ainda não capturado";
             UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"Arquivo pronto" : @"Sem path nativo" message:[NSString stringWithFormat:@"%@\n%@", path, FBTNativeMobileConfigStatus() ?: @""] preferredStyle:UIAlertControllerStyleAlert];
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+        } else if ([action isEqualToString:@"qe_ab"]) {
+            FBTMCState legacyState = [FBTMCOverridesFile stateForConfig:FBTQELegacyConfigKey paramIdx:2];
+            FBTMCState hashState = [FBTMCOverridesFile stateForConfig:FBTQEBuiltinHashConfigKey paramIdx:4];
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Teste A/B QE-info"
+                message:[NSString stringWithFormat:
+                    @"Estado atual gravado no arquivo:\nlegacy refresh: %@\nbuiltin query hash: %@\n\nEscolha uma hipótese. O teste anterior não é combinado com o atual; use Restaurar para voltar ao estado salvo.",
+                    FBTMCStateLabel(legacyState), FBTMCStateLabel(hashState)]
+                preferredStyle:UIAlertControllerStyleActionSheet];
+            [a addAction:[UIAlertAction actionWithTitle:@"0 — Baseline (sem alteração)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"baseline"];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"A — legacy refresh OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"legacy"];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"B — builtin query hash OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+                [self applyQEFlagABTest:@"hash"];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"Restaurar estado anterior" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) {
+                [self restoreQEFlagABTest];
+            }]];
+            [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
+            UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+            a.popoverPresentationController.sourceView = cell;
+            a.popoverPresentationController.sourceRect = cell.bounds;
             [self presentViewController:a animated:YES completion:nil];
         } else if ([action isEqualToString:@"clear"]) {
             UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Limpar overrides?" message:@"Remove overrides MobileConfig e Runtime BOOL salvos. Hooks já instalados continuam chamando orig quando não houver override." preferredStyle:UIAlertControllerStyleActionSheet];
@@ -332,8 +480,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.title = @"MobileConfig Live";
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
     UIBarButtonItem *diagnostics = [[UIBarButtonItem alloc] initWithTitle:@"Fetch log" style:UIBarButtonItemStylePlain target:self action:@selector(showFetchDiagnostics)];
+    UIBarButtonItem *plistAudit = [[UIBarButtonItem alloc] initWithTitle:@"Plist audit" style:UIBarButtonItemStylePlain target:self action:@selector(showOverridesPlistAudit)];
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reloadSnapshot)];
-    self.navigationItem.rightBarButtonItems = @[diagnostics, refresh];
+    self.navigationItem.rightBarButtonItems = @[diagnostics, plistAudit, refresh];
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -342,7 +491,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     // Ação manual pós-launch: evita o watchdog do ctor, mas faz o browser
     // funcionar quando o usuário abre a tela. Inclui RCTMobileConfigNative e
     // readers ObjC genéricos do novo FBReactNativeProductsFramework.
-    FBTInstallMobileConfigRuntime();
+    FBTMobileConfigSetSessionActive(YES);
     FBTInstallNativeMobileConfigContextCapture();
     FBTMobileConfigReloadPrefs();
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadSnapshot) name:FBTMobileConfigDidUpdateNotification object:nil];
@@ -356,6 +505,63 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.navigationItem.prompt = FBTNativeMobileConfigStatus();
     self.entries = FBTMobileConfigSnapshot();
     [self applyFilter];
+}
+
+
+- (void)showOverridesPlistAudit {
+    NSDictionary *report = FBTMCPreferencesAuditRun() ?: @{};
+    NSArray<NSDictionary *> *mismatches = [report[@"mismatches"] isKindOfClass:[NSArray class]] ? report[@"mismatches"] : @[];
+    NSMutableString *summary = [NSMutableString stringWithFormat:
+        @"Bundle ID: %@\nOverride: %@\nOverride JSON: %@ · file %@\nEffective plist: %@\n\n"
+         @"Rows inspected: %@\nMatch: %@ · Mismatch: %@\nNot represented in plist: %@\nPlist entries without value: %@\nMalformed: %@\nPlist candidates found: %@ · startup configs: %@\n\n",
+        report[@"bundle_id"] ?: @"unknown",
+        report[@"override_file_path"] ?: @"not_found",
+        [report[@"override_json_valid"] boolValue] ? @"valid" : @"invalid / unavailable",
+        [report[@"override_file_exists"] boolValue] ? @"exists" : @"missing",
+        report[@"preferences_plist_path"] ?: @"not_found",
+        report[@"override_rows_total"] ?: @0,
+        report[@"values_matching_plist"] ?: @0,
+        report[@"values_mismatching_plist"] ?: @0,
+        report[@"parameters_not_represented_in_plist"] ?: @0,
+        report[@"plist_entries_without_v"] ?: @0,
+        report[@"malformed_override_rows"] ?: @0,
+        report[@"preferences_plist_candidates_found"] ?: @0,
+        report[@"startup_config_entries"] ?: @0];
+    if (mismatches.count) {
+        [summary appendString:@"\nDivergências (override → plist):\n"];
+        NSUInteger limit = MIN(mismatches.count, 18);
+        for (NSUInteger i = 0; i < limit; i++) {
+            NSDictionary *item = mismatches[i];
+            [summary appendFormat:@"• %@.%@: %@ → %@\n",
+                item[@"config"] ?: @"?",
+                item[@"param"] ?: @"?",
+                item[@"override_value"] ?: @"?",
+                item[@"plist_value"] ?: @"?"];
+        }
+        if (mismatches.count > limit) {
+            [summary appendFormat:@"… mais %lu divergências; copie o JSON completo.\n",
+                (unsigned long)(mismatches.count - limit)];
+        }
+    } else {
+        [summary appendString:@"\nNenhuma divergência entre as entradas comparáveis encontradas."];
+    }
+    [summary appendString:@"\n\n‘Não representado no plist’ não é contado como divergência: significa que esse config.param não existe no mapa FBMobileConfigStartupConfigs selecionado. A auditoria compara estado persistido; sozinha, não prova que um reader em runtime consumiu o override."];
+    if ([report[@"audit_report_path"] isKindOfClass:[NSString class]]) {
+        [summary appendFormat:@"\n\nJSON completo: %@", report[@"audit_report_path"]];
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"mc_overrides ↔ Preferences plist"
+                                                                   message:summary
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar JSON completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        if ([NSJSONSerialization isValidJSONObject:report]) {
+            NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
+            NSString *json = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+            if (json.length) [UIPasteboard generalPasteboard].string = json;
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)showFetchDiagnostics {
@@ -409,6 +615,58 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             lastError[@"http_status"] ?: @"—",
             lastError[@"message"] ?: lastError[@"alert_message"] ?: lastError[@"alert"] ?: @"sem mensagem"];
     }
+    NSDictionary *bodyStatus = FBTMobileConfigResponseCaptureStatus();
+    [summary appendFormat:@"\nRaw response capture: NSURLSession %@ · Tigon %@ · state %@ · payload %@\n",
+        [bodyStatus[@"hook_installed"] boolValue] ? @"INSTALLED" : @"NOT INSTALLED",
+        [bodyStatus[@"tigon_hooks_installed"] boolValue] ? @"INSTALLED" : @"NOT INSTALLED",
+        bodyStatus[@"last_capture_status"] ?: @"unknown",
+        bodyStatus[@"last_payload_file"] ?: @"none"];
+    [summary appendFormat:@"Corpos salvos (todos os transports): %@ · respostas Tigon concluídas: %@ · contextos Tigon ativos: %@\n",
+        bodyStatus[@"captured_body_count"] ?: @0,
+        bodyStatus[@"tigon_completed_response_count"] ?: @0,
+        bodyStatus[@"tigon_context_count"] ?: @0];
+    NSDictionary *lastNameDownload = nil;
+    NSDictionary *lastResponseBody = nil;
+    NSDictionary *lastRequest = nil;
+    for (NSDictionary *event in [events.reverseObjectEnumerator allObjects]) {
+        if (!lastNameDownload && ([event[@"event"] isEqualToString:@"name_download_completed"] ||
+                                  [event[@"event"] isEqualToString:@"name_download_started"])) lastNameDownload = event;
+        if (!lastResponseBody && ([event[@"event"] isEqualToString:@"network_response_body_captured"] ||
+                                  [event[@"event"] isEqualToString:@"network_response_body_skipped"] ||
+                                  [event[@"event"] isEqualToString:@"tigon_response_body_unavailable"])) lastResponseBody = event;
+        if (!lastRequest && ([event[@"event"] isEqualToString:@"network_request_candidate"] ||
+                             [event[@"event"] isEqualToString:@"tigon_request_started"])) lastRequest = event;
+        if (lastNameDownload && lastResponseBody && lastRequest) break;
+    }
+    if (lastNameDownload) {
+        [summary appendFormat:@"Force name download: %@ · force %@ · success %@\n",
+            lastNameDownload[@"event"] ?: @"unknown",
+            lastNameDownload[@"force"] ?: @"—",
+            lastNameDownload[@"download_success"] ?: @"pending"];
+    }
+    NSDictionary *flagStateEvent = lastNameDownload ?: lastFetch;
+    if (flagStateEvent) {
+        [summary appendFormat:@"Override file state at event (not proof of runtime resolution): legacy refresh %@ · builtin query hash %@\n",
+            flagStateEvent[@"legacy_refresh_override_file_state"] ?: @"not recorded",
+            flagStateEvent[@"builtin_query_hash_override_file_state"] ?: @"not recorded"];
+    }
+    if (lastRequest) {
+        [summary appendFormat:@"Request boundary: %@ %@ · query_hash %@ (%@ chars) · one_query_hash %@ (%@ chars)\n",
+            lastRequest[@"request_method"] ?: @"?",
+            [NSString stringWithFormat:@"%@%@", lastRequest[@"request_host"] ?: @"", lastRequest[@"request_path"] ?: @""],
+            lastRequest[@"query_hash_state"] ?: @"missing",
+            lastRequest[@"query_hash_length"] ?: @0,
+            lastRequest[@"one_query_hash_state"] ?: @"missing",
+            lastRequest[@"one_query_hash_length"] ?: @0];
+    }
+    if (lastResponseBody) {
+        [summary appendFormat:@"Last response body: %@ · transport %@ · HTTP %@ · %@ bytes · %@\n",
+            lastResponseBody[@"body_capture_status"] ?: lastResponseBody[@"event"] ?: @"unknown",
+            lastResponseBody[@"transport"] ?: @"unknown",
+            ([lastResponseBody[@"http_status"] integerValue] > 0) ? lastResponseBody[@"http_status"] : @"not exposed",
+            lastResponseBody[@"response_bytes"] ?: @0,
+            lastResponseBody[@"payload_file"] ?: @"no file saved"];
+    }
     [summary appendString:@"\nQE-info cache:\n"];
     if (!qce.count) [summary appendString:@"  nenhum store QCE encontrado\n"];
     [qce enumerateObjectsUsingBlock:^(NSDictionary *store, NSUInteger idx, __unused BOOL *stop) {
@@ -429,6 +687,30 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Diagnóstico de fetch" message:summary preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Copiar JSON completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar última resposta bruta" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSString *body = FBTMobileConfigResponseCaptureLastBodyString();
+        if (body.length) {
+            [UIPasteboard generalPasteboard].string = body;
+        } else {
+            FBTLog(@"No captured text response body available; inspect AppGroup/mobileconfig/fbt_fetch_payloads and capture status.");
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Ver última resposta bruta" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSString *body = FBTMobileConfigResponseCaptureLastBodyString();
+        if (!body.length) body = @"Nenhum corpo de resposta textual foi capturado. Veja o estado do hook, o evento network_request_candidate e o arquivo do App Group.";
+        NSString *preview = body.length > 4500
+            ? [[body substringToIndex:4500] stringByAppendingString:@"\n\n[Prévia limitada; use Copiar última resposta bruta para o corpo completo.]"]
+            : body;
+        UIAlertController *detail = [UIAlertController alertControllerWithTitle:@"Última resposta bruta" message:preview preferredStyle:UIAlertControllerStyleAlert];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Copiar corpo completo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *copyAction) {
+            NSString *complete = FBTMobileConfigResponseCaptureLastBodyString();
+            if (complete.length) [UIPasteboard generalPasteboard].string = complete;
+        }]];
+        [detail addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self presentViewController:detail animated:YES completion:nil];
+        });
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];

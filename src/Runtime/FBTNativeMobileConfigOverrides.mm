@@ -20,7 +20,12 @@ class FBMobileConfigManager;
 class FBMobileConfigOverridesTable;
 }
 
-typedef std::shared_ptr<mobileconfig::FBMobileConfigManager> (*FBTGetManagerFn)(id context);
+// Build 583 exports no getMobileConfigManager C++ helper. The native ObjC
+// manager exposes these owning shared_ptr getters instead (ABI checked below).
+@protocol FBTMCNativeManagerGetter <NSObject>
+- (std::shared_ptr<mobileconfig::FBMobileConfigManager>)getCurrentManager;
+- (std::shared_ptr<mobileconfig::FBMobileConfigManager>)configManager;
+@end
 typedef std::shared_ptr<mobileconfig::FBMobileConfigOverridesTable> (*FBTGetOrCreateTableFn)(mobileconfig::FBMobileConfigManager *manager, bool create);
 typedef void (*FBTUpdateBoolFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, bool value, bool persist);
 typedef void (*FBTUpdateInt64Fn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, long long value, bool persist);
@@ -29,7 +34,6 @@ typedef void (*FBTUpdateStringFn)(mobileconfig::FBMobileConfigOverridesTable *ta
 typedef void (*FBTRemoveFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, bool persist);
 typedef void (*FBTSetSkipOverrideCheckEnabledFn)(BOOL enabled);
 
-static FBTGetManagerFn sGetManager = NULL;
 static FBTGetOrCreateTableFn sGetOrCreateTable = NULL;
 static FBTUpdateBoolFn sUpdateBool = NULL;
 static FBTUpdateInt64Fn sUpdateInt64 = NULL;
@@ -37,7 +41,7 @@ static FBTUpdateDoubleFn sUpdateDouble = NULL;
 static FBTUpdateStringFn sUpdateString = NULL;
 static FBTRemoveFn sRemove = NULL;
 static FBTSetSkipOverrideCheckEnabledFn sSetSkipOverrideCheckEnabled = NULL;
-static BOOL sSymbolsResolved = NO;
+static NSUInteger sLastMissingNativeSymbolMask = NSUIntegerMax;
 // O processo carrega classes do Facebook em fases (incluindo RN/RarelyUsed).
 // Revarremos quando a contagem de classes muda; os sets de hooks abaixo
 // tornam cada instalação idempotente.
@@ -57,26 +61,35 @@ typedef struct {
 } FBTContextHookDescriptor;
 
 static BOOL FBTResolveNativeSymbols(void) {
-    if (sSymbolsResolved) {
-        return sGetManager && sGetOrCreateTable && sUpdateBool && sUpdateInt64 && sUpdateDouble && sUpdateString && sRemove;
+    // dlsym receives the ABI name, without Mach-O's additional underscore.
+    // Retry unresolved exports: a failed lookup before a framework loads must
+    // not disable this bridge for the rest of the process.
+    if (!sGetOrCreateTable) sGetOrCreateTable = (FBTGetOrCreateTableFn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb");
+    if (!sUpdateBool) sUpdateBool = (FBTUpdateBoolFn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb");
+    if (!sUpdateInt64) sUpdateInt64 = (FBTUpdateInt64Fn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb");
+    if (!sUpdateDouble) sUpdateDouble = (FBTUpdateDoubleFn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb");
+    if (!sUpdateString) sUpdateString = (FBTUpdateStringFn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb");
+    if (!sRemove) sRemove = (FBTRemoveFn)dlsym(RTLD_DEFAULT, "_ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb");
+    // Optional; it is absent from the supplied Facebook 583 IPA. Do not infer
+    // availability from a historical config name or call an invented address.
+    if (!sSetSkipOverrideCheckEnabled) sSetSkipOverrideCheckEnabled = (FBTSetSkipOverrideCheckEnabledFn)dlsym(RTLD_DEFAULT, "FBMobileConfigSetSkipOverrideCheckEnabled");
+
+    BOOL ok = sGetOrCreateTable && sUpdateBool && sUpdateInt64 && sUpdateDouble && sUpdateString && sRemove;
+    NSUInteger missingMask = (!sGetOrCreateTable ? 2u : 0u) |
+        (!sUpdateBool ? 4u : 0u) | (!sUpdateInt64 ? 8u : 0u) | (!sUpdateDouble ? 16u : 0u) |
+        (!sUpdateString ? 32u : 0u) | (!sRemove ? 64u : 0u);
+    if (missingMask != sLastMissingNativeSymbolMask) {
+        sLastMissingNativeSymbolMask = missingMask;
+        NSMutableArray *missing = [NSMutableArray array];
+        if (!sGetOrCreateTable) [missing addObject:@"getOrCreateOverridesTable"];
+        if (!sUpdateBool) [missing addObject:@"updateOverrideForParam(bool)"];
+        if (!sUpdateInt64) [missing addObject:@"updateOverrideForParam(int64)"];
+        if (!sUpdateDouble) [missing addObject:@"updateOverrideForParam(double)"];
+        if (!sUpdateString) [missing addObject:@"updateOverrideForParam(string)"];
+        if (!sRemove) [missing addObject:@"removeOverrideForParam"];
+        FBTLog(@"native MC C++ bridge: %@; missing=%@; optional skip API=%@",
+               ok ? @"OK" : @"unavailable", missing, sSetSkipOverrideCheckEnabled ? @"available" : @"absent");
     }
-    sSymbolsResolved = YES;
-
-    sGetManager = (FBTGetManagerFn)dlsym(RTLD_DEFAULT, "__Z22getMobileConfigManagerPU32objcproto21FBMobileConfigContext11objc_object");
-    sGetOrCreateTable = (FBTGetOrCreateTableFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb");
-    sUpdateBool = (FBTUpdateBoolFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb");
-    sUpdateInt64 = (FBTUpdateInt64Fn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb");
-    sUpdateDouble = (FBTUpdateDoubleFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb");
-    sUpdateString = (FBTUpdateStringFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb");
-    sRemove = (FBTRemoveFn)dlsym(RTLD_DEFAULT, "__ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb");
-    // Novo executable importa FBMobileConfigSetSkipOverrideCheckEnabled. Não é
-    // usado como hook/patch: quando existir no processo, chamamos a API normal
-    // antes de aplicar/remover override nativo para deixar o próprio MC aceitar
-    // o arquivo/tabela de override.
-    sSetSkipOverrideCheckEnabled = (FBTSetSkipOverrideCheckEnabledFn)dlsym(RTLD_DEFAULT, "FBMobileConfigSetSkipOverrideCheckEnabled");
-
-    BOOL ok = sGetManager && sGetOrCreateTable && sUpdateBool && sUpdateInt64 && sUpdateDouble && sUpdateString && sRemove;
-    FBTLog(@"native MC symbols: %@", ok ? @"OK" : @"missing");
     return ok;
 }
 
@@ -161,6 +174,28 @@ static NSArray *FBTNativeOverrideObjectsSnapshot(void) {
     return items ?: @[];
 }
 
+static NSArray<NSString *> *FBTNativeMobileConfigGroupCandidates(void) {
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    NSMutableOrderedSet<NSString *> *groups = [NSMutableOrderedSet orderedSet];
+    if ([bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]) {
+        [groups addObject:@"group.facebook.ota"];
+        [groups addObject:@"group.com.facebook.ota"];
+    } else if ([bundleID.lowercaseString isEqualToString:@"com.facebook.facebook"]) {
+        [groups addObject:@"group.com.facebook.Facebook"];
+        [groups addObject:@"group.facebook.Facebook"];
+    }
+    if (bundleID.length) [groups addObject:[@"group." stringByAppendingString:bundleID]];
+    if ([bundleID hasPrefix:@"com."] && bundleID.length > 4) {
+        [groups addObject:[@"group." stringByAppendingString:[bundleID substringFromIndex:4]]];
+    }
+    [groups addObject:@"group.com.facebook.Facebook"];
+    [groups addObject:@"group.facebook.ota"];
+    [groups addObject:@"group.com.facebook.ota"];
+    [groups addObject:@"group.com.facebook.dogfood.internal"];
+    [groups addObject:@"group.com.facebook.family"];
+    return groups.array;
+}
+
 NSString *FBTNativeMobileConfigOverridesFilePath(void) {
     SEL pathSel = NSSelectorFromString(@"getOverridesTablePath");
     for (id obj in FBTNativeOverrideObjectsSnapshot()) {
@@ -172,18 +207,33 @@ NSString *FBTNativeMobileConfigOverridesFilePath(void) {
         } @catch (__unused NSException *e) {
         }
     }
-    NSArray<NSString *> *groups = @[
-        @"group.com.facebook.dogfood.internal",
-        @"group.com.facebook.Facebook",
-        @"group.com.facebook.family"
-    ];
-    for (NSString *group in groups) {
-        NSURL *url = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:group];
-        if (url.path.length) {
-            return [[url URLByAppendingPathComponent:@"mobileconfig/mc_overrides.json"] path];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
+    NSString *fallbackPath = nil;
+    for (NSString *group in FBTNativeMobileConfigGroupCandidates()) {
+        NSURL *url = [fm containerURLForSecurityApplicationGroupIdentifier:group];
+        if (!url.path.length) continue;
+
+        NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+        // Keep a pre-existing file in its actual location. Some builds use
+        // AppGroup/Documents/mobileconfig; others export mobileconfig directly
+        // at the shared-container root.
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        [candidates addObject:[[url.path stringByAppendingPathComponent:@"AppData/Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
+        for (NSString *candidate in candidates) {
+            if ([fm fileExistsAtPath:candidate]) return candidate;
         }
+
+        // With no existing file, create the path for the suite inferred from
+        // the active bundle, rather than taking the first unrelated group.
+        NSString *preferredRelative = [bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]
+            ? @"Documents/mobileconfig/mc_overrides.json"
+            : @"mobileconfig/mc_overrides.json";
+        if (!fallbackPath) fallbackPath = [url.path stringByAppendingPathComponent:preferredRelative];
     }
-    return nil;
+    return fallbackPath;
 }
 
 
@@ -258,7 +308,17 @@ static BOOL FBTApplyWithObjCOverrideObject(id object, uint64_t key, NSString *ty
 static BOOL FBTApplyWithTable(id context, uint64_t key, NSString *type, id value, BOOL remove) {
     if (!context || !FBTResolveNativeSymbols()) return NO;
     try {
-        std::shared_ptr<mobileconfig::FBMobileConfigManager> manager = sGetManager(context);
+        std::shared_ptr<mobileconfig::FBMobileConfigManager> manager;
+        const char *expected = "{shared_ptr<mobileconfig::FBMobileConfigManager>=^{FBMobileConfigManager}^{__shared_weak_count}}16@0:8";
+        for (NSString *selectorName in @[@"getCurrentManager", @"configManager"]) {
+            SEL selector = NSSelectorFromString(selectorName);
+            Method method = class_getInstanceMethod([context class], selector);
+            if (!method || strcmp(method_getTypeEncoding(method), expected) != 0) continue;
+            id<FBTMCNativeManagerGetter> owner = context;
+            manager = [selectorName isEqualToString:@"getCurrentManager"]
+                ? [owner getCurrentManager] : [owner configManager];
+            if (manager.get()) break;
+        }
         if (!manager.get()) return NO;
         std::shared_ptr<mobileconfig::FBMobileConfigOverridesTable> table = sGetOrCreateTable(manager.get(), true);
         if (!table.get()) return NO;

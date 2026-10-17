@@ -138,7 +138,7 @@ static void FBTInstallGateFamiliesForKey(NSString *key, BOOL enabled) {
         [runtime insertObject:@{
             @"kind": @"switch",
             @"title": @"Aquecer MobileConfig nativo",
-            @"subtitle": @"Instala readers/context antes da seleção, faz um retry tipado e mantém fallback local se o QE server continuar indisponível.",
+            @"subtitle": @"Prepara a interface, repete uma seleção com falha uma vez e oferece override local após a segunda falha.",
             @"key": FBTKeyMobileConfigNativeUIWarmupEnabled,
         } atIndex:index];
     }
