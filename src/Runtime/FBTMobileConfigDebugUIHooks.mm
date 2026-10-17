@@ -6,6 +6,7 @@
 #import "FBTMobileConfigDebugUIHooks.h"
 #import "../Settings/FBTLocalConfigViewController.h"
 #import "FBTMobileConfigResponseCapture.h"
+#import "FBTMobileConfigQueryContext.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -72,6 +73,7 @@ static FBTQEInfoRefreshNamesOrig orig_FBMobileConfigQEInfoRefreshNames = NULL;
 static FBTNSErrorInitOrig orig_NSError_initWithDomain = NULL;
 static char kFBTMCSelectionKey;
 static NSDictionary *sLatestNativeUIContexts;
+static void (*orig_FBMobileConfigDebug_selectItem)(id, SEL, id);
 
 @interface FBTMobileConfigViewController : UITableViewController
 @end
@@ -180,22 +182,28 @@ static bool fbt_FBMobileConfigQEInfoFetch(void *manager, void *query,
         @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3)
     });
     CFTimeInterval started = CACurrentMediaTime();
+    NSArray<FBTMobileConfigQueryContext *> *matchingQueries = [FBTMobileConfigQueryContext
+        contextsMatchingConfig:FBTStringFromStdString(arg2) param:FBTStringFromStdString(arg3)];
+    void *queryScope = FBTMobileConfigFetcherCaptureBeginScope();
     ++sQEInfoFetchDepth;
     bool result = false;
     try {
         result = orig_FBMobileConfigQEInfoFetch(manager, query, arg2, arg3,
                                                 metaMap, universeInfos, gkInfos);
     } catch (...) {
+        FBTMobileConfigFetcherCaptureEndScope(queryScope);
         --sQEInfoFetchDepth;
         FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_request_exception", @{
             @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3)
         });
         throw;
     }
+    NSInteger httpStatus = FBTMobileConfigFetcherCaptureEndScope(queryScope);
+    for (FBTMobileConfigQueryContext *context in matchingQueries) context.httpStatus = httpStatus;
     --sQEInfoFetchDepth;
     FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_request_returned", @{
         @"arg2": FBTStringFromStdString(arg2), @"arg3": FBTStringFromStdString(arg3),
-        @"fetch_result": @(result), @"duration_ms": @((CACurrentMediaTime() - started) * 1000.0),
+        @"fetch_result": @(result), @"http_status": @(httpStatus), @"matched_ui_query_count": @(matchingQueries.count), @"duration_ms": @((CACurrentMediaTime() - started) * 1000.0),
         @"output_universe_nonempty": @(FBTStdVectorHasElements(universeInfos)),
         @"output_gk_nonempty": @(FBTStdVectorHasElements(gkInfos)),
         @"metamap_argument_present": @(metaMap != NULL)
@@ -309,7 +317,8 @@ static void FBTCallOriginalSelection(id controller, SEL selector, FBTMCSelection
 
 static void FBTOpenLocalMobileConfigFallback(UIViewController *presenter) {
     FBTMCSelection *selection = objc_getAssociatedObject(presenter, &kFBTMCSelectionKey);
-    NSString *query = selection ? FBTStringFromStdString(selection->_configName) : @"";
+    FBTMobileConfigQueryContext *context = [FBTMobileConfigQueryContext contextForOwner:presenter];
+    NSString *query = context.configName ?: (selection ? FBTStringFromStdString(selection->_configName) : @"");
     FBTLocalConfigViewController *local = [[FBTLocalConfigViewController alloc] initWithSearchQuery:query];
     if (!local) return;
 
@@ -405,6 +414,17 @@ static void fbt_FBMobileConfigDebug_viewDidLoad(id self, SEL _cmd) {
     controller.navigationItem.rightBarButtonItems = items;
 }
 
+static void fbt_FBMobileConfigDebug_selectItem(id self, SEL selector, id item) {
+    FBTMobileConfigQueryContext *context = [FBTMobileConfigQueryContext beginForOwner:self encodedSearchItem:item];
+    // Item selections can fail on a background QE lookup before selectParam is
+    // reached. Clear any older typed selection, but keep the original item flow.
+    objc_setAssociatedObject(self, &kFBTMCSelectionKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    FBTMobileConfigFetchDiagnosticsRecord(@"item_selection_started", @{
+        @"config": context.configName ?: @"unknown", @"param": context.paramName ?: @""
+    });
+    if (orig_FBMobileConfigDebug_selectItem) orig_FBMobileConfigDebug_selectItem(self, selector, item);
+}
+
 static void fbt_FBMobileConfigDebug_selectParam(id self,
                                                  SEL _cmd,
                                                  const std::string &param,
@@ -414,6 +434,7 @@ static void fbt_FBMobileConfigDebug_selectParam(id self,
                                                  NSString *backendName) {
     FBTCaptureNativeUIManagers(self);
     FBTMobileConfigDebugWarmup();
+    [FBTMobileConfigQueryContext beginForOwner:self config:FBTStringFromStdString(configName) param:FBTStringFromStdString(param)];
 
     FBTMCSelection *selection = [[FBTMCSelection alloc] initWithParam:param
                                                                   key:key
@@ -465,16 +486,18 @@ static void fbt_FBMobileConfigDebug_present(id self,
                                              void (^completion)(void)) {
     if (FBTIsTransientParamInfoAlert(controller)) {
         FBTMCSelection *selection = objc_getAssociatedObject(self, &kFBTMCSelectionKey);
+        FBTMobileConfigQueryContext *queryContext = [FBTMobileConfigQueryContext contextForOwner:self];
         FBTMobileConfigFetchDiagnosticsRecord(@"qe_info_failure_alert", @{
             @"alert": ((UIAlertController *)controller).title ?: @"",
             @"alert_message": ((UIAlertController *)controller).message ?: @"",
             @"key": @(selection ? selection->_key : 0),
-            @"param": selection ? FBTStringFromStdString(selection->_param) : @"unknown",
-            @"config": selection ? FBTStringFromStdString(selection->_configName) : @"unknown",
+            @"param": queryContext.paramName ?: (selection ? FBTStringFromStdString(selection->_param) : @"unknown"),
+            @"config": queryContext.configName ?: (selection ? FBTStringFromStdString(selection->_configName) : @"unknown"),
             @"retry": @(selection ? selection->_retryCount : 0),
             @"context_count": @(FBTNativeMobileConfigContextCount())
         });
         NSInteger httpStatus = FBTMobileConfigFetcherCaptureCurrentHTTPStatus();
+        if (!httpStatus) httpStatus = queryContext.httpStatus;
         if (!httpStatus && selection) httpStatus = selection->_lastHTTPStatus;
         BOOL rejected = httpStatus == 400 || httpStatus == 401 || httpStatus == 403 ||
                         httpStatus == 404 || httpStatus == 410 || httpStatus == 422;
@@ -535,6 +558,11 @@ void FBTInstallMobileConfigDebugUIHooks(void) {
                             (IMP *)&orig_FBMobileConfigDebug_viewDidLoad);
         }
 
+        SEL itemSel = sel_registerName("selectMobileConfigItem:");
+        if (!orig_FBMobileConfigDebug_selectItem && FBTMCUIEncodingEquals(cls, itemSel, "v24@0:8@16")) {
+            MSHookMessageEx(cls, itemSel, (IMP)fbt_FBMobileConfigDebug_selectItem, (IMP *)&orig_FBMobileConfigDebug_selectItem);
+        }
+
         SEL selectSel = sel_registerName("selectParam:key:configName:backendType:backendName:");
         if (!orig_FBMobileConfigDebug_selectParam &&
             FBTMCUIEncodingEquals(cls, selectSel, "v52@0:8r^v16i24r^v28q36@44")) {
@@ -589,6 +617,7 @@ NSDictionary *FBTMobileConfigDebugUIHookStatus(void) {
     return @{@"qe_info_hook_available": @(orig_FBMobileConfigQEInfoFetch != NULL),
         @"name_download_hook_available": @(orig_FBMobileConfigQEInfoRefreshNames != NULL),
         @"selection_hook_available": @(orig_FBMobileConfigDebug_selectParam != NULL),
+        @"item_selection_hook_available": @(orig_FBMobileConfigDebug_selectItem != NULL),
         @"error_metadata_hook_available": @(orig_NSError_initWithDomain != NULL),
         @"contexts": contexts};
 }

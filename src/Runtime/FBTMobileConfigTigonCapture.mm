@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <atomic>
 
 typedef void (*FBTTigonStartedOrig)(void *, const void *);
 typedef void (*FBTTigonBodyOrig)(void *, void *);
@@ -33,6 +34,18 @@ static FBTTigonErrorOrig sSimpleError;
 static BOOL sSimpleHooksInstalled;
 static NSString *sSimpleFailure;
 static void FBTInstallSimpleHooks(void);
+static thread_local void *sCurrentSimpleEnd;
+static thread_local BOOL sCurrentSimpleWasCaptured;
+static std::atomic<unsigned long long> sSimpleStartedCalls(0), sSimpleResponseCalls(0),
+    sSimpleBodyCalls(0), sSimpleEOMCalls(0), sSimpleErrorCalls(0), sNativeCorrelations(0);
+struct FBTSimpleEndScope {
+    void *previous;
+    BOOL previousCaptured;
+    FBTSimpleEndScope(void *current, BOOL captured) : previous(sCurrentSimpleEnd), previousCaptured(sCurrentSimpleWasCaptured) {
+        sCurrentSimpleEnd = current; sCurrentSimpleWasCaptured = captured;
+    }
+    ~FBTSimpleEndScope() { sCurrentSimpleEnd = previous; sCurrentSimpleWasCaptured = previousCaptured; }
+};
 
 static FBTTigonRequestURLFn sTigonRequestURL = nullptr;
 static FBTTigonStringGetterFn sTigonRequestMethod = nullptr;
@@ -310,14 +323,17 @@ static void FBTTigonOnEOM(void *self, void *summary) {
 // All shared callbacks forward the same pointer/ownership to their own
 // original exactly once. No status conversion or native retry is changed.
 static void FBTSimpleOnStarted(void *self, const void *request) {
+    ++sSimpleStartedCalls;
     FBTTigonCaptureStarted(self, request, YES);
     if (sSimpleStarted) sSimpleStarted(self, request);
 }
 static void FBTSimpleOnBody(void *self, void *body) {
+    ++sSimpleBodyCalls;
     FBTTigonCaptureBody(self, body);
     if (sSimpleBody) sSimpleBody(self, body);
 }
 static void FBTSimpleOnResponse(void *self, void *response) {
+    ++sSimpleResponseCalls;
     NSMutableDictionary *context = FBTTigonContextForObject(self);
     if (context && response && [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         // TigonResponse move constructor at 0xfde234 loads status with ldrh
@@ -337,12 +353,15 @@ static void FBTSimpleOnResponse(void *self, void *response) {
     if (sSimpleResponse) sSimpleResponse(self, response);
 }
 static void FBTSimpleOnEOM(void *self, void *summary) {
+    ++sSimpleEOMCalls;
+    FBTSimpleEndScope scope(self, FBTTigonContextForObject(self) != nil);
     // Save the copied error body before native EOM replaces it with the
     // formatted FBHTTPErrorDomain string in its failure callback.
     FBTTigonFinishCapture(self);
     if (sSimpleEOM) sSimpleEOM(self, summary);
 }
 static void FBTSimpleOnError(void *self, const void *error, void *summary) {
+    ++sSimpleErrorCalls;
     NSDictionary *context = FBTTigonContextForObject(self);
     if (context) {
         FBTTigonRecordContextEvent(@"tigon_network_error", context, @{
@@ -351,6 +370,40 @@ static void FBTSimpleOnError(void *self, const void *error, void *summary) {
         FBTTigonFinishCapture(self);
     }
     if (sSimpleError) sSimpleError(self, error, summary);
+}
+
+NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *request, BOOL success) {
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return @{};
+    if (!sCurrentSimpleEnd) return @{@"native_tigon_correlation": @"no_simple_eom_scope"};
+    ++sNativeCorrelations;
+    // Native completion establishes this is MC, even when Tigon omitted onStarted.
+    // EOM reject branch keeps the body in self+0x80 until the callback returns.
+    uint16_t status = 0;
+    memcpy(&status, (const uint8_t *)sCurrentSimpleEnd + 0x48, sizeof(status));
+    NSMutableDictionary *details = [request mutableCopy];
+    details[@"native_tigon_correlation"] = @"native_mc_completion_inside_simple_eom";
+    if (status < 100 || status > 599) {
+        details[@"body_capture_status"] = @"unrecognized_native_status";
+        return details;
+    }
+    details[@"http_status"] = @(status);
+    details[@"http_status_source"] = @"verified_simple_callbacks_response_state";
+    if (!success && status >= 400 && !sCurrentSimpleWasCaptured) {
+        void *head = nullptr;
+        memcpy(&head, (const uint8_t *)sCurrentSimpleEnd + 0x80, sizeof(head));
+        BOOL tooLarge = NO, invalid = NO;
+        NSData *body = FBTCopyIOBufChain(head, &tooLarge, &invalid);
+        details[@"payload_provenance"] = @"http_error_body_retained_during_native_mc_completion";
+        details[@"response_body_bytes"] = @(body.length);
+        if (tooLarge || invalid) {
+            details[@"body_capture_status"] = tooLarge ? @"over_2mb_limit" : @"iobuf_copy_failed";
+            FBTTigonRecordContextEvent(@"tigon_response_body_unavailable", details, @{});
+        } else {
+            FBTMobileConfigResponseCaptureWriteRawBody(body ?: [NSData data], @"", @"",
+                request[@"request_method"], details, request[@"capture_reason"], status, @"", @"TigonSimpleCallbacks/NativeMCCompletion");
+        }
+    }
+    return details;
 }
 
 static void FBTInstallSimpleHooks(void) {
@@ -412,6 +465,12 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
     }
     [sTigonCaptureLock lock];
     NSDictionary *status = @{
+        @"simple_started_calls": @(sSimpleStartedCalls.load()),
+        @"simple_response_calls": @(sSimpleResponseCalls.load()),
+        @"simple_body_calls": @(sSimpleBodyCalls.load()),
+        @"simple_eom_calls": @(sSimpleEOMCalls.load()),
+        @"simple_error_calls": @(sSimpleErrorCalls.load()),
+        @"native_tigon_correlations": @(sNativeCorrelations.load()),
         @"simple_callback_hooks_installed": @(sSimpleHooksInstalled),
         @"simple_callback_failure": sSimpleFailure ?: @"not_attempted",
         @"tigon_hooks_installed": @(sTigonHooksInstalled),

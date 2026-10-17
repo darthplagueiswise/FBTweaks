@@ -105,6 +105,8 @@ status_instruction = next(status_reader.disasm(bytes(shared.get_content_from_vir
 check('tigon_response_status_layout', status_instruction.mnemonic == 'ldrh' and status_instruction.op_str == 'w8, [x1], #8')
 started_dispatch = next(status_reader.disasm(bytes(shared.get_content_from_virtual_address(0x591360,4)),0x591360))
 check('simple_started_virtual_offset', started_dispatch.mnemonic == 'ldr' and started_dispatch.op_str == 'x2, [x8, #0x28]')
+body_instruction = next(status_reader.disasm(bytes(shared.get_content_from_virtual_address(0xfde24c,4)),0xfde24c))
+check('simple_callbacks_retained_body_layout', body_instruction.mnemonic == 'ldr' and body_instruction.op_str == 'x8, [x0, #0x80]!')
 expected_uuid = bytes([76,76,68,170,85,85,49,68,161,142,1,71,65,237,25,11])
 check('main_uuid', bytes(main.uuid.uuid) == expected_uuid, uuid=bytes(main.uuid.uuid).hex())
 for address, name in [(0x101010370, '10onResponse'), (0x101010378, '6onBody')]:
@@ -123,6 +125,7 @@ main_classes = objc_methods(main, main_raw, {'RCDMobileConfigParams'})
 shared_classes = objc_methods(shared, shared_raw, {'FBNavigationInfo', 'FBBugReportConfiguration', 'FBTabBarViewController', 'FBMobileConfigContextManager'})
 rare_classes = objc_methods(rare, rare_raw, {'_TtC31FBSettingsMenuItemHandlerPlugin25FBSettingsMenuItemHandler', 'FBWhitehatSettingsMenuItemHandler', 'FBMobileConfigDebugViewController'})
 expected = [
+    (rare_classes, 'FBMobileConfigDebugViewController', 'selectMobileConfigItem:', 'v24@0:8@16'),
     (shared_classes, 'FBMobileConfigContextManager', 'getCurrentManager', '{shared_ptr<mobileconfig::FBMobileConfigManager>=^{FBMobileConfigManager}^{__shared_weak_count}}16@0:8'),
     (main_classes, 'RCDMobileConfigParams', 'initWithClassesString:trackNSObjectBaseClass:isEventBasedTrigger:maxCycleLen:ignoreAppleClassesWithPrefix:peopleSampling:isEmployee:isEnabledProduction:shouldUseSwiftABITraversal:', '@68@0:8@16B24B28q32@40q48B56B60B64'),
     (shared_classes, 'FBNavigationInfo', 'infoWithViewController:method:options:completion:whenClosed:', '@56@0:8@16Q24Q32@?40@?48'),

@@ -19,6 +19,8 @@ NSInteger FBTMobileConfigFetcherCaptureCurrentHTTPStatus(void);
 NSInteger FBTMobileConfigFetcherCaptureEndScope(void *scope);
 
 NSDictionary *FBTMobileConfigTigonCaptureStatus(void);
+// Called only from the UUID-verified native MC completion. No onStarted required.
+NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *request, BOOL success);
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void);
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *host, NSString *path, NSString *reason);
 void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *host, NSString *path,

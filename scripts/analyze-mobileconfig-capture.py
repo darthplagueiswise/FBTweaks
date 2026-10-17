@@ -36,6 +36,15 @@ def summarize(diagnostic, archive=None):
               'qe_override_states': [{'legacy_refresh': state[0], 'builtin_query_hash': state[1], 'requests': count}
                                      for state, count in states.items()],
               'native_contexts': diagnostic.get('native_hooks', {}).get('contexts', {})}
+    session = diagnostic.get('process_session_id')
+    if session:
+        current_events = [event for event in events if event.get('process_session_id') == session]
+        current_diagnostic = {'events': current_events}
+        current = summarize(current_diagnostic)
+        result['current_process'] = {'retained_events': current['retained_events'],
+                                     'completed_requests': current['completed_requests'],
+                                     'flows': current['flows'],
+                                     'qe_override_states': current['qe_override_states']}
     if archive:
         payloads = {'json_count': 0, 'populated_config_responses': 0, 'empty_config_responses': 0,
                     'max_config_count': 0, 'formatted_error_text_count': 0}

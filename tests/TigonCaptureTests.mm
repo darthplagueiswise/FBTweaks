@@ -58,6 +58,10 @@ static void DeferredOriginal(const void *, const std::string &, const std::strin
         const FBTMCRequestPairs &, FBTMCCompletion completion, const std::string &, uint64_t) {
     sDeferredCompletion = std::move(completion);
 }
+static void CompletionFromNativeEOM(void *, void *summary) {
+    Check(summary == sExpectedSummary, @"EOM summary preserved without onStarted");
+    sDeferredCompletion(false, sNativeBody);
+}
 int main(void) { @autoreleasepool {
     sSaved = [NSMutableArray array]; sEvents = [NSMutableArray array];
     sTigonCaptureLock = [NSLock new]; sTigonCapturedRequests = [NSMutableDictionary dictionary];
@@ -114,5 +118,27 @@ int main(void) { @autoreleasepool {
     sDeferredCompletion(false, sNativeBody); sDeferredCompletion = nullptr;
     Check(sCompletionCalls == 3 && FBTMobileConfigFetcherCaptureCurrentHTTPStatus() == 0,
         @"late callback owns observation safely and cannot contaminate another selection");
+    // Reproduce the device path: EOM/native MC completion arrive with no
+    // onStarted context. Native error conversion still retains the IOBuf.
+    first.length = sizeof(a); first.data = a;
+    alignas(8) uint8_t nativeState[0x88] = {};
+    uint16_t errorStatus = 400; memcpy(nativeState + 0x48, &errorStatus, sizeof(errorStatus));
+    void *retainedBody = &first; memcpy(nativeState + 0x80, &retainedBody, sizeof(retainedBody));
+    NSUInteger before = sSaved.count;
+    sOriginalFetch = DeferredOriginal;
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    sSimpleEOM = CompletionFromNativeEOM;
+    FBTSimpleOnEOM(nativeState, &summary); sDeferredCompletion = nullptr;
+    Check(sSaved.count == before + 1 && [sSaved.lastObject[@"status"] integerValue] == 400 &&
+        [sSaved.lastObject[@"data"] isEqual:[@"{\"e\":\"x\"}" dataUsingEncoding:NSUTF8StringEncoding]],
+        @"HTTP body recovered when onStarted is absent");
+    Check([sLastNativeEvent[@"native_tigon_correlation"] isEqual:@"native_mc_completion_inside_simple_eom"],
+        @"native completion establishes exact correlation");
+    void *unchanged = nullptr; memcpy(&unchanged, nativeState + 0x80, sizeof(unchanged));
+    Check(unchanged == retainedBody && sCurrentSimpleEnd == nullptr, @"retained body ownership and TLS restored");
+    Check([FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO)[@"native_tigon_correlation"] isEqual:@"no_simple_eom_scope"],
+        @"unrelated completion cannot reuse a previous native response");
+    sEnabled = NO;
+    Check(FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO).count == 0, @"logging off disables native correlation");
     NSLog(@"PASS: HTTP error body/status, move ownership, callback forwarding, endpoint filter, logging-off and copy limits");
 } return 0; }

@@ -83,6 +83,12 @@ jobs:
           clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
 
+      - name: Test native query correlation
+        run: |
+          cd main
+          clang -fobjc-arc -framework Foundation tests/QueryContextTests.m src/Runtime/FBTMobileConfigQueryContext.m -o /tmp/fbt-query-tests
+          /tmp/fbt-query-tests
+
       - name: Build rootless
         run: |
           cd main

@@ -148,3 +148,53 @@ necessária execução do pacote novo para verificar se os callbacks da vtable
 são chamados nesse aparelho e obter o corpo/status anteriores à conversão. Uma
 resposta de permissão do servidor não pode ser corrigida fabricando metadados
 ou reaproveitando um contexto Page ID de outra conta.
+
+## Retorno do build 156 — 17/10/2026, 10:08 BRT
+
+A nova exportação confirma o pacote 156/commit `81c4938`. Na execução atual há
+28 conclusões: 23 falhas QE com HTTP 400 e cinco syncs bem-sucedidos (quatro
+`mobileconfig`, um sessionless). As consultas ocorreram com o override de hash
+em SYS. O arquivo enviado agora contém apenas `_qe_overrides_: []`; não contém
+as 679 entradas da amostra anterior. Os arquivos não identificam quem limpou
+os overrides, e a correção não restaura nem remove opções por conta própria.
+
+Os seis dumps novos são respostas vazias de 172 bytes com o mesmo schema hash.
+`fb_last_app_status` contém `unknown`; isso não é um relatório de crash. O
+snapshot continua sem manager Page ID. Os registros de sessões passadas não
+são necessários para correlacionar os IDs nativos e não são publicados.
+
+O resultado de runtime revela duas lacunas do build 156:
+
+- Os slots SimpleCallbacks foram instalados, mas nenhum contexto Tigon foi
+  registrado. A implementação exigia `onStarted` antes de salvar em EOM;
+  instalação bem-sucedida não prova que esse callback chegou.
+- Há dois alertas sem configuração/parâmetro associado e nenhuma seleção
+  `selectParam` correspondente. O caminho `selectMobileConfigItem:` despacha
+  consultas QE em segundo plano antes de atingir `selectParam`.
+
+A captura adicional correlaciona o callback MC com o EOM ativo da própria
+`TigonSimpleCallbacks`. No ramo de rejeição HTTP, o status permanece em +0x48 e
+os bytes no IOBuf em +0x80 enquanto o callback MC roda. Copiar nesse ponto
+independe de um evento `onStarted`. O callback MC estabelece que a resposta é de
+MobileConfig; callbacks de outros produtos não têm seus corpos exportados.
+Se o contexto anterior já salvou o corpo, a segunda captura não o duplica.
+Contadores separados de invocação de cada callback e de correlações distinguem
+"slot instalado", "callback chamado" e "resposta MC correlacionada".
+
+O acompanhamento da UI passa a começar em `selectMobileConfigItem:`. Os
+formatos de item são decodificados como no binário (NSString separado por `:`,
+com validação do tipo e quantidade de campos). O registro liga configuração e
+parâmetro exatos ao controller por referência fraca. A consulta síncrona QE
+abre seu próprio escopo na thread de trabalho, captura o status e atualiza
+apenas os tokens que já correspondiam à consulta. Uma seleção nova não herda
+uma conclusão tardia da anterior. O alerta e o fallback local recebem esses
+nomes, mesmo quando `selectParam` ainda não foi chamado.
+
+Os testes adicionados reproduzem exatamente as duas lacunas: conclusão MC em
+EOM sem `onStarted`, além de seleção que atravessa uma fila de background e
+recebe erro antes de existir uma seleção tipada. Conferem os bytes HTTP,
+propriedade do IOBuf, restauração do escopo, correspondência exata e isolamento
+de resultados tardios. O verificador do IPA passa a ter 39 checks.
+
+A recusa QE ainda não está resolvida no servidor. O resultado do pacote seguinte
+precisa mostrar invocação/correlação real e, se disponível, o corpo de erro.

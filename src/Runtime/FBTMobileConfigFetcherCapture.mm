@@ -127,6 +127,11 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
                     }
                 }
             }
+            NSDictionary *nativeResponse = FBTMobileConfigTigonCaptureObserveNativeCompletion(request, success);
+            for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes"]) {
+                if (nativeResponse[key]) response[key] = nativeResponse[key];
+            }
+            if (observation && response[@"http_status"]) observation->httpStatus.store([response[@"http_status"] intValue]);
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_completed", response);
             if (success && body.size() <= 2 * 1024 * 1024) {
                 NSData *data = [NSData dataWithBytes:body.data() length:body.size()];
