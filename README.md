@@ -1,6 +1,12 @@
 # FBTweak
 
-Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.3. Abertura por long-press na tab bar.
+Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.3. Abra pelo ícone **FBTweak** na tela nativa de Configurações. Fallback: **dois toques com três dedos** na tela.
+
+## Correções de `flags` — Facebook 583
+
+A instrumentação, os controles Runtime/Aquecer/Log, os acessos nativos e as assinaturas foram revistos contra o payload com LIEF e Capstone. O diagnóstico informa a cobertura disponível e o retorno observado. O funcionamento remoto de Page ID, nomes e parâmetros precisa ser confirmado no aparelho.
+
+Veja [evidências, mudanças e validação](docs/flags-facebook-583.md).
 
 ## v3.2 — runtime correto
 
@@ -37,9 +43,9 @@ Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.
 
 ## Timing correto
 
-O `%ctor` faz apenas leituras baratas de pref e instala:
+O `%ctor` registra as preferências e os pontos de entrada e instala as famílias habilitadas:
 
-1. host do long-press;
+1. entrada com ícone na tela de Configurações e observadores para o gesto de fallback;
 2. observer barato para abrir Internal Settings nativo;
 3. hooks conhecidos ligados no launch;
 4. runtime bool persistido, sem varrer classes;
