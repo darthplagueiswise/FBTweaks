@@ -273,6 +273,10 @@ static NSDictionary *FBTDiagCacheSummary(void) {
 
 static NSDictionary *FBTDiagSessionSettings(void) {
     NSMutableDictionary *settings = [NSMutableDictionary dictionary];
+    NSBundle *host = NSBundle.mainBundle;
+    settings[@"host_app"] = @{@"bundle_id": host.bundleIdentifier ?: @"unknown",
+        @"version": [host objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
+        @"build": [host objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown"};
     for (NSString *key in @[FBTKeyMasterEnabled, FBTKeyMobileConfigRuntimeEnabled,
             FBTKeyMobileConfigNativeUIWarmupEnabled, FBTKeyMobileConfigCaptureEnabled,
             FBTKeyMobileConfigOverridesEnabled, FBTKeyMobileConfigFetchDiagnosticsEnabled]) {

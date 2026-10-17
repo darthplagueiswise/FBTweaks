@@ -252,11 +252,14 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         NSString *path = FBTTigonString(sTigonURLPath(url));
         NSString *method = FBTTigonString(sTigonRequestMethod(request));
         if ([host hasPrefix:@"<non-UTF8>"] || [path hasPrefix:@"<non-UTF8>"]) return;
+        BOOL confirmedEndpoint = YES;
         if (simple) {
-            // Shared callbacks serve other products too. Restrict to the MC
-            // endpoint, regardless of a broad force-download capture window.
-            if ([path.lowercaseString rangeOfString:@"mobileconfig"].location == NSNotFound) return;
-            reason = path.lastPathComponent;
+            confirmedEndpoint = [path.lowercaseString rangeOfString:@"mobileconfig"].location != NSNotFound;
+            // A Graph/API route may carry the logical operation outside the URL
+            // path. Keep only provisional metadata until the native callback
+            // confirms this object belongs to an outstanding MC request.
+            if (!confirmedEndpoint && !FBTTigonProvisionalContext(self)) return;
+            if (confirmedEndpoint) reason = path.lastPathComponent;
         } else if (!FBTMobileConfigResponseCaptureShouldCaptureRequest(host, path, reason)) return;
 
         NSDictionary *hashState = @{};
@@ -268,11 +271,11 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         }
         NSMutableDictionary *context = [@{
             @"transport": simple ? @"TigonSimpleCallbacks" : @"TigonForwardingRequestCallbacks",
-            @"request_host": host ?: @"",
-            @"request_path": path ?: @"",
+            @"request_host": FBTNamesRedactMessage(host ?: @""),
+            @"request_path": FBTNamesRedactMessage(path ?: @""),
             @"request_method": method ?: @"",
             @"capture_reason": reason,
-            @"body": [NSMutableData data], @"mc_correlated": @YES, @"created": @(CACurrentMediaTime()),
+            @"body": [NSMutableData data], @"mc_correlated": @(confirmedEndpoint), @"created": @(CACurrentMediaTime()),
             @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only"
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
@@ -286,7 +289,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         sTigonCapturedRequests[key] = context;
         [sTigonCaptureLock unlock];
 
-        FBTTigonRecordContextEvent(@"tigon_request_started", context, @{
+        if (confirmedEndpoint) FBTTigonRecordContextEvent(@"tigon_request_started", context, @{
             @"request_body_persisted": @NO,
             @"query_hash_state": hashState[@"query_hash_state"] ?: @"missing",
             @"one_query_hash_state": hashState[@"one_query_hash_state"] ?: @"missing"

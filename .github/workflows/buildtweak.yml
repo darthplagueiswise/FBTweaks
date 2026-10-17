@@ -80,7 +80,7 @@ jobs:
       - name: Test Tigon error response capture
         run: |
           cd main
-          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm -o /tmp/fbt-tigon-tests
+          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm -lz -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
 
       - name: Test native query correlation

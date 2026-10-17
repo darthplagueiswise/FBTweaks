@@ -41,3 +41,5 @@ Também foi corrigida a duplicação do payload de sucesso entre a observação 
 - Getters/overrides locais de employee/test-user e a existência da UI não demonstram reconhecimento dessa identidade pelo backend.
 
 Nenhuma dessas flags foi alterada por esta revisão. A condição específica exigida pelo servidor não é exposta na resposta. É preciso um contexto de conta/aplicativo elegível pelo fluxo autorizado para demonstrar uma correção remota; o catálogo local permanece uma alternativa independente.
+
+A captura também passou a preservar host/path quando a operação usa uma rota genérica como `/method`: esses metadados ficam provisórios em memória e só são exportados após a conclusão MC confirmar o objeto. O relatório inclui bundle ID, versão e build do aplicativo instalado para investigar a parte “Specific App Conditions”, sem ler tokens, Keychain ou headers. Esses dados são contexto diagnóstico; não são prova de elegibilidade e não alteram a identidade enviada.

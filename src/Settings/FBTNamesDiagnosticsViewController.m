@@ -85,7 +85,9 @@
         (completion.count ? [NSString stringWithFormat:@"Conclusão nativa: %@\n%@\nCorpo HTTP não capturado.",
             [completion[@"native_transport_success"] boolValue] ? @"sucesso" : @"falha", completion[@"message"] ?: @""] : @"Aguardando conclusão do pedido.");
     if ([diagnostic[@"id_to_names_valid"] boolValue]) result = [result stringByAppendingFormat:@"\nid_to_names: %@ registros.", diagnostic[@"id_to_names_count"] ?: @0];
-    NSString *localState = [NSString stringWithFormat:@"Estados no arquivo local, não prova de autorização remota:\nLegacy refresh: %@\nBuiltin query hash: %@\nÚltima conclusão do download de nomes: %@",
+    NSDictionary *app = self.report[@"session_settings"][@"host_app"] ?: @{};
+    NSString *localState = [NSString stringWithFormat:@"Aplicativo: %@ · %@ (%@)\nEstados no arquivo local, não prova de autorização remota:\nLegacy refresh: %@\nBuiltin query hash: %@\nÚltima conclusão do download de nomes: %@",
+        app[@"bundle_id"] ?: @"não registrado", app[@"version"] ?: @"?", app[@"build"] ?: @"?",
         lastDownload[@"legacy_refresh_override_file_state"] ?: @"não observado", lastDownload[@"builtin_query_hash_override_file_state"] ?: @"não observado",
         lastDownload ? ([lastDownload[@"download_success"] boolValue] ? @"sucesso nativo" : @"falha nativa") : @"não observada"];
     NSMutableArray *historyText = [NSMutableArray array];

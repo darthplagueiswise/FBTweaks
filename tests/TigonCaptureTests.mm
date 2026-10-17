@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #include <cstring>
+#import "../src/Runtime/FBTNamesResponseSummary.m"
 #import "../src/Runtime/FBTMobileConfigTigonCapture.mm"
 #import "../src/Runtime/FBTMobileConfigFetcherCapture.mm"
 
@@ -150,6 +151,9 @@ int main(void) { @autoreleasepool {
     memset(nativeState, 0, sizeof(nativeState));
     FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
     Check(sPendingNativeRequests.count == 1, @"native request authorizes provisional copying");
+    request.path = "/method";
+    FBTSimpleOnStarted(nativeState, &request);
+    Check(![FBTTigonContextForObject(nativeState)[@"mc_correlated"] boolValue], @"generic API URL remains provisional until native identity is confirmed");
     first.length = sizeof(a); first.data = a; first.next = &second;
     sExpectedResponse = &status;
     FBTSimpleOnResponse(nativeState, &status);
@@ -164,6 +168,8 @@ int main(void) { @autoreleasepool {
         @"promoted body has exact native request ID and pending request is cleared");
     Check([sLastNativeEvent[@"native_tigon_correlation"] isEqual:@"native_mc_completion_inside_simple_error"] && sCurrentSimpleEnd == nullptr,
         @"onError correlation is scoped and restored");
+    Check([sLastNativeEvent[@"request_host"] isEqual:@"graph.facebook.com"] && [sLastNativeEvent[@"request_path"] isEqual:@"/method"],
+        @"generic route metadata promoted only for the matched native MC completion");
     // An unrelated callback during a pending MC request must never be persisted.
     before = sSaved.count;
     FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);

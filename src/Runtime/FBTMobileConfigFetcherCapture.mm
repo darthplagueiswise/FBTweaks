@@ -141,7 +141,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
                 }
             }
             NSDictionary *nativeResponse = FBTMobileConfigTigonCaptureObserveNativeCompletion(response, success);
-            for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes"]) {
+            for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes", @"request_host", @"request_path"]) {
                 if (nativeResponse[key]) response[key] = nativeResponse[key];
             }
             if (observation && response[@"http_status"]) observation->httpStatus.store([response[@"http_status"] intValue]);
