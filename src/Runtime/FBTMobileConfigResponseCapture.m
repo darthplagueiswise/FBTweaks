@@ -212,6 +212,7 @@ static void FBTSetCaptureStatus(NSString *status, NSString *absolutePath, NSStri
 static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSString *path,
         NSString *method, NSDictionary *queryHashState, NSString *captureReason,
         NSInteger httpStatus, NSString *contentType, NSString *transport) {
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSMutableDictionary *event = [@{
         @"request_host": host ?: @"",
         @"request_path": path ?: @"",
@@ -343,9 +344,14 @@ static void FBTSaveResponseBody(NSData *data, NSURLResponse *response, NSError *
         captureReason, status, contentType, @"NSURLSession");
 }
 
+static __thread NSUInteger sSessionCallDepth = 0;
+
 static NSURLSessionDataTask *FBTSessionDataTaskWithOriginal(id self, SEL _cmd, NSURLRequest *request,
         void (^completionHandler)(NSData *, NSURLResponse *, NSError *), IMP originalImp) {
     if (!originalImp) return nil;
+    if (sSessionCallDepth) {
+        return ((FBTSessionDataTaskOrig)originalImp)(self, _cmd, request, completionHandler);
+    }
 
     NSString *host = nil;
     NSString *path = nil;
@@ -375,13 +381,19 @@ static NSURLSessionDataTask *FBTSessionDataTaskWithOriginal(id self, SEL _cmd, N
         NSString *copiedPath = [path copy] ?: @"";
         NSString *copiedMethod = [method copy] ?: @"GET";
         wrappedCompletion = ^(NSData *data, NSURLResponse *response, NSError *error) {
-            FBTSaveResponseBody(data, response, error, copiedHost, copiedPath, copiedMethod,
-                                copiedHashState, captureReason);
+            @try {
+                FBTSaveResponseBody(data, response, error, copiedHost, copiedPath, copiedMethod,
+                                    copiedHashState, captureReason);
+            } @catch (__unused NSException *exception) {
+                FBTSetCaptureStatus(@"capture_exception", nil, nil);
+            }
             completionHandler(data, response, error);
         };
     }
     FBTSessionDataTaskOrig orig = (FBTSessionDataTaskOrig)originalImp;
-    return orig(self, _cmd, request, wrappedCompletion);
+    ++sSessionCallDepth;
+    @try { return orig(self, _cmd, request, wrappedCompletion); }
+    @finally { --sSessionCallDepth; }
 }
 
 static BOOL FBTClassDefinesSelector(Class cls, SEL selector) {

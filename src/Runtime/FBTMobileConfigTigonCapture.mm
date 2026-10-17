@@ -216,7 +216,8 @@ static void FBTTigonOnStarted(void *self, const void *request) {
 
 static void FBTTigonOnBody(void *self, void *uniquePtrArgument) {
     NSMutableDictionary *context = FBTTigonContextForObject(self);
-    if (context && uniquePtrArgument) {
+    if (context && uniquePtrArgument &&
+        [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         @try {
             void *head = *(void **)uniquePtrArgument; // ABI: move-only unique_ptr is passed indirectly.
             BOOL tooLarge = NO;

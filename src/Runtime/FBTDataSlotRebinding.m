@@ -4,7 +4,6 @@
 #include <mach-o/getsect.h>
 #include <mach-o/loader.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <string.h>
 
 BOOL FBTRebindVerifiedMainConstSlot(uint64_t address, const unsigned char uuid[16],
@@ -41,15 +40,15 @@ BOOL FBTRebindVerifiedMainConstSlot(uint64_t address, const unsigned char uuid[1
         return NO;
     }
 
-    mach_vm_address_t region = (mach_vm_address_t)slot;
-    mach_vm_size_t regionSize = 0;
+    vm_address_t region = (vm_address_t)slot;
+    vm_size_t regionSize = 0;
     vm_region_basic_info_data_64_t info = {0};
     mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t object = MACH_PORT_NULL;
-    kern_return_t kr = mach_vm_region(mach_task_self(), &region, &regionSize,
+    kern_return_t kr = vm_region_64(mach_task_self(), &region, &regionSize,
         VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &object);
     if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
-    if (kr != KERN_SUCCESS || region > (mach_vm_address_t)slot ||
+    if (kr != KERN_SUCCESS || region > (vm_address_t)slot ||
         !(info.protection & VM_PROT_READ) || (info.protection & VM_PROT_EXECUTE)) {
         if (failure) *failure = @"ineligible_memory_region";
         return NO;
