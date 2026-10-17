@@ -22,7 +22,7 @@ NSData *FBTNamesDecodeResponse(NSData *data, NSString **status) {
     if (status) *status = @"ready";
     if (!data.length) { if (status) *status = @"not_delivered_to_observed_callback"; return nil; }
     if (data.length > limit) { if (status) *status = @"over_2mb_limit"; return nil; }
-    const uint8_t *bytes = data.bytes;
+    const uint8_t *bytes = (const uint8_t *)data.bytes;
     if (data.length < 2 || bytes[0] != 0x1f || bytes[1] != 0x8b) return data;
     z_stream stream = {0};
     stream.next_in = (Bytef *)data.bytes;
