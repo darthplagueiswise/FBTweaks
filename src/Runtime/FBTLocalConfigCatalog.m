@@ -7,6 +7,7 @@
 
 static NSArray *sConfigurations;
 static NSDictionary *sPackedLabels;
+static NSDictionary *sSchemaLabels;
 
 static id FBTLocalJSON(NSData *data) {
     if (data.length >= 2 && ((const unsigned char *)data.bytes)[0] == 0x1f &&
@@ -45,6 +46,7 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
         NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:nil] ?: @[];
         NSMutableArray *configs = [NSMutableArray array];
         NSMutableDictionary *index = [NSMutableDictionary dictionary];
+        NSMutableDictionary *schemaIndex = [NSMutableDictionary dictionary];
         NSDictionary *types = @{@4: @"bool", @8: @"int64", @12: @"string", @16: @"double"};
         for (NSString *file in [files sortedArrayUsingSelector:@selector(compare:)]) {
             if (![file hasPrefix:@"params_map"] && ![file hasPrefix:@"rn_params_map"] && ![file hasPrefix:@"added_params_map"]) continue;
@@ -95,6 +97,8 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
                         NSString *key = [NSString stringWithFormat:@"%@:%ld:%llu:%@:%@", unit, (long)ordinal, pid, type, slot];
                         index[key] = @{@"c": config[@"name"], @"p": name ?: pidText,
                             @"ck": config[@"id"], @"pid": @(pid), @"sid": slot, @"t": type};
+                        NSString *schemaKey = [NSString stringWithFormat:@"%@:%ld:%llu:%@", unit, (long)ordinal, pid, type];
+                        schemaIndex[schemaKey] = index[key];
                     }
                 }
             }
@@ -102,7 +106,7 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
         [configs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
             return [a[@"name"] compare:b[@"name"] options:NSCaseInsensitiveSearch];
         }];
-        @synchronized(self) { sPackedLabels = [index copy]; sConfigurations = [configs copy]; }
+        @synchronized(self) { sPackedLabels = [index copy]; sSchemaLabels = [schemaIndex copy]; sConfigurations = [configs copy]; }
     });
     return sConfigurations ?: @[];
 }
@@ -112,7 +116,18 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
     if (!type) return nil;
     NSString *lookup = [NSString stringWithFormat:@"%u:%u:%u:%@:%u", (flags >> 6) & 31,
         (unsigned)((key >> 32) & 0xffff), (unsigned)((key >> 16) & 0xffff), type, (unsigned)(key & 0xffff)];
-    @synchronized(self) { return sPackedLabels[lookup]; }
+    @synchronized(self) {
+        if (sPackedLabels[lookup]) return sPackedLabels[lookup];
+        NSString *schemaKey = [NSString stringWithFormat:@"%u:%u:%u:%@", (flags >> 6) & 31,
+            (unsigned)((key >> 32) & 0xffff), (unsigned)((key >> 16) & 0xffff), type];
+        NSDictionary *label = sSchemaLabels[schemaKey];
+        if (!label) return nil;
+        NSMutableDictionary *result = [label mutableCopy];
+        result[@"catalogSlot"] = label[@"sid"];
+        result[@"sid"] = @(key & 0xffff);
+        result[@"slotDiffersFromMap"] = @YES;
+        return result;
+    }
 }
 + (NSNumber *)packedKeyForConfiguration:(NSDictionary *)configuration parameter:(NSDictionary *)parameter {
     NSString *source = configuration[@"source"];
@@ -137,9 +152,11 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
         if (((key >> 32) & 0xffff) != [configuration[@"ordinal"] unsignedIntValue]) return nil;
         if ((admin && unit != 4) || (primary && unit != 1 && unit != 2)) return nil;
         if (((key >> 16) & 0xffff) != [parameter[@"id"] unsignedIntValue]) continue;
-        if ((flags & 7) != expectedType || (key & 0xffff) != [parameter[@"slot"] unsignedIntValue]) return nil;
+        if ((flags & 7) != expectedType) return nil;
         // Preserve every flag bit from the live descriptor. Do not synthesize
-        // a key from a numeric ID or silently translate a different map.
+        // a key from a numeric ID or the map slot. The supplied v2 maps and
+        // compiled descriptors have different slots for some identical IDs.
+        // Native context readers perform their own specifier translation.
         return @(key);
     }
     return nil;

@@ -64,8 +64,8 @@ static uint64_t FBTFlagUInt64FromNumber(NSNumber *n) {
 }
 
 + (NSDictionary *)bestMatchForMobileConfigKey:(uint64_t)key {
-    // Match unit, native config ordinal, parameter ID, type and slot together.
-    // RN slotId alone is not a native packed specifier and must not label it.
+    // Match unit, native config ordinal, parameter ID and type. Report any
+    // compiled/map slot difference; RN slotId alone never identifies a key.
     return [FBTLocalConfigCatalog labelForPackedKey:key];
 }
 
@@ -107,3 +107,4 @@ static uint64_t FBTFlagUInt64FromNumber(NSNumber *n) {
 }
 
 @end
+

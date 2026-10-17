@@ -102,7 +102,11 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
         NSDictionary *runtimeOverride = FBTMobileConfigOverrideForKey(key);
         id effective = FBTRead(selected, selector, key, type, effectiveOptions);
         NSInteger effectiveSource = ((NSInteger (*)(id, SEL))objc_msgSend)(effectiveOptions, NSSelectorFromString(@"valueSource"));
-        return @{@"available": @YES, @"key": packed, @"unit": @(unit), @"type": type,
+        return @{@"available": @YES,
+            @"key": [NSString stringWithFormat:@"%llu", (unsigned long long)key],
+            @"key_hex": [NSString stringWithFormat:@"0x%016llx", (unsigned long long)key],
+            @"unit": @(unit), @"type": type,
+            @"descriptor_slot": @(key & 0xffff), @"catalog_slot": parameter[@"slot"] ?: NSNull.null,
             @"system_value": systemValue ?: NSNull.null, @"effective_value": effective ?: NSNull.null,
             @"source_raw": @(source), @"source": FBTNativeSourceName(source),
             @"effective_source": runtimeOverride ? @"Override da tweak" : FBTNativeSourceName(effectiveSource),

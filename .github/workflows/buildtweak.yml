@@ -101,6 +101,12 @@ jobs:
           clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/MobileConfigValueReaderTests.m src/Runtime/FBTMobileConfigValueReader.m -o /tmp/fbt-value-tests
           /tmp/fbt-value-tests
 
+      - name: Test compiled descriptor and map validation
+        run: |
+          cd main
+          clang -fobjc-arc -Wno-incomplete-implementation -Wl,-export_dynamic -framework Foundation tests/LocalConfigDescriptorTests.m src/Runtime/FBTLocalConfigCatalog.m -lz -o /tmp/fbt-descriptor-tests
+          /tmp/fbt-descriptor-tests
+
       - name: Build rootless
         run: |
           cd main
