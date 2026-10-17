@@ -1,5 +1,6 @@
 #import "FBTSettingsViewController.h"
 #import "FBTLocalConfigViewController.h"
+#import "FBTNamesDiagnosticsViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
@@ -183,6 +184,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"nav", @"title": @"MobileConfig local — todos os mapas", @"subtitle": @"Busca por nome/ID e edição de overrides sem depender de QE-info.", @"dest": @"localconfig" },
+            @{ @"kind": @"nav", @"title": @"Diagnóstico do download de nomes", @"subtitle": @"Capturar, ver o erro remoto e compartilhar pelo iPhone.", @"dest": @"namesdiagnostic" },
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
             @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
             @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
@@ -418,6 +420,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         NSString *dest = item[@"dest"];
         UIViewController *vc = nil;
         if ([dest isEqualToString:@"localconfig"]) vc = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
+        else if ([dest isEqualToString:@"namesdiagnostic"]) vc = [[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
         else if ([dest hasPrefix:@"feat:"]) vc = [[FBTFeatureParamsViewController alloc] initWithFeatureId:[dest substringFromIndex:5]];
@@ -570,6 +573,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (void)showFetchDiagnostics {
+    [self.navigationController pushViewController:[[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
+}
+
+- (void)showLegacyFetchDiagnostics {
     NSDictionary *report = FBTMobileConfigFetchDiagnosticsSnapshot();
     NSArray *events = [report[@"events"] isKindOfClass:[NSArray class]] ? report[@"events"] : @[];
     NSDictionary *last = [events.lastObject isKindOfClass:[NSDictionary class]] ? events.lastObject : @{};
@@ -982,3 +989,4 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     return cell;
 }
 @end
+

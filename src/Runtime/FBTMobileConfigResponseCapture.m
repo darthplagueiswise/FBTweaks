@@ -1,5 +1,6 @@
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNamesResponseSummary.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
@@ -40,7 +41,8 @@ static NSString *FBTResponseCaptureBasePath(void) {
             return [[url URLByAppendingPathComponent:@"mobileconfig/fbt_fetch_payloads" isDirectory:YES] path];
         }
     }
-    return nil;
+    // Sideloaded apps can lack App Group entitlement; diagnostics still work.
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/FBTweak/mobileconfig/fbt_fetch_payloads"];
 }
 
 static BOOL FBTStringContainsOneOf(NSString *text, NSArray<NSString *> *needles) {
@@ -224,6 +226,22 @@ static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSSt
         @"transport": transport ?: @"unknown",
         @"body_capture_status": @"not_saved"
     } mutableCopy];
+    for (NSString *key in @[@"request_id", @"http_status_source", @"native_tigon_correlation"])
+        if (queryHashState[key]) event[key] = queryHashState[key];
+    NSDictionary *summary = FBTNamesResponseSummary(data);
+    NSMutableDictionary *summaryEvent = [event mutableCopy];
+    [summaryEvent addEntriesFromDictionary:summary];
+    FBTMobileConfigFetchDiagnosticsRecord(@"names_transport_diagnostic", summaryEvent);
+    NSString *decodeStatus = nil;
+    NSData *decoded = FBTNamesDecodeResponse(data, &decodeStatus);
+    if (!decoded || [summary[@"body_status"] isEqualToString:@"native_error_summary_NOT_server_JSON"]) {
+        event[@"body_capture_status"] = summary[@"body_status"] ?: decodeStatus ?: @"decode_failed";
+        FBTSetCaptureStatus(event[@"body_capture_status"], nil, nil);
+        FBTMobileConfigFetchDiagnosticsRecord(@"network_response_body_skipped", event);
+        return;
+    }
+    data = decoded;
+    event[@"response_bytes"] = @(data.length);
     NSString *provenance = queryHashState[@"payload_provenance"] ?: @"http_response_body";
     event[@"payload_provenance"] = provenance;
     if (!data.length) {
@@ -498,7 +516,9 @@ void FBTMobileConfigResponseCaptureArm(NSString *reason) {
     [sCaptureLock lock];
     sCaptureReason = [reason copy] ?: @"qe_info";
     sCaptureArmedUntil = CACurrentMediaTime() + 45.0;
-    sLastCaptureStatus = @"armed_waiting_for_matching_urlsession_response";
+    sLastBodyPath = nil;
+    sLastBodyRelativePath = nil;
+    sLastCaptureStatus = @"armed_waiting_for_native_mc_response";
     [sCaptureLock unlock];
     FBTMobileConfigFetchDiagnosticsRecord(@"response_capture_armed", @{
         @"capture_reason": reason ?: @"qe_info",
@@ -506,11 +526,19 @@ void FBTMobileConfigResponseCaptureArm(NSString *reason) {
     });
 }
 
+void FBTMobileConfigResponseCaptureDisarm(void) {
+    [sCaptureLock lock];
+    sCaptureArmedUntil = 0;
+    sCaptureReason = nil;
+    sLastCaptureStatus = @"paused";
+    [sCaptureLock unlock];
+}
+
 NSString *FBTMobileConfigResponseCaptureLastBodyString(void) {
     [sCaptureLock lock];
     NSString *path = [sLastBodyPath copy];
     [sCaptureLock unlock];
-    if (!path.length) {
+    if (!path.length && !sCaptureReason.length) {
         NSString *base = FBTResponseCaptureBasePath();
         if (!base.length) return @"";
         NSArray<NSString *> *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:base error:nil] ?: @[];
@@ -560,3 +588,4 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void) {
     [combined addEntriesFromDictionary:FBTMobileConfigFetcherCaptureStatus()];
     return [combined copy];
 }
+

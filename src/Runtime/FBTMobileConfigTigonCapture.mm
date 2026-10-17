@@ -1,5 +1,7 @@
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNamesResponseSummary.h"
+#import <QuartzCore/QuartzCore.h>
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
 #include "../../modules/fishhook/fishhook.h"
@@ -9,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <atomic>
+#include <cfloat>
 
 typedef void (*FBTTigonStartedOrig)(void *, const void *);
 typedef void (*FBTTigonBodyOrig)(void *, void *);
@@ -36,15 +39,17 @@ static NSString *sSimpleFailure;
 static void FBTInstallSimpleHooks(void);
 static thread_local void *sCurrentSimpleEnd;
 static thread_local BOOL sCurrentSimpleWasCaptured;
+static thread_local BOOL sCurrentSimpleIsError;
 static std::atomic<unsigned long long> sSimpleStartedCalls(0), sSimpleResponseCalls(0),
     sSimpleBodyCalls(0), sSimpleEOMCalls(0), sSimpleErrorCalls(0), sNativeCorrelations(0);
 struct FBTSimpleEndScope {
     void *previous;
-    BOOL previousCaptured;
-    FBTSimpleEndScope(void *current, BOOL captured) : previous(sCurrentSimpleEnd), previousCaptured(sCurrentSimpleWasCaptured) {
-        sCurrentSimpleEnd = current; sCurrentSimpleWasCaptured = captured;
+    BOOL previousCaptured, previousError;
+    FBTSimpleEndScope(void *current, BOOL captured, BOOL isError = NO)
+        : previous(sCurrentSimpleEnd), previousCaptured(sCurrentSimpleWasCaptured), previousError(sCurrentSimpleIsError) {
+        sCurrentSimpleEnd = current; sCurrentSimpleWasCaptured = captured; sCurrentSimpleIsError = isError;
     }
-    ~FBTSimpleEndScope() { sCurrentSimpleEnd = previous; sCurrentSimpleWasCaptured = previousCaptured; }
+    ~FBTSimpleEndScope() { sCurrentSimpleEnd = previous; sCurrentSimpleWasCaptured = previousCaptured; sCurrentSimpleIsError = previousError; }
 };
 
 static FBTTigonRequestURLFn sTigonRequestURL = nullptr;
@@ -55,6 +60,8 @@ static FBTTigonStringGetterFn sTigonURLQuery = nullptr;
 
 static NSLock *sTigonCaptureLock = nil;
 static NSMutableDictionary<NSValue *, NSMutableDictionary *> *sTigonCapturedRequests = nil;
+static NSMutableDictionary<NSNumber *, NSNumber *> *sPendingNativeRequests;
+static NSUInteger sProvisionalEvictions;
 static BOOL sTigonHooksInstalled = NO;
 static int sTigonRebindStatus = -999;
 static NSUInteger sTigonBodyCount = 0;
@@ -112,10 +119,63 @@ static NSDictionary *FBTTigonQueryHashState(const std::string &query) {
     return state;
 }
 
+// Caller holds the map lock. Provisional bytes have a short lifetime and are
+// never persisted until a native MC completion identifies the exact object.
+static void FBTTigonPruneLocked(void) {
+    double now = CACurrentMediaTime();
+    for (NSNumber *key in sPendingNativeRequests.allKeys)
+        if ([sPendingNativeRequests[key] doubleValue] < now) [sPendingNativeRequests removeObjectForKey:key];
+    for (NSValue *key in sTigonCapturedRequests.allKeys) {
+        NSDictionary *context = sTigonCapturedRequests[key];
+        if (context[@"created"] && now - [context[@"created"] doubleValue] > 60) {
+            [sTigonCapturedRequests removeObjectForKey:key]; ++sProvisionalEvictions;
+        }
+    }
+}
+
+void FBTMobileConfigTigonCaptureExpectRequest(NSDictionary *request) {
+    NSNumber *key = request[@"request_id"];
+    if (!key || !sTigonCaptureLock || ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    [sTigonCaptureLock lock];
+    if (!sPendingNativeRequests) sPendingNativeRequests = [NSMutableDictionary dictionary];
+    FBTTigonPruneLocked();
+    if (sPendingNativeRequests.count < 32) sPendingNativeRequests[key] = @(CACurrentMediaTime() + 60);
+    [sTigonCaptureLock unlock];
+}
+
+void FBTMobileConfigTigonCaptureCompleteRequest(NSNumber *key) {
+    [sTigonCaptureLock lock];
+    if (key) [sPendingNativeRequests removeObjectForKey:key];
+    [sTigonCaptureLock unlock];
+}
+
 static NSMutableDictionary *FBTTigonContextForObject(void *self) {
     if (!self || !sTigonCaptureLock) return nil;
     [sTigonCaptureLock lock];
-    NSMutableDictionary *context = [sTigonCapturedRequests objectForKey:[NSValue valueWithPointer:self]];
+    NSMutableDictionary *context = sTigonCapturedRequests[[NSValue valueWithPointer:self]];
+    [sTigonCaptureLock unlock];
+    return context;
+}
+
+static NSMutableDictionary *FBTTigonProvisionalContext(void *self) {
+    if (!self || !sTigonCaptureLock || ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return nil;
+    [sTigonCaptureLock lock];
+    FBTTigonPruneLocked();
+    NSValue *key = [NSValue valueWithPointer:self];
+    NSMutableDictionary *context = sTigonCapturedRequests[key];
+    if (!context && sPendingNativeRequests.count) {
+        if (sTigonCapturedRequests.count >= 32) {
+            NSValue *oldest = nil; double earliest = DBL_MAX;
+            for (NSValue *candidate in sTigonCapturedRequests) {
+                double created = [sTigonCapturedRequests[candidate][@"created"] doubleValue];
+                if (created < earliest) { earliest = created; oldest = candidate; }
+            }
+            if (oldest) { [sTigonCapturedRequests removeObjectForKey:oldest]; ++sProvisionalEvictions; }
+        }
+        context = [@{@"body": [NSMutableData data], @"created": @(CACurrentMediaTime()),
+                     @"transport": @"TigonSimpleCallbacks", @"mc_correlated": @NO} mutableCopy];
+        sTigonCapturedRequests[key] = context;
+    }
     [sTigonCaptureLock unlock];
     return context;
 }
@@ -124,7 +184,7 @@ static void FBTTigonRecordContextEvent(NSString *event, NSDictionary *context, N
     NSMutableDictionary *details = [NSMutableDictionary dictionary];
     if (context) {
         for (NSString *key in @[@"request_host", @"request_path", @"request_method",
-                                @"capture_reason", @"query_hash_state", @"query_hash_length",
+                                @"capture_reason", @"request_id", @"http_status_source", @"native_tigon_correlation", @"query_hash_state", @"query_hash_length",
                                 @"one_query_hash_state", @"one_query_hash_length", @"query_hash_source"]) {
             id value = context[key];
             if (value) details[key] = value;
@@ -163,7 +223,7 @@ static NSData *FBTCopyIOBufChain(void *rawHead, BOOL *tooLarge, BOOL *invalid) {
         if (length) [copy appendBytes:node->data length:(NSUInteger)length];
         node = node->next;
     } while (node && node != head);
-    if (segments >= maxSegments && node != head) {
+    if (!node || (segments >= maxSegments && node != head)) {
         if (invalid) *invalid = YES;
         return nil;
     }
@@ -212,7 +272,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
             @"request_path": path ?: @"",
             @"request_method": method ?: @"",
             @"capture_reason": reason,
-            @"body": [NSMutableData data],
+            @"body": [NSMutableData data], @"mc_correlated": @YES, @"created": @(CACurrentMediaTime()),
             @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only"
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
@@ -248,7 +308,7 @@ static void FBTTigonCaptureBody(void *self, void *uniquePtrArgument) {
     NSMutableDictionary *context = FBTTigonContextForObject(self);
     if (context && uniquePtrArgument &&
         [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
-        @try {
+        @synchronized (context) { @try {
             void *head = *(void **)uniquePtrArgument; // ABI: move-only unique_ptr is passed indirectly.
             BOOL tooLarge = NO;
             BOOL invalid = NO;
@@ -258,14 +318,15 @@ static void FBTTigonCaptureBody(void *self, void *uniquePtrArgument) {
                 [body setLength:0];
                 context[@"body_capture_status"] = @"over_2mb_limit";
             } else if (invalid || !chunk || !body) {
+                [body setLength:0];
                 context[@"body_capture_status"] = @"iobuf_copy_failed";
-            } else if (![context[@"body_capture_status"] isEqualToString:@"over_2mb_limit"] &&
-                       ![context[@"body_capture_status"] isEqualToString:@"iobuf_copy_failed"]) {
+            } else if (!context[@"body_capture_status"]) {
                 [body appendData:chunk];
             }
         } @catch (__unused NSException *exception) {
+            [context[@"body"] setLength:0];
             context[@"body_capture_status"] = @"iobuf_copy_exception";
-        }
+        } }
     }
 }
 
@@ -292,14 +353,19 @@ static void FBTTigonFinishCapture(void *self) {
         [sTigonCapturedRequests removeObjectForKey:[NSValue valueWithPointer:self]];
         [sTigonCaptureLock unlock];
     }
-    if (!context) return;
+    if (!context || ![context[@"mc_correlated"] boolValue]) return;
 
     NSMutableData *body = [context[@"body"] isKindOfClass:[NSMutableData class]] ? context[@"body"] : nil;
     NSString *captureStatus = [context[@"body_capture_status"] isKindOfClass:[NSString class]]
         ? context[@"body_capture_status"] : @"ready";
-    if ([captureStatus isEqualToString:@"over_2mb_limit"] ||
+    if ([captureStatus isEqualToString:@"ready"] && !body.length) captureStatus = @"not_delivered_to_observed_callback";
+    if (![captureStatus isEqualToString:@"ready"] ||
         [captureStatus isEqualToString:@"iobuf_copy_failed"] ||
         [captureStatus isEqualToString:@"iobuf_copy_exception"]) {
+        FBTTigonRecordContextEvent(@"names_transport_diagnostic", context, @{
+            @"body_status": captureStatus, @"response_bytes": @(body.length),
+            @"http_status": context[@"http_status"] ?: @0
+        });
         FBTTigonRecordContextEvent(@"tigon_response_body_unavailable", context, @{
             @"body_capture_status": captureStatus,
             @"response_bytes": @(body.length)
@@ -329,12 +395,13 @@ static void FBTSimpleOnStarted(void *self, const void *request) {
 }
 static void FBTSimpleOnBody(void *self, void *body) {
     ++sSimpleBodyCalls;
+    FBTTigonProvisionalContext(self);
     FBTTigonCaptureBody(self, body);
     if (sSimpleBody) sSimpleBody(self, body);
 }
 static void FBTSimpleOnResponse(void *self, void *response) {
     ++sSimpleResponseCalls;
-    NSMutableDictionary *context = FBTTigonContextForObject(self);
+    NSMutableDictionary *context = FBTTigonProvisionalContext(self);
     if (context && response && [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         // TigonResponse move constructor at 0xfde234 loads status with ldrh
         // from +0; SimpleCallbacks EOM reads the moved status at self+0x48.
@@ -345,7 +412,7 @@ static void FBTSimpleOnResponse(void *self, void *response) {
             context[@"http_status_source"] = @"verified_tigon_response_status";
         }
         context[@"payload_provenance"] = @"http_response_body_before_native_status_conversion";
-        FBTTigonRecordContextEvent(@"tigon_response_received", context, @{
+        if ([context[@"mc_correlated"] boolValue]) FBTTigonRecordContextEvent(@"tigon_response_received", context, @{
             @"http_status": context[@"http_status"] ?: @0,
             @"http_status_source": context[@"http_status_source"] ?: @"not_observed"
         });
@@ -354,55 +421,59 @@ static void FBTSimpleOnResponse(void *self, void *response) {
 }
 static void FBTSimpleOnEOM(void *self, void *summary) {
     ++sSimpleEOMCalls;
-    FBTSimpleEndScope scope(self, FBTTigonContextForObject(self) != nil);
-    // Save the copied error body before native EOM replaces it with the
-    // formatted FBHTTPErrorDomain string in its failure callback.
-    FBTTigonFinishCapture(self);
-    if (sSimpleEOM) sSimpleEOM(self, summary);
+    FBTSimpleEndScope scope(self, NO);
+    @try { if (sSimpleEOM) sSimpleEOM(self, summary); }
+    @finally { FBTTigonFinishCapture(self); }
 }
 static void FBTSimpleOnError(void *self, const void *error, void *summary) {
     ++sSimpleErrorCalls;
-    NSDictionary *context = FBTTigonContextForObject(self);
-    if (context) {
-        FBTTigonRecordContextEvent(@"tigon_network_error", context, @{
-            @"error_object_present": @(error != nullptr)
-        });
-        FBTTigonFinishCapture(self);
-    }
-    if (sSimpleError) sSimpleError(self, error, summary);
+    FBTTigonProvisionalContext(self);
+    FBTSimpleEndScope scope(self, NO, YES);
+    @try { if (sSimpleError) sSimpleError(self, error, summary); }
+    @finally { FBTTigonFinishCapture(self); }
 }
 
 NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *request, BOOL success) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return @{};
-    if (!sCurrentSimpleEnd) return @{@"native_tigon_correlation": @"no_simple_eom_scope"};
+    if (!sCurrentSimpleEnd) return @{@"native_tigon_correlation": @"no_simple_terminal_scope"};
     ++sNativeCorrelations;
-    // Native completion establishes this is MC, even when Tigon omitted onStarted.
-    // EOM reject branch keeps the body in self+0x80 until the callback returns.
-    uint16_t status = 0;
-    memcpy(&status, (const uint8_t *)sCurrentSimpleEnd + 0x48, sizeof(status));
-    NSMutableDictionary *details = [request mutableCopy];
-    details[@"native_tigon_correlation"] = @"native_mc_completion_inside_simple_eom";
-    if (status < 100 || status > 599) {
-        details[@"body_capture_status"] = @"unrecognized_native_status";
-        return details;
-    }
-    details[@"http_status"] = @(status);
-    details[@"http_status_source"] = @"verified_simple_callbacks_response_state";
-    if (!success && status >= 400 && !sCurrentSimpleWasCaptured) {
-        void *head = nullptr;
-        memcpy(&head, (const uint8_t *)sCurrentSimpleEnd + 0x80, sizeof(head));
-        BOOL tooLarge = NO, invalid = NO;
-        NSData *body = FBTCopyIOBufChain(head, &tooLarge, &invalid);
-        details[@"payload_provenance"] = @"http_error_body_retained_during_native_mc_completion";
-        details[@"response_body_bytes"] = @(body.length);
-        if (tooLarge || invalid) {
-            details[@"body_capture_status"] = tooLarge ? @"over_2mb_limit" : @"iobuf_copy_failed";
-            FBTTigonRecordContextEvent(@"tigon_response_body_unavailable", details, @{});
-        } else {
-            FBTMobileConfigResponseCaptureWriteRawBody(body ?: [NSData data], @"", @"",
-                request[@"request_method"], details, request[@"capture_reason"], status, @"", @"TigonSimpleCallbacks/NativeMCCompletion");
+    NSMutableDictionary *context = FBTTigonContextForObject(sCurrentSimpleEnd);
+    if (!context) context = [@{@"body": [NSMutableData data], @"transport": @"TigonSimpleCallbacks"} mutableCopy];
+    [context addEntriesFromDictionary:request];
+    context[@"mc_correlated"] = @YES;
+    context[@"transport"] = @"TigonSimpleCallbacks";
+    context[@"native_tigon_correlation"] = sCurrentSimpleIsError ? @"native_mc_completion_inside_simple_error" : @"native_mc_completion_inside_simple_eom";
+    context[@"payload_provenance"] = @"http_response_body_before_native_status_conversion";
+    if (!sCurrentSimpleIsError) {
+        uint16_t status = 0;
+        memcpy(&status, (const uint8_t *)sCurrentSimpleEnd + 0x48, sizeof(status));
+        if (status >= 100 && status <= 599) {
+            context[@"http_status"] = @(status);
+            context[@"http_status_source"] = @"verified_simple_callbacks_response_state";
+        }
+        // Fallback for onStarted/onBody not dispatched through the observed slots.
+        if (!success && status >= 400 && ![context[@"body"] length] && !context[@"body_capture_status"]) {
+            void *head = nullptr;
+            memcpy(&head, (const uint8_t *)sCurrentSimpleEnd + 0x80, sizeof(head));
+            BOOL tooLarge = NO, invalid = NO;
+            NSData *body = FBTCopyIOBufChain(head, &tooLarge, &invalid);
+            if (tooLarge || invalid) context[@"body_capture_status"] = tooLarge ? @"over_2mb_limit" : @"iobuf_copy_failed";
+            else if (body.length) {
+                context[@"body"] = [body mutableCopy];
+                context[@"payload_provenance"] = @"http_error_body_retained_during_native_mc_completion";
+            }
         }
     }
+    NSMutableDictionary *details = [context mutableCopy];
+    details[@"response_body_bytes"] = @([context[@"body"] length]);
+    [details removeObjectForKey:@"body"];
+    [sTigonCaptureLock lock];
+    sTigonCapturedRequests[[NSValue valueWithPointer:sCurrentSimpleEnd]] = context;
+    [sTigonCaptureLock unlock];
+    // Snapshot/persist while still inside the original callback and before any
+    // native teardown. Unrelated SimpleCallbacks never reach this promotion.
+    FBTTigonFinishCapture(sCurrentSimpleEnd);
+    sCurrentSimpleWasCaptured = YES;
     return details;
 }
 
@@ -441,12 +512,8 @@ static void FBTTigonOnError(void *self, const void *error, void *summary) {
             @"error_object_present": @(error != nullptr)
         });
     }
+    FBTTigonFinishCapture(self);
     if (sOrigTigonError) sOrigTigonError(self, error, summary);
-    if (context) {
-        [sTigonCaptureLock lock];
-        [sTigonCapturedRequests removeObjectForKey:[NSValue valueWithPointer:self]];
-        [sTigonCaptureLock unlock];
-    }
 }
 
 NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
@@ -464,7 +531,10 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
         };
     }
     [sTigonCaptureLock lock];
+    FBTTigonPruneLocked();
     NSDictionary *status = @{
+        @"pending_native_requests": @(sPendingNativeRequests.count),
+        @"provisional_evictions": @(sProvisionalEvictions),
         @"simple_started_calls": @(sSimpleStartedCalls.load()),
         @"simple_response_calls": @(sSimpleResponseCalls.load()),
         @"simple_body_calls": @(sSimpleBodyCalls.load()),
@@ -492,6 +562,7 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     dispatch_once(&once, ^{
         sTigonCaptureLock = [[NSLock alloc] init];
         sTigonCapturedRequests = [NSMutableDictionary dictionary];
+        sPendingNativeRequests = [NSMutableDictionary dictionary];
     });
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     // Resolve only missing getters on each install attempt. Frameworks may
@@ -547,3 +618,4 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
         @"capture_surface": @"imports plus UUID-verified main executable data slots; response status is not exposed yet"
     });
 }
+

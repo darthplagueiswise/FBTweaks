@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+void FBTMobileConfigFetchDiagnosticsReset(void);
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details);
 NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void);
 NSString *FBTMobileConfigFetchDiagnosticsJSON(void);
@@ -13,3 +14,4 @@ NSString *FBTMobileConfigFetchDiagnosticsJSON(void);
 #endif
 
 #endif /* FBT_MOBILECONFIG_FETCH_DIAGNOSTICS_H */
+

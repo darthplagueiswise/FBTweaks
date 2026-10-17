@@ -78,13 +78,25 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             "universe_regex", "param", "gatekeeper", "with_universe_params",
             "with_current_experiment_group", "with_only_current_experiment_group",
             "with_all_experiment_groups", "with_experiment_params",
-            "with_experiment_universes", "with_gatekeepers", "needs_name", "skip_qe",
+            "with_experiment_universes", "with_gatekeepers", "with_experiments", "with_params",
+            "with_groups", "with_group_params", "needs_name", "skip_qe",
             "query_hash", "one_query_hash"};
+        if (pair.first == "device_id") parameterShape[@"device_id_present"] = @(!pair.second.empty());
+        if (pair.first == "queries") {
+            NSString *queries = FBTMCText(pair.second);
+            NSData *raw = [queries dataUsingEncoding:NSUTF8StringEncoding];
+            id parsed = raw ? [NSJSONSerialization JSONObjectWithData:raw options:NSJSONReadingFragmentsAllowed error:nil] : nil;
+            parameterShape[@"queries_is_array"] = @([parsed isKindOfClass:NSArray.class]);
+            if ([parsed isKindOfClass:NSArray.class]) parameterShape[@"queries_count"] = @([parsed count]);
+        }
         if (std::find(allowed.begin(), allowed.end(), pair.first) != allowed.end()) {
             NSString *key = FBTMCText(pair.first);
             if (pair.first == "needs_name" || pair.first == "skip_qe" || pair.first.find("with_") == 0) {
                 BOOL valid = pair.second == "true" || pair.second == "false" || pair.second == "0" || pair.second == "1";
                 parameterShape[key] = valid ? FBTMCText(pair.second) : @"unexpected_boolean_encoding";
+            } else if (pair.first == "api_version" && !pair.second.empty() && pair.second.size() <= 5 &&
+                       pair.second.find_first_not_of("0123456789") == std::string::npos) {
+                parameterShape[key] = FBTMCText(pair.second);
             } else parameterShape[key] = [NSString stringWithFormat:@"%llu_bytes", (unsigned long long)pair.second.size()];
         }
         if (pair.first == "query_hash" || pair.first == "one_query_hash") {
@@ -97,6 +109,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     NSData *shapeJSON = [NSJSONSerialization dataWithJSONObject:parameterShape options:NSJSONWritingSortedKeys error:nil];
     details[@"request_parameter_summary"] = [[NSString alloc] initWithData:shapeJSON encoding:NSUTF8StringEncoding] ?: @"{}";
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_started", details);
+    FBTMobileConfigTigonCaptureExpectRequest(details);
     auto original = std::make_shared<FBTMCCompletion>(std::move(completion));
     NSDictionary *request = [details copy];
     CFTimeInterval started = CACurrentMediaTime();
@@ -127,7 +140,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
                     }
                 }
             }
-            NSDictionary *nativeResponse = FBTMobileConfigTigonCaptureObserveNativeCompletion(request, success);
+            NSDictionary *nativeResponse = FBTMobileConfigTigonCaptureObserveNativeCompletion(response, success);
             for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes"]) {
                 if (nativeResponse[key]) response[key] = nativeResponse[key];
             }
@@ -141,10 +154,12 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         } @catch (__unused NSException *exception) {
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_capture_exception", @{});
         }
+        FBTMobileConfigTigonCaptureCompleteRequest(request[@"request_id"]);
         // Native callback receives exactly the original status and bytes.
         if (original && *original) (*original)(success, body);
     };
-    sOriginalFetch(fetcher, method, purpose, params, std::move(wrapped), routingHint, target);
+    try { sOriginalFetch(fetcher, method, purpose, params, std::move(wrapped), routingHint, target); }
+    catch (...) { FBTMobileConfigTigonCaptureCompleteRequest(request[@"request_id"]); throw; }
 }
 
 void FBTMobileConfigFetcherCaptureInstall(void) {
@@ -165,3 +180,4 @@ NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
         @"native_mc_requests": @(sRequests.load()), @"native_mc_responses": @(sResponses.load()),
         @"native_mc_failures": @(sFailures.load())};
 }
+

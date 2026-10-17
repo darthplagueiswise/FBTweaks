@@ -11,17 +11,18 @@ static BOOL sEnabled = YES;
 
 static NSMutableArray *sSaved, *sEvents;
 static NSDictionary *sLastNativeEvent;
+static NSDictionary *sLastTransportEvent;
 static NSUInteger sBodyCalls, sResponseCalls, sEndCalls;
 static void *sExpectedBodyArgument, *sExpectedResponse, *sExpectedSummary;
 static void Check(BOOL result, NSString *message) { if (!result) { NSLog(@"FAIL: %@", message); exit(1); } }
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) { [sEvents addObject:event]; if ([event isEqual:@"native_mc_fetch_completed"]) sLastNativeEvent = [details copy]; }
-void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details) { [sEvents addObject:event]; }
+void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details) { [sEvents addObject:event]; sLastTransportEvent = [details copy]; }
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void) { return @{}; }
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *, NSString *, NSString *) { return YES; }
 void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *, NSString *, NSString *, NSDictionary *state,
         NSString *, NSInteger status, NSString *, NSString *) {
     if (!sEnabled) return;
-    [sSaved addObject:@{@"data": [data copy], @"status": @(status), @"provenance": state[@"payload_provenance"] ?: @""}];
+    [sSaved addObject:@{@"data": [data copy], @"status": @(status), @"request_id": state[@"request_id"] ?: @0, @"provenance": state[@"payload_provenance"] ?: @""}];
 }
 BOOL FBTRebindVerifiedMainConstSlot(uint64_t, const unsigned char *, const char *, void *, void **, NSString **) { return NO; }
 BOOL FBTRebindVerifiedImageConstSlot(const char *, uint64_t, const unsigned char *, uint64_t, void *, void **, NSString **) { return NO; }
@@ -42,7 +43,7 @@ static void BodyOriginal(void *, void *b) {
 }
 static void EndOriginal(void *, void *summary) {
     Check(summary == sExpectedSummary, @"summary forwarded unchanged");
-    Check(sSaved.count == 1, @"HTTP error body saved before native conversion"); ++sEndCalls;
+    ++sEndCalls;
 }
 static NSUInteger sNativeCalls, sCompletionCalls;
 static std::string sNativeBody;
@@ -60,6 +61,10 @@ static void DeferredOriginal(const void *, const std::string &, const std::strin
 }
 static void CompletionFromNativeEOM(void *, void *summary) {
     Check(summary == sExpectedSummary, @"EOM summary preserved without onStarted");
+    sDeferredCompletion(false, sNativeBody);
+}
+static void CompletionFromNativeError(void *, const void *, void *summary) {
+    Check(summary == sExpectedSummary, @"onError summary forwarded unchanged");
     sDeferredCompletion(false, sNativeBody);
 }
 int main(void) { @autoreleasepool {
@@ -136,9 +141,43 @@ int main(void) { @autoreleasepool {
         @"native completion establishes exact correlation");
     void *unchanged = nullptr; memcpy(&unchanged, nativeState + 0x80, sizeof(unchanged));
     Check(unchanged == retainedBody && sCurrentSimpleEnd == nullptr, @"retained body ownership and TLS restored");
-    Check([FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO)[@"native_tigon_correlation"] isEqual:@"no_simple_eom_scope"],
+    Check([FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO)[@"native_tigon_correlation"] isEqual:@"no_simple_terminal_scope"],
         @"unrelated completion cannot reuse a previous native response");
+    // onResponse/onBody precede native identification; no onStarted is needed.
+    before = sSaved.count;
+    memset(nativeState, 0, sizeof(nativeState));
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    Check(sPendingNativeRequests.count == 1, @"native request authorizes provisional copying");
+    first.length = sizeof(a); first.data = a; first.next = &second;
+    sExpectedResponse = &status;
+    FBTSimpleOnResponse(nativeState, &status);
+    head = &first; sExpectedBodyArgument = &head;
+    FBTSimpleOnBody(nativeState, &head);
+    Check(head == nullptr && sSaved.count == before, @"unconfirmed body stays in memory and native ownership is preserved");
+    sSimpleError = CompletionFromNativeError;
+    FBTSimpleOnError(nativeState, nullptr, &summary); sDeferredCompletion = nullptr;
+    Check(sSaved.count == before + 1 && [sSaved.lastObject[@"data"] isEqual:[@"{\"e\":\"x\"}" dataUsingEncoding:NSUTF8StringEncoding]],
+        @"partial response bytes survive onError without onStarted");
+    Check([sSaved.lastObject[@"request_id"] isEqual:sLastNativeEvent[@"request_id"]] && sPendingNativeRequests.count == 0,
+        @"promoted body has exact native request ID and pending request is cleared");
+    Check([sLastNativeEvent[@"native_tigon_correlation"] isEqual:@"native_mc_completion_inside_simple_error"] && sCurrentSimpleEnd == nullptr,
+        @"onError correlation is scoped and restored");
+    // An unrelated callback during a pending MC request must never be persisted.
+    before = sSaved.count;
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    FBTSimpleOnResponse(&object, &status);
+    head = &first; sExpectedBodyArgument = &head; FBTSimpleOnBody(&object, &head);
+    sSimpleEOM = EndOriginal; FBTSimpleOnEOM(&object, &summary);
+    Check(sSaved.count == before && FBTTigonContextForObject(&object) == nil, @"unrelated provisional body discarded at terminal callback");
+    // The real MC error without bytes remains explicitly unavailable.
+    FBTSimpleOnError(nativeState, nullptr, &summary); sDeferredCompletion = nullptr;
+    Check(sSaved.count == before && [sLastTransportEvent[@"body_capture_status"] isEqual:@"not_delivered_to_observed_callback"],
+        @"missing HTTP body is explicit and never replaced with native error text");
+    // Broken null-ended chains must not be accepted as complete bodies.
+    first.length = 0; first.next = nullptr;
+    Check(FBTCopyIOBufChain(&first, &tooLarge, &invalid) == nil && invalid, @"null-ended IOBuf chain rejected");
     sEnabled = NO;
     Check(FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO).count == 0, @"logging off disables native correlation");
     NSLog(@"PASS: HTTP error body/status, move ownership, callback forwarding, endpoint filter, logging-off and copy limits");
 } return 0; }
+

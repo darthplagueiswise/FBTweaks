@@ -21,6 +21,10 @@ NSInteger FBTMobileConfigFetcherCaptureEndScope(void *scope);
 NSDictionary *FBTMobileConfigTigonCaptureStatus(void);
 // Called only from the UUID-verified native MC completion. No onStarted required.
 NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *request, BOOL success);
+// Outstanding native requests authorize bounded in-memory provisional copies.
+// Only a matching native completion can promote them to persisted MC evidence.
+void FBTMobileConfigTigonCaptureExpectRequest(NSDictionary *request);
+void FBTMobileConfigTigonCaptureCompleteRequest(NSNumber *requestID);
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void);
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *host, NSString *path, NSString *reason);
 void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *host, NSString *path,
@@ -28,6 +32,7 @@ void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *host, NS
     NSString *contentType, NSString *transport);
 void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details);
 void FBTMobileConfigResponseCaptureArm(NSString *reason);
+void FBTMobileConfigResponseCaptureDisarm(void);
 NSString *FBTMobileConfigResponseCaptureLastBodyString(void);
 NSDictionary *FBTMobileConfigResponseCaptureStatus(void);
 
@@ -35,3 +40,4 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void);
 }
 #endif
 #endif
+
