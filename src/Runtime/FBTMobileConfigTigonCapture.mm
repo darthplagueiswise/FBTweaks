@@ -570,7 +570,9 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     // Resolve only missing getters on each install attempt. Frameworks may
     // appear after launch; dispatch_once is only for local container setup.
-    if (!sTigonRequestURL) sTigonRequestURL = (FBTTigonRequestURLFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest3urlEv");
+    // url() returns const std::string& at request+0x68, not TigonUrl.
+    // getTigonUrl() returns the parsed object used by component getters.
+    if (!sTigonRequestURL) sTigonRequestURL = (FBTTigonRequestURLFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest11getTigonUrlEv");
     if (!sTigonRequestMethod) sTigonRequestMethod = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest6methodEv");
     if (!sTigonURLHost) sTigonURLHost = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getHostEv");
     if (!sTigonURLPath) sTigonURLPath = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getPathEv");
@@ -621,4 +623,5 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
         @"capture_surface": @"imports plus UUID-verified main executable data slots; response status is not exposed yet"
     });
 }
+
 

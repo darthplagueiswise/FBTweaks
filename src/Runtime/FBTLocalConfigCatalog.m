@@ -2,6 +2,8 @@
 #import "FBTFlagCatalog.h"
 #include <zlib.h>
 #include <stdlib.h>
+#include <dlfcn.h>
+#include <mach/mach.h>
 
 static NSArray *sConfigurations;
 static NSDictionary *sPackedLabels;
@@ -112,4 +114,35 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
         (unsigned)((key >> 32) & 0xffff), (unsigned)((key >> 16) & 0xffff), type, (unsigned)(key & 0xffff)];
     @synchronized(self) { return sPackedLabels[lookup]; }
 }
++ (NSNumber *)packedKeyForConfiguration:(NSDictionary *)configuration parameter:(NSDictionary *)parameter {
+    NSString *source = configuration[@"source"];
+    BOOL primary = [source isEqualToString:@"params_map.txt"];
+    BOOL admin = [source isEqualToString:@"params_map_kMobileConfigAdminId.txt"];
+    if (!primary && !admin) return nil; // RN slot IDs are not native packed keys.
+    NSString *name = configuration[@"name"];
+    if (![name isKindOfClass:NSString.class] || !name.length) return nil;
+    void *symbol = dlsym(RTLD_DEFAULT, name.UTF8String);
+    if (!symbol) return nil;
+    NSUInteger count = [configuration[@"params"] count];
+    if (count > 65536) return nil;
+    unsigned int expectedType = [@{@"bool": @1, @"int64": @2, @"string": @3, @"double": @4}[parameter[@"type"]] unsignedIntValue];
+    if (!expectedType) return nil;
+    for (NSUInteger i = 0; i < count; ++i) {
+        uint64_t key = 0; vm_size_t copied = 0;
+        kern_return_t result = vm_read_overwrite(mach_task_self(),
+            (vm_address_t)(uintptr_t)symbol + i * sizeof(key), sizeof(key),
+            (vm_address_t)(uintptr_t)&key, &copied);
+        if (result != KERN_SUCCESS || copied != sizeof(key)) return nil;
+        unsigned int flags = (unsigned int)(key >> 48), unit = (flags >> 6) & 31;
+        if (((key >> 32) & 0xffff) != [configuration[@"ordinal"] unsignedIntValue]) return nil;
+        if ((admin && unit != 4) || (primary && unit != 1 && unit != 2)) return nil;
+        if (((key >> 16) & 0xffff) != [parameter[@"id"] unsignedIntValue]) continue;
+        if ((flags & 7) != expectedType || (key & 0xffff) != [parameter[@"slot"] unsignedIntValue]) return nil;
+        // Preserve every flag bit from the live descriptor. Do not synthesize
+        // a key from a numeric ID or silently translate a different map.
+        return @(key);
+    }
+    return nil;
+}
 @end
+

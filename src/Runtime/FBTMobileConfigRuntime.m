@@ -3,6 +3,7 @@
 #import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTMobileConfigValueReader.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
@@ -67,6 +68,7 @@ static void FBTMCPostUpdateThrottled(void) {
 }
 
 static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
+    if (FBTMobileConfigIsInspectingSystemValue()) return;
     pthread_mutex_lock(&sLock);
     BOOL capture = sCaptureEnabled;
     pthread_mutex_unlock(&sLock);
@@ -160,6 +162,7 @@ NSDictionary *FBTMobileConfigRuntimeStatus(void) {
 }
 
 static NSDictionary *FBTMCOverride(uint64_t key, NSString *expectedType) {
+    if (FBTMobileConfigIsInspectingSystemValue()) return nil;
     pthread_mutex_lock(&sLock);
     NSDictionary *ov = sOverridesEnabled ? [sOverrides objectForKey:FBTMCKeyString(key)] : nil;
     pthread_mutex_unlock(&sLock);
@@ -317,3 +320,4 @@ void FBTInstallMobileConfigRuntime(void) {
     FBTMobileConfigFetchDiagnosticsRecord(@"runtime_import_hooks", available);
     FBTLog(@"MobileConfig runtime: requested import registration; %@", available);
 }
+

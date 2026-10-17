@@ -95,6 +95,12 @@ jobs:
           clang -fobjc-arc -framework Foundation tests/NamesResponseSummaryTests.m src/Runtime/FBTNamesResponseSummary.m -lz -o /tmp/fbt-names-tests
           /tmp/fbt-names-tests
 
+      - name: Test native SYS and effective value inspection
+        run: |
+          cd main
+          clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/MobileConfigValueReaderTests.m src/Runtime/FBTMobileConfigValueReader.m -o /tmp/fbt-value-tests
+          /tmp/fbt-value-tests
+
       - name: Build rootless
         run: |
           cd main
@@ -115,4 +121,5 @@ jobs:
           name: FBTweak.1.0.${{ github.run_number }}
           path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
           if-no-files-found: error
+
 

@@ -277,6 +277,8 @@ static NSArray *FBTNativeContextsSnapshot(void) {
     return items ?: @[];
 }
 
+NSArray *FBTNativeMobileConfigReaderContexts(void) { return FBTNativeContextsSnapshot(); }
+
 static BOOL FBTApplyWithObjCOverrideObject(id object, uint64_t key, NSString *type, id value, BOOL remove) {
     if (!object) return NO;
     @try {
@@ -844,3 +846,4 @@ void FBTInstallNativeMobileConfigContextCapture(void) {
     sLastScannedClassCount = classCount;
     FBTLog(@"native MC late-class scan: %d classes", classCount);
 }
+

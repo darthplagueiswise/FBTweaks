@@ -20,6 +20,7 @@ BOOL FBTNativeMobileConfigEnsureOverridesFile(void);
 
 NSUInteger FBTNativeMobileConfigContextCount(void);
 NSString *FBTNativeMobileConfigStatus(void);
+NSArray *FBTNativeMobileConfigReaderContexts(void);
 
 // Aplica no FBMobileConfigOverridesTable nativo quando há contexto vivo.
 // A camada fishhook runtime continua como fallback persistente.
@@ -31,3 +32,4 @@ BOOL FBTNativeMobileConfigRemoveOverride(uint64_t key);
 #endif
 
 #endif /* FBT_NATIVE_MOBILECONFIG_OVERRIDES_H */
+
