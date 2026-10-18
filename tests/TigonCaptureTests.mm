@@ -33,7 +33,7 @@ struct TestRequest { std::string host, path, method, query; };
 static const void *URL(const void *r) { return r; }
 static const std::string &Host(const void *r) { return ((const TestRequest *)r)->host; }
 static const std::string &Path(const void *r) { return ((const TestRequest *)r)->path; }
-static const std::string &Method(const void *r) { return ((const TestRequest *)r)->method; }
+static const std::string &RequestMethod(const void *r) { return ((const TestRequest *)r)->method; }
 static const std::string &Query(const void *r) { return ((const TestRequest *)r)->query; }
 static void ResponseOriginal(void *, void *r) {
     Check(r == sExpectedResponse, @"response forwarded unchanged"); ++sResponseCalls;
@@ -110,7 +110,7 @@ int main(void) { @autoreleasepool {
           [probe[@"auth_header_state"] isEqual:@"not_observed"] && !probe[@"shared_send_rva"],
         @"unknown implementation never claimed as native TigonStack or authenticated");
     sTigonCaptureLock = [NSLock new]; sTigonCapturedRequests = [NSMutableDictionary dictionary];
-    sTigonRequestURL = URL; sTigonURLHost = Host; sTigonURLPath = Path; sTigonURLQuery = Query; sTigonRequestMethod = Method;
+    sTigonRequestURL = URL; sTigonURLHost = Host; sTigonURLPath = Path; sTigonURLQuery = Query; sTigonRequestMethod = RequestMethod;
     sSimpleBody = BodyOriginal; sSimpleResponse = ResponseOriginal; sSimpleEOM = EndOriginal;
     int object = 0, summary = 0; TestRequest request = {"graph.facebook.com", "/method/mobileconfig_qe_info", "POST", ""};
     FBTSimpleOnStarted(&object, &request);
