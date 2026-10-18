@@ -14,7 +14,6 @@
 #import <objc/runtime.h>
 #include <dlfcn.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #import <QuartzCore/QuartzCore.h>
 
 using FBTMCCompletion = std::function<void(bool, const std::string &)>;
@@ -104,9 +103,10 @@ static void FBTMCInstallAuthReadHook(void) {
 
 static bool FBTMCReadWord(uintptr_t address, uintptr_t *value) {
     if (!address || !value) return false;
-    mach_vm_size_t size = 0;
-    return mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address,
-        sizeof(*value), (mach_vm_address_t)value, &size) == KERN_SUCCESS && size == sizeof(*value);
+    static_assert(sizeof(vm_address_t) >= sizeof(uintptr_t), "VM address must preserve native pointers");
+    vm_size_t size = 0;
+    return vm_read_overwrite(mach_task_self(), (vm_address_t)address,
+        sizeof(*value), (vm_address_t)value, &size) == KERN_SUCCESS && size == sizeof(*value);
 }
 
 static NSDictionary *FBTMCServiceSnapshot(const void *fetcher, BOOL verifiedLayout) {
@@ -299,5 +299,6 @@ NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
         @"native_mc_requests": @(sRequests.load()), @"native_mc_responses": @(sResponses.load()),
         @"native_mc_failures": @(sFailures.load())};
 }
+
 
 
