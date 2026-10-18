@@ -67,6 +67,8 @@
     NSDictionary *entry = history.firstObject ?: @{};
     NSDictionary *request = entry[@"request"], *diagnostic = entry[@"diagnostic"], *completion = entry[@"completion"];
     NSDictionary *advice = FBTNamesDiagnosticAdvice(diagnostic ?: @{});
+    NSDictionary *assessment = FBTNamesAssessRequest(request ?: @{}, diagnostic ?: @{}, completion ?: @{});
+    NSString *interpretation = [NSString stringWithFormat:@"Perfil: %@\n%@\n\nTransporte: %@ · nomes: %@\n%@\n\n%@\n\n%@\n\n%@", assessment[@"request_profile"], assessment[@"request_options_explanation"], assessment[@"transport_state"], assessment[@"names_payload_state"], assessment[@"native_callback_explanation"], assessment[@"authentication_explanation"], assessment[@"whitehat_explanation"], assessment[@"next_step"]];
     BOOL enabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
     BOOL installed = [transport[@"native_mc_fetcher_installed"] boolValue] && [transport[@"simple_callback_hooks_installed"] boolValue];
     NSString *readiness = !enabled ? @"Captura pausada" : installed ? @"Captura nativa pronta" : @"Captura incompleta — verifique os hooks";
@@ -99,7 +101,7 @@
     if (!historyText.count) [historyText addObject:@"Nenhum pedido QE-info registrado nesta sessão."];
     self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local"],
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState], historyText,
+        @[requestText, result, localState, interpretation], historyText,
         @[@"1. Inicie a captura aqui.\n2. Execute Internal Settings → MobileConfig → Advanced Settings → Force name download uma vez.\n3. Retorne e use Compartilhar.\n\nA captura continua com esta tela fechada e funciona sem Frida ou computador. O mapa local funciona sem o serviço QE-info e não anuncia sucesso remoto."]];
     [self.tableView reloadData];
 }
@@ -187,3 +189,4 @@ void FBTPresentNamesDiagnostics(UIViewController *presenter) {
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
     [presenter presentViewController:nav animated:YES completion:nil];
 }
+

@@ -40,5 +40,29 @@ int main(void) { @autoreleasepool {
     Check([FBTNamesDiagnosticAdvice(@{@"body_status": @"not_delivered_to_observed_callback"})[@"classification"] isEqual:@"body_unavailable"], @"missing body remains unknown");
     Check([FBTNamesDiagnosticAdvice(@{@"id_to_names_valid": @YES, @"id_to_names_count": @0})[@"classification"] isEqual:@"empty_names"], @"empty names are not treated as populated");
     Check([FBTNamesDiagnosticAdvice(@{})[@"classification"] isEqual:@"undetermined"], @"no evidence is not reported as success");
+    NSDictionary *shape = @{@"needs_name": @"true", @"skip_qe": @"1", @"with_current_experiment_group": @"false",
+        @"with_experiments": @0, @"with_gatekeepers": @0, @"with_group_params": @0, @"with_groups": @0,
+        @"with_only_current_experiment_group": @0, @"with_params": @0, @"with_universe_params": @0};
+    NSString *shapeText = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:shape options:0 error:nil] encoding:NSUTF8StringEncoding];
+    NSDictionary *request = @{@"event": @"native_mc_fetch_started", @"request_id": @13, @"process_session_id": @"A",
+        @"capture_reason": @"mobileconfig_qe_info", @"request_parameter_summary": shapeText};
+    NSDictionary *assessment = FBTNamesAssessRequest(request, @{@"http_status": @400, @"id_to_names_valid": @NO}, @{@"native_transport_success": @NO});
+    Check([assessment[@"request_profile"] isEqual:@"native_names_profile"], @"native false options are expected, not authorization failures");
+    Check([assessment[@"transport_state"] isEqual:@"remote_rejection"], @"HTTP 400 dominates success claims");
+    Check([assessment[@"authentication_observation"] isEqual:@"not_captured_at_final_request"], @"parameter capture cannot establish authentication");
+    assessment = FBTNamesAssessRequest(@{}, @{}, @{});
+    Check([assessment[@"transport_state"] isEqual:@"not_observed"] && [assessment[@"names_payload_state"] isEqual:@"not_observed"], @"missing result is not false");
+    Check([assessment[@"request_profile"] isEqual:@"incomplete_observation"], @"missing false-valued options do not count as observed false");
+    assessment = FBTNamesAssessRequest(@{@"request_parameter_summary": @"[]"}, @{}, @{});
+    Check([assessment[@"request_profile"] isEqual:@"incomplete_observation"], @"non-object parameter summary handled");
+    assessment = FBTNamesAssessRequest(request, @{@"http_status": @200, @"id_to_names_valid": @YES}, @{@"native_transport_success": @YES});
+    Check([assessment[@"file_write_observation"] isEqual:@"not_correlated_to_this_request"], @"valid payload and transport do not prove file write");
+    NSArray *history = FBTNamesAssessHistory(@[request,
+        @{@"event": @"names_transport_diagnostic", @"request_id": @13, @"process_session_id": @"A", @"http_status": @400},
+        @{@"event": @"names_transport_diagnostic", @"request_id": @13, @"process_session_id": @"B", @"http_status": @200},
+        @{@"event": @"native_mc_fetch_completed", @"request_id": @13, @"process_session_id": @"A", @"native_transport_success": @NO}], @"A");
+    Check(history.count == 1 && [history[0][@"assessment"][@"transport_state"] isEqual:@"remote_rejection"], @"assessment does not mix process sessions sharing a request ID");
+    Check(FBTNamesAssessHistory(@[request], @"B").count == 0, @"other process requests excluded");
     NSLog(@"PASS: %lu response summary checks", (unsigned long)count);
 } return 0; }
+

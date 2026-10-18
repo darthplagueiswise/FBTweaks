@@ -320,10 +320,11 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
                         [event isEqualToString:@"network_response_body_captured"] ||
                         [event isEqualToString:@"network_response_body_skipped"];
     if (!sDiagCacheState || refreshCache) sDiagCacheState = FBTDiagCacheSummary();
-    NSDictionary *report = @{ @"schema_version": @4,
+    NSDictionary *report = @{ @"schema_version": @5,
                              @"process_session_id": FBTDiagProcessSessionID(),
                              @"updated_at_utc": FBTDiagISODate([NSDate date]),
                              @"events": [sDiagEvents copy],
+                             @"names_assessments": FBTNamesAssessHistory(sDiagEvents, FBTDiagProcessSessionID()),
                              @"capture_enabled": @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] && ![event isEqualToString:@"capture_paused"]),
                              @"cache_state": sDiagCacheState ?: @{},
                              @"runtime": FBTMobileConfigRuntimeStatus(),
@@ -348,6 +349,8 @@ NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void) {
     NSArray *events = sDiagEvents ? [sDiagEvents copy] : ([existing[@"events"] isKindOfClass:[NSArray class]] ? existing[@"events"] : @[]);
     NSMutableDictionary *report = [NSMutableDictionary dictionaryWithDictionary:existing ?: @{}];
     report[@"events"] = events;
+    report[@"schema_version"] = @5;
+    report[@"names_assessments"] = FBTNamesAssessHistory(events, FBTDiagProcessSessionID());
     report[@"capture_enabled"] = @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]);
     report[@"cache_state"] = FBTDiagCacheSummary();
     report[@"schema_version"] = @4;
@@ -374,4 +377,5 @@ void FBTMobileConfigFetchDiagnosticsReset(void) {
     pthread_mutex_unlock(&sDiagLock);
     FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
 }
+
 

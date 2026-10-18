@@ -12,3 +12,14 @@ NSDictionary *FBTNamesDiagnosticAdvice(NSDictionary *event);
 #ifdef __cplusplus
 }
 #endif
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Observations only: never changes the native request, callback or overrides.
+NSDictionary *FBTNamesAssessRequest(NSDictionary *request, NSDictionary *response, NSDictionary *completion);
+NSArray<NSDictionary *> *FBTNamesAssessHistory(NSArray<NSDictionary *> *events, NSString *processSessionID);
+#ifdef __cplusplus
+}
+#endif

@@ -115,3 +115,72 @@ NSDictionary *FBTNamesDiagnosticAdvice(NSDictionary *event) {
         @"explanation": @"Confira se a captura está pronta e faça uma tentativa pelo menu nativo.",
         @"next_step": @"Nenhuma correção de autorização foi comprovada."};
 }
+
+
+static NSInteger FBTNamesBoolean(id value) {
+    if ([value isKindOfClass:NSNumber.class]) {
+        if ([value isEqual:@0]) return 0;
+        if ([value isEqual:@1]) return 1;
+    }
+    if ([value isKindOfClass:NSString.class]) {
+        if ([value isEqual:@"true"] || [value isEqual:@"1"]) return 1;
+        if ([value isEqual:@"false"] || [value isEqual:@"0"]) return 0;
+    }
+    return -1;
+}
+
+NSDictionary *FBTNamesAssessRequest(NSDictionary *request, NSDictionary *response, NSDictionary *completion) {
+    NSString *summary = [request[@"request_parameter_summary"] isKindOfClass:NSString.class] ? request[@"request_parameter_summary"] : @"";
+    NSData *bytes = [summary dataUsingEncoding:NSUTF8StringEncoding];
+    id parsed = bytes.length ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:nil] : nil;
+    NSDictionary *shape = [parsed isKindOfClass:NSDictionary.class] ? parsed : @{};
+    NSArray *disabledOptions = @[@"with_current_experiment_group", @"with_experiments", @"with_gatekeepers",
+        @"with_group_params", @"with_groups", @"with_only_current_experiment_group", @"with_params", @"with_universe_params"];
+    BOOL profile = FBTNamesBoolean(shape[@"needs_name"]) == 1 && FBTNamesBoolean(shape[@"skip_qe"]) == 1;
+    NSMutableArray *missing = [NSMutableArray array];
+    for (NSString *key in [disabledOptions arrayByAddingObjectsFromArray:@[@"needs_name", @"skip_qe"]]) {
+        if (FBTNamesBoolean(shape[key]) < 0) [missing addObject:key];
+    }
+    for (NSString *key in disabledOptions) profile = profile && FBTNamesBoolean(shape[key]) == 0;
+    NSInteger http = [response[@"http_status"] respondsToSelector:@selector(integerValue)] ? [response[@"http_status"] integerValue] : 0;
+    if (!http && [completion[@"http_status"] respondsToSelector:@selector(integerValue)]) http = [completion[@"http_status"] integerValue];
+    NSInteger native = FBTNamesBoolean(completion[@"native_transport_success"]);
+    BOOL rejected = http >= 400 || response[@"server_error_code"] != nil;
+    NSString *transport = rejected ? @"remote_rejection" : native == 0 ? @"native_failure" : native == 1 ? @"native_success" : @"not_observed";
+    NSString *names = response[@"id_to_names_valid"] == nil ? @"not_observed" :
+        [response[@"id_to_names_valid"] boolValue] ? @"array_of_strings_observed" : @"expected_array_not_observed";
+    NSString *next = rejected ? @"Compare uma tentativa com o override 118554:2 removido (SYS), após reiniciar o app, com a captura original. Mantenha conta e demais opções constantes. Se a mesma rejeição persistir, esse teste não corrigiu a condição. Confirme então conta/app autorizados e a autenticação da requisição; este hook não observa o header final." :
+        native == 1 ? @"Confira id_to_names e a atualização do arquivo. Sucesso do transporte não comprova parsing nem gravação." :
+        @"Confira os hooks, o status HTTP e o corpo. Ausência de observação não significa false.";
+    return @{@"request_profile": profile ? @"native_names_profile" : missing.count ? @"incomplete_observation" : @"other_profile",
+        @"unobserved_or_invalid_options": missing,
+        @"request_options_explanation": @"with_* são seleções de conteúdo. No refreshNames nativo, as oito opções ficam false; needs_name e skip_qe ficam true. Não são permissões de employee.",
+        @"transport_state": transport, @"names_payload_state": names,
+        @"native_callback_explanation": @"No binário analisado, o callback de sucesso do fetcher exige corpo não vazio; o callback de erro devolve false. O processamento de nomes e a gravação são etapas posteriores. Não force o retorno.",
+        @"authentication_observation": @"not_captured_at_final_request",
+        @"authentication_explanation": @"O resumo dos parâmetros não captura a credencial anexada pela pilha HTTP. Não permite afirmar token presente, ausente, válido ou com escopo correto.",
+        @"file_write_observation": @"not_correlated_to_this_request",
+        @"whitehat_explanation": @"O controle FBWhitehatSSLPinningBypass analisado configura inspeção TLS e pede reinício. Não altera a elegibilidade remota. Receber OAuthException em JSON já demonstra uma resposta HTTP nesta tentativa.",
+        @"next_step": next};
+}
+
+NSArray<NSDictionary *> *FBTNamesAssessHistory(NSArray<NSDictionary *> *events, NSString *processSessionID) {
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSDictionary *request in events.reverseObjectEnumerator) {
+        if (![request isKindOfClass:NSDictionary.class] || ![request[@"event"] isEqual:@"native_mc_fetch_started"] ||
+            ![request[@"capture_reason"] isEqual:@"mobileconfig_qe_info"] ||
+            ![request[@"process_session_id"] isEqual:processSessionID] || !request[@"request_id"]) continue;
+        NSDictionary *response = @{}, *completion = @{};
+        for (NSDictionary *event in events.reverseObjectEnumerator) {
+            if (![event isKindOfClass:NSDictionary.class] || ![event[@"process_session_id"] isEqual:processSessionID] ||
+                ![event[@"request_id"] isEqual:request[@"request_id"]]) continue;
+            if ([event[@"event"] isEqual:@"native_mc_fetch_completed"] && !completion.count) completion = event;
+            if ([event[@"event"] isEqual:@"names_transport_diagnostic"] &&
+                (!response.count || (![response[@"http_status"] integerValue] && [event[@"http_status"] integerValue]))) response = event;
+        }
+        [out addObject:@{@"request_id": request[@"request_id"], @"process_session_id": processSessionID,
+            @"assessment": FBTNamesAssessRequest(request, response, completion)}];
+        if (out.count == 8) break;
+    }
+    return out;
+}
