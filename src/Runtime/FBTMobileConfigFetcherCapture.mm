@@ -9,6 +9,12 @@
 #include <vector>
 #include <atomic>
 #include <algorithm>
+#include <cstring>
+#include <mutex>
+#import <objc/runtime.h>
+#include <dlfcn.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #import <QuartzCore/QuartzCore.h>
 
 using FBTMCCompletion = std::function<void(bool, const std::string &)>;
@@ -22,6 +28,109 @@ static FBTMCAsyncFetchFn sOriginalFetch;
 static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
+
+// Read-only observations; no tokens, IDs, request mutations or forced results.
+// Layout and selectors are enabled only after the existing UUID/slot check.
+struct FBTMCBoolParam { uint64_t value; };
+static_assert(sizeof(FBTMCBoolParam) == 8, "mc_bool_param_t ABI mismatch");
+using FBTMCStartupBoolFn = bool (*)(id, SEL, FBTMCBoolParam, bool);
+static FBTMCStartupBoolFn sOriginalStartupBool;
+static BOOL sAuthReadHookInstalled;
+static NSString *sAuthReadHookFailure;
+static std::mutex sAuthReadMutex;
+struct FBTMCAuthRead { unsigned long long count = 0; bool value = false; };
+static FBTMCAuthRead sSessionAuthRead, sLoggedOutAuthRead;
+
+static uintptr_t FBTMCSharedRVA(const void *address) {
+    Dl_info info = {};
+    if (!address || !dladdr(address, &info) || !info.dli_fname || !info.dli_fbase) return 0;
+    const char *base = strrchr(info.dli_fname, '/');
+    if (strcmp(base ? base + 1 : info.dli_fname, "FBSharedFramework") != 0) return 0;
+    return (uintptr_t)address - (uintptr_t)info.dli_fbase;
+}
+
+static void FBTMCObserveAuthRead(uint64_t specifier, uintptr_t callerRVA, bool result) {
+    if (specifier != 0x00810cc7000042acULL) return;
+    std::lock_guard<std::mutex> guard(sAuthReadMutex);
+    // Exact return sites: session constructor and logged-out constructor.
+    // A UI inspection of the same flag is NOT evidence of consumption here.
+    FBTMCAuthRead *read = callerRVA == 0x53cc5c ? &sSessionAuthRead :
+                          callerRVA == 0x446c7c ? &sLoggedOutAuthRead : nullptr;
+    if (read) { ++read->count; read->value = result; }
+}
+
+static bool FBTMCStartupBool(id object, SEL command, FBTMCBoolParam param, bool fallback) {
+    const void *caller = __builtin_return_address(0);
+    bool result = sOriginalStartupBool(object, command, param, fallback);
+    if (param.value == 0x00810cc7000042acULL &&
+            [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        FBTMCObserveAuthRead(param.value, FBTMCSharedRVA(caller), result);
+    }
+    return result;
+}
+
+static NSDictionary *FBTMCAuthReadSnapshot(void) {
+    std::lock_guard<std::mutex> guard(sAuthReadMutex);
+    NSMutableDictionary *state = [@{@"hook_installed": @(sAuthReadHookInstalled),
+        @"scope": @"process_constructor_reads_not_request_identity",
+        @"session_read_count": @(sSessionAuthRead.count),
+        @"logged_out_read_count": @(sLoggedOutAuthRead.count),
+        @"session_state": sSessionAuthRead.count ? @"observed" : @"not_observed",
+        @"logged_out_state": sLoggedOutAuthRead.count ? @"observed" : @"not_observed"} mutableCopy];
+    if (sSessionAuthRead.count) state[@"session_last_value"] = @(sSessionAuthRead.value);
+    if (sLoggedOutAuthRead.count) state[@"logged_out_last_value"] = @(sLoggedOutAuthRead.value);
+    return state;
+}
+
+static void FBTMCInstallAuthReadHook(void) {
+    if (!sFetcherInstalled || sAuthReadHookInstalled) return;
+    Class cls = NSClassFromString(@"FBMobileConfigStartupConfigs");
+    if (!cls) { sAuthReadHookFailure = @"class_not_loaded"; return; }
+    @synchronized (cls) {
+        if (sAuthReadHookInstalled) return;
+        Method method = class_getInstanceMethod(cls, sel_registerName("getBool:withDefault:"));
+        const char *encoding = method ? method_getTypeEncoding(method) : nullptr;
+        IMP original = method ? method_getImplementation(method) : nullptr;
+        if (!encoding || strcmp(encoding, "B28@0:8{mc_bool_param_t=Q}16B24") != 0 ||
+                FBTMCSharedRVA((const void *)original) != 0x15b9f4) {
+            sAuthReadHookFailure = @"method_ABI_or_original_IMP_mismatch"; return;
+        }
+        sOriginalStartupBool = (FBTMCStartupBoolFn)original;
+        method_setImplementation(method, (IMP)FBTMCStartupBool);
+        sAuthReadHookInstalled = YES;
+        sAuthReadHookFailure = nil;
+    }
+}
+
+static bool FBTMCReadWord(uintptr_t address, uintptr_t *value) {
+    if (!address || !value) return false;
+    mach_vm_size_t size = 0;
+    return mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address,
+        sizeof(*value), (mach_vm_address_t)value, &size) == KERN_SUCCESS && size == sizeof(*value);
+}
+
+static NSDictionary *FBTMCServiceSnapshot(const void *fetcher, BOOL verifiedLayout) {
+    if (!verifiedLayout) return @{@"state": @"layout_not_verified"};
+    uintptr_t object = (uintptr_t)fetcher, service = 0, vtable = 0, send = 0;
+    if (!object || object > UINTPTR_MAX - 0x50 || !FBTMCReadWord(object + 0x50, &service))
+        return @{@"state": @"fetcher_unreadable"};
+    if (!service) return @{@"state": @"service_null"};
+    if (!FBTMCReadWord(service, &vtable) || !vtable || vtable > UINTPTR_MAX - 0x10 ||
+            !FBTMCReadWord(vtable + 0x10, &send)) return @{@"state": @"service_unreadable"};
+    uintptr_t rva = FBTMCSharedRVA((const void *)send);
+    NSMutableDictionary *state = [@{@"state": @"observed",
+        @"dispatch": rva == 0x45be80 ? @"TigonStack::sendRequest" : @"other_or_unresolved",
+        @"source": @"verified_fetcher_plus_0x50_vtable_plus_0x10",
+        @"auth_header_state": @"not_observed"} mutableCopy];
+    if (rva) state[@"shared_send_rva"] = [NSString stringWithFormat:@"0x%llx", (unsigned long long)rva];
+    // Raw pointers and account/token data are deliberately never emitted.
+    return state;
+}
+
+static NSString *FBTMCDiagnosticJSON(NSDictionary *value) {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:nil];
+    return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
+}
 
 struct FBTMCFetchObservation { std::atomic<int> httpStatus{0}; };
 static thread_local std::shared_ptr<FBTMCFetchObservation> sObservation;
@@ -108,6 +217,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     }
     NSData *shapeJSON = [NSJSONSerialization dataWithJSONObject:parameterShape options:NSJSONWritingSortedKeys error:nil];
     details[@"request_parameter_summary"] = [[NSString alloc] initWithData:shapeJSON encoding:NSUTF8StringEncoding] ?: @"{}";
+    details[@"tigon_service_snapshot"] = FBTMCDiagnosticJSON(FBTMCServiceSnapshot(fetcher, sFetcherInstalled));
+    details[@"auth_validation_read_snapshot"] = FBTMCDiagnosticJSON(FBTMCAuthReadSnapshot());
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_started", details);
     FBTMobileConfigTigonCaptureExpectRequest(details);
     auto original = std::make_shared<FBTMCCompletion>(std::move(completion));
@@ -167,12 +278,14 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
 }
 
 void FBTMobileConfigFetcherCaptureInstall(void) {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] || sFetcherInstalled) return;
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    if (sFetcherInstalled) { FBTMCInstallAuthReadHook(); return; }
     static const unsigned char uuid[16] = {76,76,68,254,85,85,49,68,161,194,108,202,228,237,37,151};
     NSString *failure = nil;
     sFetcherInstalled = FBTRebindVerifiedImageConstSlot("FBSharedFramework", 0x8161f88ULL,
         uuid, 0xa17f70ULL, (void *)FBTMCAsyncFetch, (void **)&sOriginalFetch, &failure);
     sFetcherFailure = [failure copy];
+    FBTMCInstallAuthReadHook();
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetcher_hook", @{
         @"hook_installed": @(sFetcherInstalled), @"message": sFetcherFailure ?: @"",
         @"capture_surface": @"UUID-verified FBMobileConfigTigonFetcher asyncFetch data slot; native decoded completion"});
@@ -180,8 +293,11 @@ void FBTMobileConfigFetcherCaptureInstall(void) {
 
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
     return @{@"native_mc_fetcher_installed": @(sFetcherInstalled),
+        @"auth_validation_reads": FBTMCAuthReadSnapshot(),
+        @"auth_validation_read_hook_failure": sAuthReadHookFailure ?: @"none_or_not_attempted",
         @"native_mc_fetcher_failure": sFetcherFailure ?: @"not_attempted",
         @"native_mc_requests": @(sRequests.load()), @"native_mc_responses": @(sResponses.load()),
         @"native_mc_failures": @(sFailures.load())};
 }
+
 

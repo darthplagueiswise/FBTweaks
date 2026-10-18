@@ -70,8 +70,45 @@ static void CompletionFromNativeError(void *, const void *, void *summary) {
 }
 static const std::string sSuccessBody = "{\"id_to_names\":[\"1:test:0:flag\"]}";
 static void SuccessFromNativeEOM(void *, void *) { sDeferredCompletion(true, sSuccessBody); }
+static NSUInteger sStartupCalls;
+static bool StartupOriginal(id object, SEL command, FBTMCBoolParam param, bool fallback) {
+    Check(object == nil && command == sel_registerName("getBool:withDefault:") &&
+          param.value == 0x00810cc7000042acULL, @"startup getter ABI and arguments preserved");
+    ++sStartupCalls; return !fallback;
+}
 int main(void) { @autoreleasepool {
     sSaved = [NSMutableArray array]; sEvents = [NSMutableArray array];
+    NSDictionary *probe = FBTMCAuthReadSnapshot();
+    Check([probe[@"session_state"] isEqual:@"not_observed"] && !probe[@"session_last_value"],
+        @"unobserved auth selection is not false");
+    FBTMCObserveAuthRead(0x00810cc7000042acULL, 0x123, true);
+    FBTMCObserveAuthRead(0, 0x53cc5c, true);
+    Check([FBTMCAuthReadSnapshot()[@"session_read_count"] intValue] == 0,
+        @"UI reads and other parameters cannot masquerade as constructor consumption");
+    FBTMCObserveAuthRead(0x00810cc7000042acULL, 0x53cc5c, false);
+    FBTMCObserveAuthRead(0x00810cc7000042acULL, 0x446c7c, true);
+    probe = FBTMCAuthReadSnapshot();
+    Check([probe[@"session_state"] isEqual:@"observed"] && ![probe[@"session_last_value"] boolValue] &&
+          [probe[@"logged_out_last_value"] boolValue], @"session and logged-out observations remain separate");
+    sOriginalStartupBool = StartupOriginal;
+    Check(FBTMCStartupBool(nil, sel_registerName("getBool:withDefault:"), {0x00810cc7000042acULL}, false) &&
+          !FBTMCStartupBool(nil, sel_registerName("getBool:withDefault:"), {0x00810cc7000042acULL}, true) &&
+          sStartupCalls == 2, @"startup original called once per request and result preserved");
+    Check([FBTMCServiceSnapshot((void *)1, NO)[@"state"] isEqual:@"layout_not_verified"],
+        @"unverified layout is never read");
+    Check([FBTMCServiceSnapshot((void *)1, YES)[@"state"] isEqual:@"fetcher_unreadable"],
+        @"unmapped fetcher does not crash");
+    uintptr_t fakeFetcher[12] = {}, fakeVtable[3] = {0, 0, (uintptr_t)StartupOriginal};
+    uintptr_t fakeService = (uintptr_t)fakeVtable;
+    Check([FBTMCServiceSnapshot(fakeFetcher, YES)[@"state"] isEqual:@"service_null"], @"null service identified");
+    fakeFetcher[10] = 1;
+    Check([FBTMCServiceSnapshot(fakeFetcher, YES)[@"state"] isEqual:@"service_unreadable"],
+        @"unmapped service does not crash");
+    fakeFetcher[10] = (uintptr_t)&fakeService;
+    probe = FBTMCServiceSnapshot(fakeFetcher, YES);
+    Check([probe[@"state"] isEqual:@"observed"] && [probe[@"dispatch"] isEqual:@"other_or_unresolved"] &&
+          [probe[@"auth_header_state"] isEqual:@"not_observed"] && !probe[@"shared_send_rva"],
+        @"unknown implementation never claimed as native TigonStack or authenticated");
     sTigonCaptureLock = [NSLock new]; sTigonCapturedRequests = [NSMutableDictionary dictionary];
     sTigonRequestURL = URL; sTigonURLHost = Host; sTigonURLPath = Path; sTigonURLQuery = Query; sTigonRequestMethod = Method;
     sSimpleBody = BodyOriginal; sSimpleResponse = ResponseOriginal; sSimpleEOM = EndOriginal;
@@ -117,6 +154,8 @@ int main(void) { @autoreleasepool {
         [sLastNativeEvent[@"request_parameter_summary"] rangeOfString:@"never_persist_this"].location == NSNotFound,
         @"credential fields excluded from metadata");
     sEnabled = NO;
+    Check(FBTMCStartupBool(nil, sel_registerName("getBool:withDefault:"), {0x00810cc7000042acULL}, false) &&
+        sStartupCalls == 3, @"logging off still forwards startup getter unchanged");
     FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
     Check(sNativeCalls == 2 && sCompletionCalls == 2, @"logging off forwards native fetch directly");
     sEnabled = YES; sOriginalFetch = DeferredOriginal;
@@ -199,4 +238,5 @@ int main(void) { @autoreleasepool {
     Check(FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO).count == 0, @"logging off disables native correlation");
     NSLog(@"PASS: HTTP error body/status, move ownership, callback forwarding, endpoint filter, logging-off and copy limits");
 } return 0; }
+
 
