@@ -1,4 +1,4 @@
-name: Build FBTweaks
+name: Build FBTweak
 
 on:
   push:
