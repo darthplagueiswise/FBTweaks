@@ -5,7 +5,11 @@
 #import "../src/Runtime/FBTMobileConfigFetcherCapture.mm"
 
 NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.capture";
+NSString * const FBTKeyEmployeeEnabled = @"test.employee";
 static BOOL sEnabled = YES;
+void FBTEmployeeObserveMCBool(uint64_t, BOOL, BOOL, const void *) {}
+BOOL FBTEmployeeApplyTWProbe(uint64_t, BOOL value) { return value; }
+NSDictionary *FBTEmployeeDiagnosticsSnapshot(void) { return @{@"sequence": @0, @"tw_probe_armed": @NO}; }
 @implementation FBTDefaults
 + (BOOL)boolForKey:(NSString *)key { return sEnabled; }
 @end
@@ -35,6 +39,13 @@ static const std::string &Host(const void *r) { return ((const TestRequest *)r)-
 static const std::string &Path(const void *r) { return ((const TestRequest *)r)->path; }
 static const std::string &RequestMethod(const void *r) { return ((const TestRequest *)r)->method; }
 static const std::string &Query(const void *r) { return ((const TestRequest *)r)->query; }
+static FBTHeaderResult TestHeader(const void *, const std::string &key) {
+    FBTHeaderResult result = {};
+    if (key == "Authorization") {
+        new (result.bytes) std::string("OAuth fixture-secret"); result.bytes[24] = 1;
+    }
+    return result;
+}
 static void ResponseOriginal(void *, void *r) {
     Check(r == sExpectedResponse, @"response forwarded unchanged"); ++sResponseCalls;
 }
@@ -60,6 +71,12 @@ static void DeferredOriginal(const void *, const std::string &, const std::strin
         const FBTMCRequestPairs &, FBTMCCompletion completion, const std::string &, uint64_t) {
     sDeferredCompletion = std::move(completion);
 }
+static FBTMCRequestPairs sExperimentNativeParams;
+static void ExperimentOriginal(const void *, const std::string &, const std::string &,
+        const FBTMCRequestPairs &params, FBTMCCompletion completion, const std::string &, uint64_t) {
+    sExperimentNativeParams = params;
+    completion(false, sNativeBody);
+}
 static void CompletionFromNativeEOM(void *, void *summary) {
     Check(summary == sExpectedSummary, @"EOM summary preserved without onStarted");
     sDeferredCompletion(false, sNativeBody);
@@ -78,6 +95,13 @@ static bool StartupOriginal(id object, SEL command, FBTMCBoolParam param, bool f
 }
 int main(void) { @autoreleasepool {
     sSaved = [NSMutableArray array]; sEvents = [NSMutableArray array];
+    Check([FBTAuthorizationSummary("OAuth fixture-secret")[@"authorization_scheme"] isEqual:@"OAuth"], @"OAuth scheme observed");
+    Check(![FBTAuthorizationSummary("Bearer ")[@"authorization_credential_present"] boolValue], @"empty credential is not present");
+    Check(![FBTAuthorizationSummary("OAuth fixture-secret").description containsString:@"fixture-secret"], @"secret never enters summary");
+    Check([FBTObserveRequestAuthorization((void *)1)[@"authorization_state"] isEqual:@"not_observed"], @"unverified getter is unknown");
+    sFindHeader = TestHeader;
+    Check([FBTObserveRequestAuthorization((void *)1)[@"authorization_scheme"] isEqual:@"OAuth"], @"native optional header ABI exercised");
+    sFindHeader = nullptr;
     NSDictionary *probe = FBTMCAuthReadSnapshot();
     Check([probe[@"session_state"] isEqual:@"not_observed"] && !probe[@"session_last_value"],
         @"unobserved auth selection is not false");
@@ -236,7 +260,25 @@ int main(void) { @autoreleasepool {
         @"successful response saved once with HTTP 200 instead of a duplicate HTTP 0");
     sEnabled = NO;
     Check(FBTMobileConfigTigonCaptureObserveNativeCompletion(@{}, NO).count == 0, @"logging off disables native correlation");
+    sEnabled = YES; sOriginalFetch = ExperimentOriginal;
+    FBTMobileConfigArmEmployeeExperiment(YES);
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    Check(sExperimentNativeParams.size() == params.size()+1 && params.size() == 2 &&
+        sExperimentNativeParams.back() == FBTMCRequestPairs::value_type("is_employee", "true"), @"B adds one field to outgoing copy only");
+    Check([sLastNativeEvent[@"experiment_profile"] isEqual:@"B_is_employee_true"] &&
+        [sLastNativeEvent[@"employee_field_added"] boolValue] && ![sLastNativeEvent[@"native_transport_success"] boolValue],
+        @"B profile retained; native failure is never promoted to success");
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    Check(sExperimentNativeParams == params, @"B applies to one request only");
+    FBTMobileConfigArmEmployeeExperiment(NO);
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", params, completion, "", 0);
+    Check(sExperimentNativeParams == params && [sLastNativeEvent[@"experiment_profile"] isEqual:@"A_native"], @"A preserves original native request");
+    FBTMCRequestPairs existing = params; existing.emplace_back("is_employee", "false");
+    FBTMobileConfigArmEmployeeExperiment(YES);
+    FBTMCAsyncFetch(nullptr, "POST", "mobileconfig_qe_info", existing, completion, "", 0);
+    Check(sExperimentNativeParams == existing && [sLastNativeEvent[@"experiment_state"] isEqual:@"skipped_existing_native_field"], @"existing native field never replaced or duplicated");
     NSLog(@"PASS: HTTP error body/status, move ownership, callback forwarding, endpoint filter, logging-off and copy limits");
 } return 0; }
+
 
 

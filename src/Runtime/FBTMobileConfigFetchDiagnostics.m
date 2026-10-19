@@ -6,6 +6,7 @@
 #import "FBTMCOverridesFile.h"
 #import "FBTMobileConfigDebugUIHooks.h"
 #import "FBTFlagCatalog.h"
+#import "FBTEmployeeDiagnostics.h"
 #import "../FBTDefaults.h"
 #import "FBTPrefix.h"
 #import <pthread.h>
@@ -148,6 +149,12 @@ static NSString *FBTDiagFilePath(void) {
 static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
     NSSet *allowed = [NSSet setWithArray:@[@"body_status", @"decoded_response_bytes", @"id_to_names_valid", @"id_to_names_count", @"server_error_code", @"server_error_subcode", @"server_error_type", @"server_error_message", @"matched_ui_query_count", @"native_tigon_correlation", @"request_id", @"request_param_count", @"routing_hint_present", @"payload_provenance", @"request_metadata_source", @"request_parameter_summary", @"simple_callback_hooks_installed", @"native_transport_success", @"bool_reader_available", @"int64_reader_available", @"double_reader_available", @"string_reader_available", @"param", @"config", @"key", @"backend_type", @"backend", @"alert", @"alert_message", @"retry", @"context_count", @"arg2", @"arg3", @"fetch_result", @"duration_ms", @"hook_installed", @"error_domain", @"error_code", @"rebind_status", @"http_status", @"message", @"force", @"download_success", @"output_universe_nonempty", @"output_gk_nonempty", @"metamap_argument_present", @"capture_reason", @"capture_window_seconds", @"capture_surface", @"hooked_session_class_count", @"body_capture_status", @"payload_file", @"payload_sha256", @"response_bytes", @"legacy_refresh_override_file_state", @"builtin_query_hash_override_file_state", @"content_type", @"request_host", @"request_path", @"request_method", @"request_body_bytes", @"query_hash_state", @"query_hash_length", @"one_query_hash_state", @"one_query_hash_length", @"capture_enabled", @"network_error_domain", @"network_error_code", @"response_body_bytes", @"armed", @"last_capture_status", @"last_payload_file", @"captured_body_count", @"surface", @"transport", @"query_hash_source", @"http_status_source", @"error_object_present", @"request_body_persisted", @"tigon_body_hook_installed", @"tigon_request_hook_installed", @"tigon_response_hook_installed", @"tigon_eom_hook_installed", @"tigon_error_hook_installed", @"request_url_getter_available", @"request_method_getter_available", @"url_components_available", @"tigon_rebind_status", @"tigon_callback", @"tigon_response_bytes", @"body_chunk_bytes", @"tigon_completed_response_count", @"tigon_context_count"]];
     NSMutableDictionary *safe = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"experiment_id", @"experiment_profile", @"experiment_state", @"employee_field_added",
+        @"authorization_state", @"authorization_scheme", @"authorization_credential_present", @"authorization_observation_stage",
+        @"identity_read_sequence_at_start", @"identity_read_sequence_at_completion", @"local_employee_enabled", @"tw_probe_armed_at_start"]) {
+        id value = details[key];
+        if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class]) safe[key] = value;
+    }
     // Both fields are produced from fixed-key, credential-free native probes.
     for (NSString *key in @[@"tigon_service_snapshot", @"auth_validation_read_snapshot"]) {
         if ([details[key] isKindOfClass:NSString.class]) safe[key] = details[key];
@@ -324,7 +331,8 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
                         [event isEqualToString:@"network_response_body_captured"] ||
                         [event isEqualToString:@"network_response_body_skipped"];
     if (!sDiagCacheState || refreshCache) sDiagCacheState = FBTDiagCacheSummary();
-    NSDictionary *report = @{ @"schema_version": @5,
+    NSDictionary *report = @{ @"schema_version": @7,
+                             @"employee_identity": FBTEmployeeDiagnosticsSnapshot(),
                              @"process_session_id": FBTDiagProcessSessionID(),
                              @"updated_at_utc": FBTDiagISODate([NSDate date]),
                              @"events": [sDiagEvents copy],
@@ -353,7 +361,8 @@ NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void) {
     NSArray *events = sDiagEvents ? [sDiagEvents copy] : ([existing[@"events"] isKindOfClass:[NSArray class]] ? existing[@"events"] : @[]);
     NSMutableDictionary *report = [NSMutableDictionary dictionaryWithDictionary:existing ?: @{}];
     report[@"events"] = events;
-    report[@"schema_version"] = @5;
+    report[@"schema_version"] = @7;
+    report[@"employee_identity"] = FBTEmployeeDiagnosticsSnapshot();
     report[@"names_assessments"] = FBTNamesAssessHistory(events, FBTDiagProcessSessionID());
     report[@"capture_enabled"] = @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]);
     report[@"cache_state"] = FBTDiagCacheSummary();
@@ -380,6 +389,7 @@ void FBTMobileConfigFetchDiagnosticsReset(void) {
     pthread_mutex_unlock(&sDiagLock);
     FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
 }
+
 
 
 

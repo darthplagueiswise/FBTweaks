@@ -2,6 +2,8 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
+#import "FBTEmployeeDiagnostics.h"
+#include "FBTMCRequestExperiment.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -27,6 +29,20 @@ static FBTMCAsyncFetchFn sOriginalFetch;
 static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
+static fbt_mc_probe::OneShot sRequestExperiment;
+void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    NSString *identifier = NSUUID.UUID.UUIDString;
+    sRequestExperiment.arm(addEmployeeField, identifier.UTF8String, CACurrentMediaTime());
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_experiment_armed", @{
+        @"experiment_id": identifier, @"experiment_profile": addEmployeeField ? @"B_is_employee_true" : @"A_native",
+        @"experiment_state": @"armed_next_QE_only", @"capture_window_seconds": @120});
+}
+void FBTMobileConfigCancelEmployeeExperiment(void) { sRequestExperiment.cancel(); }
+NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void) {
+    auto pending = sRequestExperiment.pending(CACurrentMediaTime());
+    return @{@"armed": @(pending.mode >= 0), @"profile": pending.mode < 0 ? @"native" : pending.mode ? @"B_is_employee_true" : @"A_native"};
+}
 
 // Read-only observations; no tokens, IDs, request mutations or forced results.
 // Layout and selectors are enabled only after the existing UUID/slot check.
@@ -61,11 +77,13 @@ static void FBTMCObserveAuthRead(uint64_t specifier, uintptr_t callerRVA, bool r
 static bool FBTMCStartupBool(id object, SEL command, FBTMCBoolParam param, bool fallback) {
     const void *caller = __builtin_return_address(0);
     bool result = sOriginalStartupBool(object, command, param, fallback);
+    bool effective = FBTEmployeeApplyTWProbe(param.value, result);
+    FBTEmployeeObserveMCBool(param.value, result, effective, caller);
     if (param.value == 0x00810cc7000042acULL &&
             [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         FBTMCObserveAuthRead(param.value, FBTMCSharedRVA(caller), result);
     }
-    return result;
+    return effective;
 }
 
 static NSDictionary *FBTMCAuthReadSnapshot(void) {
@@ -164,9 +182,13 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         FBTMCCompletion completion, const std::string &routingHint, uint64_t target) {
     if (!sOriginalFetch) return;
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        FBTMobileConfigCancelEmployeeExperiment();
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
+    auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
+    auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
+    BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
     // Binary TigonRequest constructor and device logs prove argument 1 is the
@@ -175,12 +197,16 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     NSMutableDictionary *details = [@{@"request_id": @(requestID),
         @"request_method": requestMethod, @"capture_reason": requestLabel,
         @"request_metadata_source": @"native_fetcher_arguments",
-        @"transport": @"FBMobileConfigTigonFetcher", @"request_param_count": @(params.size()),
+        @"transport": @"FBMobileConfigTigonFetcher", @"request_param_count": @(outgoing->size()),
+        @"experiment_profile": selected.mode < 0 ? @"native" : selected.mode ? @"B_is_employee_true" : @"A_native",
+        @"experiment_state": selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
+        @"employee_field_added": @(added),
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
-    for (const auto &pair : params) {
+    if (selected.mode >= 0) details[@"experiment_id"] = FBTMCText(selected.id);
+    for (const auto &pair : *outgoing) {
         // Only public protocol field names are allowed; account/token values and
         // regex/name contents are never serialized. Booleans are useful for 400s.
         static const std::vector<std::string> allowed = {"api_version", "locale",
@@ -189,7 +215,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             "with_all_experiment_groups", "with_experiment_params",
             "with_experiment_universes", "with_gatekeepers", "with_experiments", "with_params",
             "with_groups", "with_group_params", "needs_name", "skip_qe",
-            "query_hash", "one_query_hash"};
+            "query_hash", "one_query_hash", "is_employee"};
         if (pair.first == "device_id") parameterShape[@"device_id_present"] = @(!pair.second.empty());
         if (pair.first == "queries") {
             NSString *queries = FBTMCText(pair.second);
@@ -200,7 +226,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         }
         if (std::find(allowed.begin(), allowed.end(), pair.first) != allowed.end()) {
             NSString *key = FBTMCText(pair.first);
-            if (pair.first == "needs_name" || pair.first == "skip_qe" || pair.first.find("with_") == 0) {
+            if (pair.first == "is_employee" || pair.first == "needs_name" || pair.first == "skip_qe" || pair.first.find("with_") == 0) {
                 BOOL valid = pair.second == "true" || pair.second == "false" || pair.second == "0" || pair.second == "1";
                 parameterShape[key] = valid ? FBTMCText(pair.second) : @"unexpected_boolean_encoding";
             } else if (pair.first == "api_version" && !pair.second.empty() && pair.second.size() <= 5 &&
@@ -219,14 +245,18 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     details[@"request_parameter_summary"] = [[NSString alloc] initWithData:shapeJSON encoding:NSUTF8StringEncoding] ?: @"{}";
     details[@"tigon_service_snapshot"] = FBTMCDiagnosticJSON(FBTMCServiceSnapshot(fetcher, sFetcherInstalled));
     details[@"auth_validation_read_snapshot"] = FBTMCDiagnosticJSON(FBTMCAuthReadSnapshot());
+    details[@"identity_read_sequence_at_start"] = FBTEmployeeDiagnosticsSnapshot()[@"sequence"];
+    details[@"local_employee_enabled"] = @([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]);
+    details[@"tw_probe_armed_at_start"] = FBTEmployeeDiagnosticsSnapshot()[@"tw_probe_armed"];
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_started", details);
     FBTMobileConfigTigonCaptureExpectRequest(details);
     auto original = std::make_shared<FBTMCCompletion>(std::move(completion));
     NSDictionary *request = [details copy];
     CFTimeInterval started = CACurrentMediaTime();
     auto observation = purpose == "mobileconfig_qe_info" ? sObservation : nullptr;
-    FBTMCCompletion wrapped = [original, request, requestLabel, requestMethod, started, observation]
+    FBTMCCompletion wrapped = [original, outgoing, request, requestLabel, requestMethod, started, observation]
             (bool success, const std::string &body) {
+        (void)outgoing; // Retain the parameter copy for asynchronous native consumers.
         ++sResponses;
         if (!success) ++sFailures;
         @try {
@@ -235,6 +265,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             response[@"response_bytes"] = @(body.size());
             response[@"duration_ms"] = @((CACurrentMediaTime() - started) * 1000.0);
             response[@"payload_provenance"] = success ? @"native_decoded_completion" : @"native_formatted_transport_error";
+            response[@"identity_read_sequence_at_completion"] = FBTEmployeeDiagnosticsSnapshot()[@"sequence"];
             if (!success) {
                 response[@"message"] = FBTMCText(body);
                 // This callback contains Tigon's formatted error, not the HTTP body.
@@ -252,7 +283,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
                 }
             }
             NSDictionary *nativeResponse = FBTMobileConfigTigonCaptureObserveNativeCompletion(response, success);
-            for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes", @"request_host", @"request_path"]) {
+            for (NSString *key in @[@"native_tigon_correlation", @"http_status", @"http_status_source", @"response_body_bytes", @"request_host", @"request_path",
+                @"authorization_state", @"authorization_scheme", @"authorization_credential_present", @"authorization_observation_stage"]) {
                 if (nativeResponse[key]) response[key] = nativeResponse[key];
             }
             if (observation && response[@"http_status"]) observation->httpStatus.store([response[@"http_status"] intValue]);
@@ -273,7 +305,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         // Native callback receives exactly the original status and bytes.
         if (original && *original) (*original)(success, body);
     };
-    try { sOriginalFetch(fetcher, method, purpose, params, std::move(wrapped), routingHint, target); }
+    try { sOriginalFetch(fetcher, method, purpose, *outgoing, std::move(wrapped), routingHint, target); }
     catch (...) { FBTMobileConfigTigonCaptureCompleteRequest(request[@"request_id"]); throw; }
 }
 
@@ -293,12 +325,14 @@ void FBTMobileConfigFetcherCaptureInstall(void) {
 
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
     return @{@"native_mc_fetcher_installed": @(sFetcherInstalled),
+        @"employee_request_experiment": FBTMobileConfigEmployeeExperimentStatus(),
         @"auth_validation_reads": FBTMCAuthReadSnapshot(),
         @"auth_validation_read_hook_failure": sAuthReadHookFailure ?: @"none_or_not_attempted",
         @"native_mc_fetcher_failure": sFetcherFailure ?: @"not_attempted",
         @"native_mc_requests": @(sRequests.load()), @"native_mc_responses": @(sResponses.load()),
         @"native_mc_failures": @(sFailures.load())};
 }
+
 
 
 

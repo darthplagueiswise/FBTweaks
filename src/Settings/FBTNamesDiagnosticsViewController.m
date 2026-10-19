@@ -6,6 +6,9 @@
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
+#import "../Runtime/FBTMobileConfigRuntime.h"
+#import "../Runtime/FBTEmployeeDiagnostics.h"
+extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
 @property (nonatomic, strong) NSTimer *timer;
@@ -17,7 +20,7 @@
 @implementation FBTNamesDiagnosticsViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Diagnóstico de nomes";
+    self.title = @"Fetch, FBUser e tw_*";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 64;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -95,14 +98,23 @@
     NSMutableArray *historyText = [NSMutableArray array];
     for (NSDictionary *item in history) {
         NSDictionary *r = item[@"request"], *d = item[@"diagnostic"];
-        [historyText addObject:[NSString stringWithFormat:@"Pedido %@ · HTTP %@ · %@\n%@", r[@"request_id"],
+        [historyText addObject:[NSString stringWithFormat:@"Pedido %@ · %@ · HTTP %@ · %@\n%@", r[@"request_id"], r[@"experiment_profile"] ?: @"native",
             [d[@"http_status"] integerValue] ? d[@"http_status"] : @"?", r[@"time_utc"] ?: @"", d[@"server_error_message"] ?: d[@"body_status"] ?: @"aguardando"]];
     }
     if (!historyText.count) [historyText addObject:@"Nenhum pedido QE-info registrado nesta sessão."];
-    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local"],
+    NSDictionary *identity = self.report[@"employee_identity"] ?: @{};
+    NSString *identityText = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:identity options:NSJSONWritingPrettyPrinted error:nil] encoding:NSUTF8StringEncoding] ?: @"";
+    NSString *authText = [NSString stringWithFormat:@"Authorization: %@ · esquema: %@ · credencial: %@\nEtapa: %@\nExperimento: %@ · %@\nA presença de OAuth não confirma elegibilidade nem validade do token.",
+        completion[@"authorization_state"] ?: @"não observado", completion[@"authorization_scheme"] ?: @"não observado",
+        completion[@"authorization_credential_present"] ?: @"não observada", completion[@"authorization_observation_stage"] ?: @"não observada",
+        request[@"experiment_profile"] ?: @"native", request[@"experiment_state"] ?: @"original"];
+    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local",
+        @"Armar A: próximo pedido QE original", @"Armar B: próximo pedido QE + is_employee=true",
+        @"Testar tw_is_employee=true por 120 s", @"Cancelar testes temporários",
+        [NSString stringWithFormat:@"Employee local (FBUser/gates): %@ — tocar alterna", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]],
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation], historyText,
-        @[@"1. Inicie a captura aqui.\n2. Execute Internal Settings → MobileConfig → Advanced Settings → Force name download uma vez.\n3. Retorne e use Compartilhar.\n\nA captura continua com esta tela fechada e funciona sem Frida ou computador. O mapa local funciona sem o serviço QE-info e não anuncia sucesso remoto."]];
+        @[requestText, result, localState, interpretation, authText, identityText], historyText,
+        @[@"Inicie a captura uma vez. Arme A e execute Force name download; arme B e repita a mesma ação. Faça depois A/B na consulta de params. Cada armamento vale só para o próximo POST QE-info em até 120 s. Confira no histórico qual ação o consumiu.\n\nTeste FBUser/gates e tw_is_employee separadamente, mantendo o restante fixo. O teste tw_* afeta somente tw_is_employee.enabled nos leitores observados e expira em 120 s. Não grava mc_overrides.\n\nVolte e compartilhe o JSON. O relatório não contém seu token. Leituras locais de identidade são observações do processo, não prova de autorização remota nem de associação a um pedido específico."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
@@ -135,14 +147,27 @@
         [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMobileConfigResponseCaptureInstall();
         FBTInstallMobileConfigDebugUIBootstrap();
+        FBTInitEmployeeGroup();
+        FBTInstallMobileConfigRuntime();
+        FBTMobileConfigCancelEmployeeExperiment();
+        FBTEmployeeDiagnosticsReset();
         FBTMobileConfigFetchDiagnosticsReset();
         FBTMobileConfigResponseCaptureArm(@"force_name_download");
     } else if (path.row == 1) {
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMobileConfigResponseCaptureDisarm();
+        FBTMobileConfigCancelEmployeeExperiment();
+        FBTEmployeeCancelTWProbe();
     } else if (path.row == 2) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
-    else [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if (path.row == 3) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if (path.row == 4 || path.row == 5) FBTMobileConfigArmEmployeeExperiment(path.row == 5);
+    else if (path.row == 6) FBTEmployeeArmTWProbe();
+    else if (path.row == 7) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
+    else if (path.row == 8) {
+        [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
+        FBTInitEmployeeGroup();
+    }
     [self refreshReport];
 }
 - (void)shareReport {
@@ -189,4 +214,5 @@ void FBTPresentNamesDiagnostics(UIViewController *presenter) {
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
     [presenter presentViewController:nav animated:YES completion:nil];
 }
+
 

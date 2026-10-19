@@ -22,6 +22,7 @@ int main(void) { @autoreleasepool {
     Check(![out.description containsString:@"123456789"] && ![out.description containsString:@"secret"], @"IDs and unallowlisted credentials absent");
     Check(![FBTNamesRedactMessage(@"{\"access_token\":\"sensitive\"} Authorization: Bearer abc.def.ghi") containsString:@"sensitive"] &&
         ![FBTNamesRedactMessage(@"Bearer abc.def.ghi") containsString:@"abc.def.ghi"], @"quoted credentials and bearer sanitized");
+    Check(![FBTNamesRedactMessage(@"OAuth fixture-secret-token") containsString:@"fixture-secret-token"], @"standalone OAuth credentials sanitized");
     out = FBTNamesResponseSummary(UTF8(@"{\"id_to_names\":[\"1:test:0:flag\"]}"));
     Check([out[@"id_to_names_valid"] boolValue] && [out[@"id_to_names_count"] intValue] == 1 && ![out.description containsString:@"flag"], @"valid names counted without values");
     Check(![FBTNamesResponseSummary(UTF8(@"{\"id_to_names\":[1]}"))[@"id_to_names_valid"] boolValue], @"wrong token types rejected");
@@ -65,4 +66,5 @@ int main(void) { @autoreleasepool {
     Check(FBTNamesAssessHistory(@[request], @"B").count == 0, @"other process requests excluded");
     NSLog(@"PASS: %lu response summary checks", (unsigned long)count);
 } return 0; }
+
 

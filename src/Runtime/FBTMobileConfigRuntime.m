@@ -4,6 +4,7 @@
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTMobileConfigValueReader.h"
+#import "FBTEmployeeDiagnostics.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
@@ -235,8 +236,14 @@ NSArray<NSDictionary *> *FBTMobileConfigSnapshot(void) {
 static BOOL fbt_MSGCSessionedMobileConfigGetBoolean(void *ctx, uint64_t key, BOOL defaultValue, void *extra) {
     BOOL original = orig_MSGCSessionedMobileConfigGetBoolean ? orig_MSGCSessionedMobileConfigGetBoolean(ctx, key, defaultValue, extra) : defaultValue;
     NSDictionary *ov = FBTMCOverride(key, @"bool");
+    BOOL effective = FBTEmployeeApplyTWProbe(key, ov ? [ov[@"v"] boolValue] : original);
+    FBTEmployeeObserveMCBool(key, original, effective, __builtin_return_address(0));
+    if (effective != original && !ov) {
+        FBTMCRecord(key, @"bool", defaultValue ? @"true" : @"false", effective ? @"true" : @"false", YES);
+        return effective;
+    }
     if (ov) {
-        BOOL forced = [ov[@"v"] boolValue];
+        BOOL forced = effective;
         FBTMCRecord(key, @"bool", defaultValue ? @"true" : @"false", forced ? @"true" : @"false", YES);
         return forced;
     }
@@ -320,4 +327,5 @@ void FBTInstallMobileConfigRuntime(void) {
     FBTMobileConfigFetchDiagnosticsRecord(@"runtime_import_hooks", available);
     FBTLog(@"MobileConfig runtime: requested import registration; %@", available);
 }
+
 

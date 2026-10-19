@@ -3,6 +3,7 @@
 #import "FBTDefaults.h"
 #import <objc/runtime.h>
 #import <string.h>
+#import "../../Runtime/FBTEmployeeDiagnostics.h"
 
 // Known identity/gating hooks verified in Facebook, FBSharedFramework,
 // FBSharedDynamicFramework and FBRarelyUsedFramework. These are deliberately
@@ -25,10 +26,17 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBUserPreferences
 - (BOOL)isEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled])
+        return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBUserPreferences.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 - (void)setEmployee:(BOOL)value {
-    %orig(FBTEmployeeIdentityOn() ? YES : value);
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : value;
+    FBTEmployeeObserveBool(@"FBUserPreferences.setEmployee.input", value, effective, __builtin_return_address(0));
+    %orig(effective);
 }
 %end
 
@@ -159,6 +167,14 @@ static FBTBoolVoidFn orig_RageState_triage = NULL;
 static FBTBoolVoidFn orig_RageModel_triage = NULL;
 static FBTVoidBoolFn orig_RageView_updatedTriage = NULL;
 static FBTBoolVoidFn orig_FFDB_isInternLoggedIn = NULL;
+static FBTBoolVoidFn orig_FBUser_isEmployee = NULL;
+
+static BOOL fbt_FBUser_isEmployee(id self, SEL command) {
+    BOOL original = orig_FBUser_isEmployee ? orig_FBUser_isEmployee(self, command) : NO;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBUser.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
+}
 
 static BOOL fbt_isInternalTestUser(id self, SEL _cmd, id arg1) {
     return FBTTestUserOn() ? YES : (orig_isInternalTestUser ? orig_isInternalTestUser(self, _cmd, arg1) : NO);
@@ -229,6 +245,9 @@ static void FBTInstallBoolVoidHook(Class cls,
 }
 
 void FBTInstallKnownGateRuntimeHooks(void) {
+    // Retryable; no selector is added. Only an existing B16/c16 getter can hook.
+    FBTInstallBoolVoidHook(objc_getClass("FBUser"), "isEmployee",
+        (IMP)fbt_FBUser_isEmployee, (IMP *)&orig_FBUser_isEmployee);
     Class helper = objc_getClass("_TtC24FBIdentitySwitcherGating30FBIdentitySwitcherGatingHelper");
     FBTInstallBoolObjectHook(helper,
                              "isInternalTestUser:",
@@ -281,3 +300,4 @@ void FBTInitEmployeeGroup(void) {
     });
     FBTInstallKnownGateRuntimeHooks();
 }
+

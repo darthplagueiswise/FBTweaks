@@ -6,7 +6,7 @@ NSString *FBTNamesRedactMessage(NSString *message) {
     NSString *text = message;
     NSArray *patterns = @[
         @"(?i)[\"']?(authorization|proxy_authorization|cookie|set-cookie|access[_-]?token|session[_-]?(token|key)|password|client[_-]?secret|app[_-]?secret)[\"']?\\s*[:=]\\s*(?:\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'|[^,;\\r\\n}]+)",
-        @"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+",
+        @"(?i)\\b(?:Bearer|OAuth)\\s+[A-Za-z0-9._~+/=-]+",
         @"https?://[^\\s\"']+", @"[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}",
         @"\\bEAA[A-Za-z0-9_-]{15,}\\b", @"(?i)\\b[0-9a-f]{16,}\\b", @"\\b[0-9]{6,}\\b"
     ];
@@ -149,7 +149,8 @@ NSDictionary *FBTNamesAssessRequest(NSDictionary *request, NSDictionary *respons
     NSString *transport = rejected ? @"remote_rejection" : native == 0 ? @"native_failure" : native == 1 ? @"native_success" : @"not_observed";
     NSString *names = response[@"id_to_names_valid"] == nil ? @"not_observed" :
         [response[@"id_to_names_valid"] boolValue] ? @"array_of_strings_observed" : @"expected_array_not_observed";
-    NSString *next = rejected ? @"Compare uma tentativa com o override 118554:2 removido (SYS), após reiniciar o app, com a captura original. Mantenha conta e demais opções constantes. Se a mesma rejeição persistir, esse teste não corrigiu a condição. Confirme então conta/app autorizados e a autenticação da requisição; este hook não observa o header final." :
+    NSString *auth = completion[@"authorization_state"] ?: response[@"authorization_state"] ?: @"not_observed";
+    NSString *next = rejected ? @"Compare A e B para a mesma ação e conta. Teste FBUser/gates e tw_is_employee separadamente. Confira o perfil realmente consumido, HTTP, corpo e saídas nativas de params/nomes. OAuth presente não prova token válido ou condição employee aceita." :
         native == 1 ? @"Confira id_to_names e a atualização do arquivo. Sucesso do transporte não comprova parsing nem gravação." :
         @"Confira os hooks, o status HTTP e o corpo. Ausência de observação não significa false.";
     return @{@"request_profile": profile ? @"native_names_profile" : missing.count ? @"incomplete_observation" : @"other_profile",
@@ -157,8 +158,8 @@ NSDictionary *FBTNamesAssessRequest(NSDictionary *request, NSDictionary *respons
         @"request_options_explanation": @"with_* são seleções de conteúdo. No refreshNames nativo, as oito opções ficam false; needs_name e skip_qe ficam true. Não são permissões de employee.",
         @"transport_state": transport, @"names_payload_state": names,
         @"native_callback_explanation": @"No binário analisado, o callback de sucesso do fetcher exige corpo não vazio; o callback de erro devolve false. O processamento de nomes e a gravação são etapas posteriores. Não force o retorno.",
-        @"authentication_observation": @"not_captured_at_final_request",
-        @"authentication_explanation": @"O resumo dos parâmetros não captura a credencial anexada pela pilha HTTP. Não permite afirmar token presente, ausente, válido ou com escopo correto.",
+        @"authentication_observation": [auth isEqual:@"not_observed"] ? @"not_captured_at_final_request" : auth,
+        @"authentication_explanation": @"O callback onStarted pode observar presença/esquema de Authorization. A etapa é exportada explicitamente. Isso não valida token, ator, escopo, elegibilidade ou headers finais na rede. Ausência do callback fica não observada.",
         @"file_write_observation": @"not_correlated_to_this_request",
         @"whitehat_explanation": @"O controle FBWhitehatSSLPinningBypass analisado configura inspeção TLS e pede reinício. Não altera a elegibilidade remota. Receber OAuthException em JSON já demonstra uma resposta HTTP nesta tentativa.",
         @"next_step": next};
@@ -184,3 +185,4 @@ NSArray<NSDictionary *> *FBTNamesAssessHistory(NSArray<NSDictionary *> *events, 
     }
     return out;
 }
+

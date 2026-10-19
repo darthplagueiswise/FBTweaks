@@ -12,6 +12,7 @@
 #include <cstring>
 #include <atomic>
 #include <cfloat>
+#include <new>
 
 typedef void (*FBTTigonStartedOrig)(void *, const void *);
 typedef void (*FBTTigonBodyOrig)(void *, void *);
@@ -57,6 +58,37 @@ static FBTTigonStringGetterFn sTigonRequestMethod = nullptr;
 static FBTTigonStringGetterFn sTigonURLHost = nullptr;
 static FBTTigonStringGetterFn sTigonURLPath = nullptr;
 static FBTTigonStringGetterFn sTigonURLQuery = nullptr;
+
+// Verified in Shared 583: findHeader -> 0x45dd74 returns a 32-byte optional
+// string indirectly in x8, with engagement at +0x18. Missing result has no
+// live string. Destroy only an engaged copy; never retain/export its bytes.
+struct alignas(8) FBTHeaderResult { unsigned char bytes[32]; };
+using FBTFindHeaderFn = FBTHeaderResult (*)(const void *, const std::string &);
+static FBTFindHeaderFn sFindHeader;
+static_assert(sizeof(std::string) == 24, "Apple libc++ string ABI required");
+static NSDictionary *FBTAuthorizationSummary(const std::string &value) {
+    size_t start = value.find_first_not_of(" \t");
+    if (start == std::string::npos) return @{@"authorization_state": @"empty", @"authorization_scheme": @"none", @"authorization_credential_present": @NO};
+    size_t end = value.find_first_of(" \t", start);
+    std::string scheme = value.substr(start, end == std::string::npos ? end : end-start);
+    for (char &c : scheme) if (c >= 'A' && c <= 'Z') c += 'a'-'A';
+    BOOL credential = end != std::string::npos && value.find_first_not_of(" \t", end) != std::string::npos;
+    return @{@"authorization_state": @"present", @"authorization_scheme": scheme == "oauth" ? @"OAuth" : scheme == "bearer" ? @"Bearer" : @"other",
+        @"authorization_credential_present": @(credential)};
+}
+static NSDictionary *FBTObserveRequestAuthorization(const void *request) {
+    if (!sFindHeader) return @{@"authorization_state": @"not_observed", @"authorization_observation_stage": @"getter_unavailable_or_unverified"};
+    for (const char *key : {"Authorization", "authorization"}) {
+        FBTHeaderResult found = sFindHeader(request, std::string(key));
+        if (!found.bytes[24]) continue;
+        std::string *value = reinterpret_cast<std::string *>(found.bytes);
+        NSMutableDictionary *summary = [FBTAuthorizationSummary(*value) mutableCopy];
+        value->~basic_string();
+        summary[@"authorization_observation_stage"] = @"TigonCallbacks.onStarted_not_wire_or_token_validation";
+        return summary;
+    }
+    return @{@"authorization_state": @"not_found_by_native_lookup", @"authorization_observation_stage": @"TigonCallbacks.onStarted_not_wire_or_token_validation"};
+}
 
 static NSLock *sTigonCaptureLock = nil;
 static NSMutableDictionary<NSValue *, NSMutableDictionary *> *sTigonCapturedRequests = nil;
@@ -279,6 +311,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
             @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only"
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
+        [context addEntriesFromDictionary:FBTObserveRequestAuthorization(request)];
 
         [sTigonCaptureLock lock];
         NSValue *key = [NSValue valueWithPointer:self];
@@ -442,6 +475,10 @@ NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *r
     ++sNativeCorrelations;
     NSMutableDictionary *context = FBTTigonContextForObject(sCurrentSimpleEnd);
     if (!context) context = [@{@"body": [NSMutableData data], @"transport": @"TigonSimpleCallbacks"} mutableCopy];
+    if (!context[@"authorization_state"]) {
+        context[@"authorization_state"] = @"not_observed";
+        context[@"authorization_observation_stage"] = @"onStarted_not_observed_for_this_request";
+    }
     [context addEntriesFromDictionary:request];
     context[@"mc_correlated"] = @YES;
     context[@"transport"] = @"TigonSimpleCallbacks";
@@ -578,6 +615,14 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (!sTigonURLPath) sTigonURLPath = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getPathEv");
     if (!sTigonURLQuery) sTigonURLQuery = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl8getQueryEv");
     FBTInstallSimpleHooks();
+    if (!sFindHeader && sSimpleHooksInstalled) {
+        void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
+        Dl_info info = {};
+        if (candidate && dladdr(candidate, &info) && info.dli_fname && info.dli_fbase &&
+            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0 &&
+            (uintptr_t)candidate - (uintptr_t)info.dli_fbase == 0x561d4c)
+            sFindHeader = (FBTFindHeaderFn)candidate;
+    }
     if (sTigonHooksInstalled) return;
 
     struct rebinding bindings[] = {
@@ -623,5 +668,6 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
         @"capture_surface": @"imports plus UUID-verified main executable data slots; response status is not exposed yet"
     });
 }
+
 
 

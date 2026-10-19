@@ -12,6 +12,10 @@ void FBTMobileConfigResponseCaptureInstall(void);
 void FBTMobileConfigResponseCaptureInstallTigon(void);
 void FBTMobileConfigFetcherCaptureInstall(void);
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void);
+// One-shot experiment, memory only, expires in 120 seconds.
+void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField);
+void FBTMobileConfigCancelEmployeeExperiment(void);
+NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void);
 // Selection-scoped correlation: begin/end on the same thread, in LIFO order.
 // Async callbacks own shared state, so a late response cannot touch a dead scope.
 void *FBTMobileConfigFetcherCaptureBeginScope(void);
@@ -40,4 +44,5 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void);
 }
 #endif
 #endif
+
 

@@ -226,7 +226,8 @@ static void FBTResponseCaptureWriteRawPayload(NSData *data, NSString *host, NSSt
         @"transport": transport ?: @"unknown",
         @"body_capture_status": @"not_saved"
     } mutableCopy];
-    for (NSString *key in @[@"request_id", @"http_status_source", @"native_tigon_correlation"])
+    for (NSString *key in @[@"request_id", @"http_status_source", @"native_tigon_correlation", @"experiment_id", @"experiment_profile", @"experiment_state", @"employee_field_added",
+        @"authorization_state", @"authorization_scheme", @"authorization_credential_present", @"authorization_observation_stage"])
         if (queryHashState[key]) event[key] = queryHashState[key];
     NSDictionary *summary = FBTNamesResponseSummary(data);
     NSMutableDictionary *summaryEvent = [event mutableCopy];
@@ -588,4 +589,5 @@ NSDictionary *FBTMobileConfigResponseCaptureStatus(void) {
     [combined addEntriesFromDictionary:FBTMobileConfigFetcherCaptureStatus()];
     return [combined copy];
 }
+
 

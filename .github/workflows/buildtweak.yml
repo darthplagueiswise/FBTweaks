@@ -77,6 +77,14 @@ jobs:
           clang -fobjc-arc -framework Foundation tests/MCOverridesFileTests.m src/Runtime/FBTMCOverridesFile.m -o /tmp/fbt-mc-file-tests
           /tmp/fbt-mc-file-tests
 
+      - name: Test scoped request experiment and employee observations
+        run: |
+          cd main
+          clang++ -std=c++11 -pthread tests/RequestExperimentTests.cpp -o /tmp/fbt-request-experiment-tests
+          /tmp/fbt-request-experiment-tests
+          clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/EmployeeDiagnosticsTests.m -o /tmp/fbt-employee-tests
+          /tmp/fbt-employee-tests
+
       - name: Test Tigon error response capture
         run: |
           cd main
@@ -127,5 +135,6 @@ jobs:
           name: FBTweak.1.0.${{ github.run_number }}
           path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
           if-no-files-found: error
+
 
 
