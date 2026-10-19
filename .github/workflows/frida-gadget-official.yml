@@ -30,13 +30,17 @@ jobs:
           file frida-lab/FridaGadget.dylib
           lipo -info frida-lab/FridaGadget.dylib
           lipo -archs frida-lab/FridaGadget.dylib | grep -qw arm64
+          # Controlled diagnostic only: arm64 thin slice of the verified official asset.
+          mkdir -p frida-lab-arm64
+          lipo -thin arm64 frida-lab/FridaGadget.dylib -output frida-lab-arm64/FridaGadget.dylib
+          lipo -archs frida-lab-arm64/FridaGadget.dylib | grep -qx arm64
           cat > frida-lab/FridaGadget.config <<'EOF'
           {
             "interaction": {
               "type": "listen",
               "address": "127.0.0.1",
               "port": 27042,
-              "on_port_conflict": "fail",
+              "on_port_conflict": "pick-next",
               "on_load": "resume"
             },
             "code_signing": "required"
@@ -50,10 +54,22 @@ jobs:
           Platform: iOS physical device (arm64)
           Note: laboratory only, not signed; re-sign IPA, nested dylib and provision.
           EOF
+          cp frida-lab/FridaGadget.config frida-lab-arm64/FridaGadget.config
+          cat > frida-lab-arm64/manifest.txt <<EOF
+          Source: official 17.24.3 iOS Universal, thinned via lipo
+          Arm64-only SHA256: $(shasum -a 256 frida-lab-arm64/FridaGadget.dylib | awk '{print $1}')
+          Warning: diagnostic experiment, not a proven workaround for Frida issue 3770
+          EOF
           cat frida-lab/manifest.txt
       - uses: actions/upload-artifact@v4
         with:
           name: FridaGadget-official-ios-17.24.3
           path: frida-lab/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FridaGadget-ios-arm64-only-lab-17.24.3
+          path: frida-lab-arm64/
           if-no-files-found: error
           retention-days: 7
