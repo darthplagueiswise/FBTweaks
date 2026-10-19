@@ -5,6 +5,7 @@
 #import "FBTUtils.h"
 #import "Runtime/FBTMobileConfigRuntime.h"
 #import "Runtime/FBTRuntimeBoolBrowser.h"
+#import "Runtime/FBTNativeTrace.h"
 #import "Runtime/FBTNativeMobileConfigOverrides.h"
 #import "Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "Features/Employee/FBTInternalImports.h"
@@ -92,6 +93,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
 %ctor {
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
+        FBTNativeTraceReloadPrefs();
         // Migrate away from the duplicate employee sweep before loading hooks.
         // Only sweep:employee entries are removed; manual overrides remain.
         FBTRuntimeBoolClearSweep(@"employee");
@@ -133,6 +135,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
                         if (![FBTDefaults boolForKey:FBTKeyMasterEnabled]) FBTMobileConfigSetSessionActive(NO);
                         FBTMobileConfigReloadPrefs();
                         FBTRuntimeBoolReloadPrefs();
+                        FBTNativeTraceReloadPrefs();
                         FBTInternalImportReloadPrefs();
                         FBTInstallEnabledKnownFamilies();
 
