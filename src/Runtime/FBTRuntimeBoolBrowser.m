@@ -1,4 +1,5 @@
 #import "FBTRuntimeBoolBrowser.h"
+#import "FBTNativeTrace.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
@@ -142,16 +143,22 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
-        __atomic_fetch_add(&captured->invocationCount, 1ULL, __ATOMIC_RELAXED);
+        unsigned long long count = __atomic_add_fetch(&captured->invocationCount, 1ULL, __ATOMIC_RELAXED);
         int mode = __atomic_load_n(&captured->forceMode, __ATOMIC_ACQUIRE);
         // No original call on a forced path: getters may have side effects.
         if (mode != -1) {
             __atomic_store_n(&captured->observedEffective, mode, __ATOMIC_RELAXED);
+            if (FBTNativeTraceIsEnabled() && (count <= 8 || count % 128 == 0)) {
+                FBTNativeTraceRecordBool((__bridge NSString *)captured->key, -1, mode);
+            }
             return mode == 1;
         }
         BOOL original = captured->orig ? ((FBTBoolOrigImp)captured->orig)(receiver, captured->sel) : NO;
         __atomic_store_n(&captured->observedOriginal, original ? 1 : 0, __ATOMIC_RELAXED);
         __atomic_store_n(&captured->observedEffective, original ? 1 : 0, __ATOMIC_RELAXED);
+        if (FBTNativeTraceIsEnabled() && (count <= 8 || count % 128 == 0)) {
+            FBTNativeTraceRecordBool((__bridge NSString *)captured->key, original ? 1 : 0, original ? 1 : 0);
+        }
         return original;
     });
 
@@ -226,6 +233,7 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         }
         NSString *key = FBTBoolKey(className, sel, classMethods);
         NSDictionary *ov = FBTBoolOverrideForKey(key);
+        BOOL hasForce = [ov[@"force"] respondsToSelector:@selector(boolValue)];
         pthread_mutex_lock(&sBoolLock);
         FBTBoolHookDescriptor *desc = [sInstalled[key] pointerValue];
         pthread_mutex_unlock(&sBoolLock);
@@ -244,7 +252,8 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
             @"key": key ?: @"",
             @"image": imagePath ?: @"",
             @"imageKind": imageKind ?: @"unknown",
-            @"forced": ov ? @YES : @NO,
+            @"forced": @(hasForce),
+            @"observing": @(ov != nil && !hasForce),
             @"force": ov[@"force"] ?: [NSNull null],
         }];
     }
@@ -373,6 +382,21 @@ NSDictionary *FBTRuntimeBoolSweepStats(void) {
 
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue) {
     FBTRuntimeBoolSetOverrideWithSource(candidate, forcedValue, @"manual");
+}
+
+// Installs a passive observer without changing return values; persists exact target.
+void FBTRuntimeBoolObserve(NSDictionary *candidate) {
+    NSString *className = candidate[@"class"];
+    NSString *selectorName = candidate[@"selector"];
+    if (!className.length || !selectorName.length) return;
+    BOOL isClassMethod = [candidate[@"classMethod"] boolValue];
+    NSString *key = FBTBoolKey(className, selectorName, isClassMethod);
+    NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
+    all[key] = @{ @"class": className, @"selector": selectorName,
+                  @"classMethod": @(isClassMethod), @"source": @"observe" };
+    [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
+    FBTRuntimeBoolReloadPrefs();
+    FBTRuntimeBoolInstallOne(className, selectorName, isClassMethod);
 }
 
 void FBTRuntimeBoolClearOverride(NSDictionary *candidate) {
