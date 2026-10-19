@@ -8,12 +8,12 @@
 #include <mutex>
 #include <vector>
 namespace fbt_trace {
-static const size_t CAPACITY=256, NAME_MAX=112, NOTE_MAX=176;
+static const size_t CAPACITY=256, kNameBytes=112, kNoteBytes=176;
 enum Kind { BOOL_CALL=1, NETWORK=2, SYSTEM=3 };
 struct Record {
  uint64_t sequence,monotonic_ns;
  int kind,original,effective;
- char name[NAME_MAX],note[NOTE_MAX];
+ char name[kNameBytes],note[kNoteBytes];
 };
 class Ring {
 public:
