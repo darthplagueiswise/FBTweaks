@@ -75,6 +75,8 @@ static void FBTInstallEnabledKnownFamilies(void) {
     // Retry exato e idempotente para Swift/Dynamic/RN/RarelyUsed que podem ser
     // carregados depois do constructor. Não enumera classes globalmente.
     FBTInstallEnabledKnownFamilies();
+    // Late-loaded classes: retry only persisted BOOL targets (throttled).
+    FBTRuntimeBoolRetryPendingHooks();
 
     FBTRetryEntryPoints();
 }
@@ -90,6 +92,12 @@ static void FBTInstallEnabledKnownFamilies(void) {
 %ctor {
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
+        // Migrate away from the duplicate employee sweep before loading hooks.
+        // Only sweep:employee entries are removed; manual overrides remain.
+        FBTRuntimeBoolClearSweep(@"employee");
+        if ([[NSUserDefaults standardUserDefaults] boolForKey:FBTKeyEmployeeSweepEnabled]) {
+            [[NSUserDefaults standardUserDefaults] setBool:NO forKey:FBTKeyEmployeeSweepEnabled];
+        }
 
         %init(FBTHost);
         FBTInstallEntryPoints();
