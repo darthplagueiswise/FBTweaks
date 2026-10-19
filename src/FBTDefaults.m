@@ -25,6 +25,7 @@ NSString * const FBTKeyMobileConfigOverrides        = @"fbt_mobileconfig_overrid
 
 NSString * const FBTKeyRuntimeBoolBrowserEnabled = @"fbt_runtime_bool_browser_enabled";
 NSString * const FBTKeyRuntimeBoolOverrides      = @"fbt_runtime_bool_overrides";
+NSString * const FBTKeyNativeTraceEnabled        = @"fbt_native_trace_enabled";
 
 NSString * const FBTNotificationPrefsChanged = @"FBTNotificationPrefsChanged";
 
@@ -61,6 +62,7 @@ static NSDictionary *gRegistered = nil;
 
         FBTKeyRuntimeBoolBrowserEnabled:        @(YES),
         FBTKeyRuntimeBoolOverrides:             @{},
+        FBTKeyNativeTraceEnabled:               @(NO),
     };
 }
 
