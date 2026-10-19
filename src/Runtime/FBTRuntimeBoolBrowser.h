@@ -10,6 +10,7 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
 NSDictionary *FBTRuntimeBoolOverridesSnapshot(void);
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue);
 void FBTRuntimeBoolClearOverride(NSDictionary *candidate);
+void FBTRuntimeBoolObserve(NSDictionary *candidate);
 void FBTRuntimeBoolClearAllOverrides(void);
 void FBTRuntimeBoolClearSweep(NSString *mode);
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit);
