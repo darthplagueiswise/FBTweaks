@@ -73,9 +73,7 @@ static void FBTInstallGateFamiliesForKey(NSString *key, BOOL enabled) {
         FBTInstallMobileConfigDebugUIHooks();
     }
 
-    if ([key isEqualToString:FBTKeyEmployeeSweepEnabled] && !enabled) {
-        FBTRuntimeBoolClearSweep(@"employee");
-    } else if ([key isEqualToString:FBTKeyDogfoodSweepEnabled] && !enabled) {
+    if ([key isEqualToString:FBTKeyDogfoodSweepEnabled] && !enabled) {
         FBTRuntimeBoolClearSweep(@"dogfood");
     } else if ([key isEqualToString:FBTKeyInternalDebugSweepEnabled] && !enabled) {
         FBTRuntimeBoolClearSweep(@"internaldebug");
