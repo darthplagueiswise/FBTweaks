@@ -163,7 +163,6 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Employee sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo employee/test/internalTestUser.", @"key": FBTKeyEmployeeSweepEnabled },
             @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
             @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
             @{ @"kind": @"switch", @"title": @"C import: Internal Settings", @"subtitle": @"fishhook em FBShouldEnableInternalSettings importado pelo executable; toggle runtime após instalar.", @"key": FBTKeyInternalCImportsEnabled },
@@ -290,10 +289,6 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if ([sender.prefKey isEqualToString:FBTKeyRuntimeBoolBrowserEnabled]) {
         FBTRuntimeBoolReloadPrefs();
         if (sender.isOn) FBTRuntimeBoolReinstallPersistedHooks();
-    }
-    if ([sender.prefKey isEqualToString:FBTKeyEmployeeSweepEnabled] && sender.isOn) {
-        NSUInteger n = FBTRuntimeBoolInstallSweep(@"employee", YES, 160);
-        [self showInfoTitle:@"Employee sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
     }
     if ([sender.prefKey isEqualToString:FBTKeyDogfoodSweepEnabled] && sender.isOn) {
         NSUInteger n = FBTRuntimeBoolInstallSweep(@"dogfood", YES, 160);
@@ -878,7 +873,14 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = [NSString stringWithFormat:@"%@%@", [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"selector"] ?: @""];
     NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : @"";
-    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@%@", e[@"class"] ?: @"", e[@"imageKind"] ?: @"unknown", force];
+    NSString *hookState = e[@"installState"] ?: @"unknown";
+    id original = e[@"observedOriginal"];
+    id effective = e[@"observedEffective"];
+    NSString *originalLabel = original && original != [NSNull null] ? FBTBoolText([original boolValue]) : @"?";
+    NSString *effectiveLabel = effective && effective != [NSNull null] ? FBTBoolText([effective boolValue]) : @"?";
+    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@%@\nHook: %@ · Original: %@ · Efetivo: %@ · Chamadas: %@",
+                         e[@"class"] ?: @"", e[@"imageKind"] ?: @"unknown", force, hookState,
+                         originalLabel, effectiveLabel, e[@"invocationCount"] ?: @0];
     cfg.secondaryTextProperties.numberOfLines = 3;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
