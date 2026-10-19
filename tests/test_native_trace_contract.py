@@ -31,6 +31,12 @@ class NativeTraceContract(unittest.TestCase):
         s=src("src/Runtime/FBTMobileConfigFetchDiagnostics.m")
         self.assertLess(s.index("FBTDiagSafeEvent(event, details"),s.index("FBTNativeTraceRecordNetwork(event, safeEvent)"))
         self.assertIn("if (!fullLogEnabled) return;",s)
+    def test_objective_cxx_exports_c_linkage(self):
+        header = src("src/Runtime/FBTNativeTrace.h")
+        self.assertIn('extern "C" {', header)
+        self.assertIn('#ifdef __cplusplus', header)
+        self.assertIn("void FBTNativeTraceRecordBool(", header)
+
     def test_no_frida_dependency(self):
         for p in ["src/Runtime/FBTNativeTrace.mm","src/Runtime/FBTNativeTraceCore.hpp","src/Settings/FBTNativeTraceViewController.m"]:
             self.assertNotIn("FridaGadget",src(p))
