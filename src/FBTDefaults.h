@@ -29,6 +29,7 @@ extern NSString * const FBTKeyMobileConfigOverrides;
 
 extern NSString * const FBTKeyRuntimeBoolBrowserEnabled;
 extern NSString * const FBTKeyRuntimeBoolOverrides;
+extern NSString * const FBTKeyNativeTraceEnabled;
 
 extern NSString * const FBTNotificationPrefsChanged;
 
