@@ -15,6 +15,10 @@ typedef struct {
     SEL sel;
     IMP orig;
     CFStringRef key;
+    int forceMode;  // -1 original, 0 OFF, 1 ON; atomic accesses
+    int observedOriginal; // -1 until original really executed
+    int observedEffective; // -1 until any invocation
+    unsigned long long invocationCount;
 } FBTBoolHookDescriptor;
 
 static NSMutableDictionary<NSString *, NSValue *> *sInstalled; // key -> descriptor ptr
@@ -74,24 +78,39 @@ static BOOL FBTBoolDecodeKey(NSString *key, NSString **className, NSString **sel
 }
 
 static NSDictionary *FBTBoolOverrideForKey(NSString *key) {
+    pthread_mutex_lock(&sBoolLock);
     NSDictionary *ov = sOverrides[key];
-    return [ov isKindOfClass:[NSDictionary class]] ? ov : nil;
+    NSDictionary *answer = [ov isKindOfClass:[NSDictionary class]] ? ov : nil;
+    pthread_mutex_unlock(&sBoolLock);
+    return answer;
 }
 
-static void FBTBoolRememberObserved(NSString *key, BOOL value) {
-    // Mantém a observação fora do defaults para não gravar em hot path.
-    // Reservado para UI futura; hoje o importante é não ler defaults aqui.
-    (void)key; (void)value;
+static int FBTBoolMode(NSDictionary *override, BOOL enabled) {
+    if (!enabled || ![override isKindOfClass:[NSDictionary class]]) return -1;
+    id value = override[@"force"];
+    return [value respondsToSelector:@selector(boolValue)] ? ([value boolValue] ? 1 : 0) : -1;
 }
 
 void FBTRuntimeBoolReloadPrefs(void) {
-    sBoolBrowserEnabled = [FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled];
-    NSDictionary *raw = [FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides];
-    sOverrides = [raw copy] ?: @{};
+    BOOL enabled = [FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled];
+    NSDictionary *snapshot = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] copy] ?: @{};
+    pthread_mutex_lock(&sBoolLock);
+    sBoolBrowserEnabled = enabled;
+    sOverrides = snapshot;
+    for (NSValue *v in sInstalled.allValues) {
+        FBTBoolHookDescriptor *desc = [v pointerValue];
+        if (!desc) continue;
+        NSString *key = (__bridge NSString *)desc->key;
+        __atomic_store_n(&desc->forceMode, FBTBoolMode(snapshot[key], enabled), __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&sBoolLock);
 }
 
 NSDictionary *FBTRuntimeBoolOverridesSnapshot(void) {
-    return sOverrides ?: @{};
+    pthread_mutex_lock(&sBoolLock);
+    NSDictionary *snapshot = sOverrides ?: @{};
+    pthread_mutex_unlock(&sBoolLock);
+    return snapshot;
 }
 
 static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName, BOOL isClassMethod) {
@@ -117,23 +136,22 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     if (!desc) return NO;
     desc->sel = sel;
     desc->key = (CFStringRef)CFBridgingRetain(key);
+    desc->forceMode = FBTBoolMode(FBTBoolOverrideForKey(key), sBoolBrowserEnabled);
+    desc->observedOriginal = -1;
+    desc->observedEffective = -1;
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
-        NSString *capturedKey = (__bridge NSString *)captured->key;
-        NSDictionary *ov = FBTBoolOverrideForKey(capturedKey);
-        // Force is decided before the original. A forced getter must not run
-        // side effects, slow paths or crashes from the original implementation.
-        if (ov && sBoolBrowserEnabled) {
-            id v = ov[@"force"];
-            if ([v respondsToSelector:@selector(boolValue)]) return [v boolValue];
+        __atomic_fetch_add(&captured->invocationCount, 1ULL, __ATOMIC_RELAXED);
+        int mode = __atomic_load_n(&captured->forceMode, __ATOMIC_ACQUIRE);
+        // No original call on a forced path: getters may have side effects.
+        if (mode != -1) {
+            __atomic_store_n(&captured->observedEffective, mode, __ATOMIC_RELAXED);
+            return mode == 1;
         }
-
-        BOOL original = NO;
-        if (captured->orig) {
-            original = ((FBTBoolOrigImp)captured->orig)(receiver, captured->sel);
-        }
-        FBTBoolRememberObserved(capturedKey, original);
+        BOOL original = captured->orig ? ((FBTBoolOrigImp)captured->orig)(receiver, captured->sel) : NO;
+        __atomic_store_n(&captured->observedOriginal, original ? 1 : 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&captured->observedEffective, original ? 1 : 0, __ATOMIC_RELAXED);
         return original;
     });
 
@@ -151,7 +169,7 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
 void FBTRuntimeBoolReinstallPersistedHooks(void) {
     FBTRuntimeBoolReloadPrefs();
     if (!sBoolBrowserEnabled) return;
-    NSDictionary *ovs = sOverrides ?: @{};
+    NSDictionary *ovs = FBTRuntimeBoolOverridesSnapshot();
     for (NSString *key in ovs) {
         NSString *cls = nil;
         NSString *sel = nil;
@@ -159,6 +177,16 @@ void FBTRuntimeBoolReinstallPersistedHooks(void) {
         if (!FBTBoolDecodeKey(key, &cls, &sel, &isClass)) continue;
         FBTRuntimeBoolInstallOne(cls, sel, isClass);
     }
+}
+
+// Called from an ordinary lifecycle callback, never from a dyld initializer.
+// Only persisted targets are queried: no global Objective-C enumeration.
+void FBTRuntimeBoolRetryPendingHooks(void) {
+    static NSTimeInterval previous;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now - previous < 10.0) return;
+    previous = now;
+    FBTRuntimeBoolReinstallPersistedHooks();
 }
 
 static BOOL FBTSelectorLooksUseful(NSString *sel) {
@@ -198,7 +226,18 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         }
         NSString *key = FBTBoolKey(className, sel, classMethods);
         NSDictionary *ov = FBTBoolOverrideForKey(key);
+        pthread_mutex_lock(&sBoolLock);
+        FBTBoolHookDescriptor *desc = [sInstalled[key] pointerValue];
+        pthread_mutex_unlock(&sBoolLock);
+        int original = desc ? __atomic_load_n(&desc->observedOriginal, __ATOMIC_RELAXED) : -1;
+        int effective = desc ? __atomic_load_n(&desc->observedEffective, __ATOMIC_RELAXED) : -1;
+        unsigned long long count = desc ? __atomic_load_n(&desc->invocationCount, __ATOMIC_RELAXED) : 0;
         [out addObject:@{
+            @"hookInstalled": @(desc != NULL),
+            @"installState": desc ? @"installed" : (ov ? @"pending" : @"not_requested"),
+            @"observedOriginal": original < 0 ? [NSNull null] : @(original != 0),
+            @"observedEffective": effective < 0 ? [NSNull null] : @(effective != 0),
+            @"invocationCount": @(count),
             @"class": className ?: @"",
             @"selector": sel ?: @"",
             @"classMethod": @(classMethods),
@@ -273,8 +312,7 @@ static void FBTRuntimeBoolSetOverrideWithSource(NSDictionary *candidate,
     NSString *selectorName = candidate[@"selector"];
     BOOL isClass = [candidate[@"classMethod"] boolValue];
     NSString *key = FBTBoolKey(className, selectorName, isClass);
-    if (!FBTRuntimeBoolInstallOne(className, selectorName, isClass)) return;
-
+    // Persist first; a class absent during startup remains pending.
     NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
     NSMutableDictionary *entry = [@{
         @"class": className ?: @"",
@@ -286,6 +324,9 @@ static void FBTRuntimeBoolSetOverrideWithSource(NSDictionary *candidate,
     all[key] = entry;
     [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
     FBTRuntimeBoolReloadPrefs();
+    if (!FBTRuntimeBoolInstallOne(className, selectorName, isClass)) {
+        FBTLog(@"runtime bool pendente (classe ausente): %@", key);
+    }
 }
 
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit) {
