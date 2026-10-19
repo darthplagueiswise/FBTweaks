@@ -40,7 +40,7 @@ class RuntimeBoolContractTests(unittest.TestCase):
         start = source.index("static void FBTRuntimeBoolSetOverrideWithSource(")
         end = source.index("NSUInteger FBTRuntimeBoolInstallSweep", start)
         segment = source[start:end]
-        self.assertLess(segment.index("[FBTDefaults setDict:all"), segment.index("FBTBoolInstallOne("))
+        self.assertLess(segment.index("[FBTDefaults setDict:all"), segment.index("FBTRuntimeBoolInstallOne("))
         self.assertIn("void FBTRuntimeBoolRetryPendingHooks(void)", source)
         retry = source[source.index("void FBTRuntimeBoolRetryPendingHooks(void)"):
                        source.index("static BOOL FBTSelectorLooksUseful")]
