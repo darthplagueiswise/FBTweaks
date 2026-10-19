@@ -7,6 +7,7 @@ on:
       - 'dev'
       - 'main'
       - 'alpha2'
+      - 'experiments'
   workflow_dispatch:
 
 concurrency:
