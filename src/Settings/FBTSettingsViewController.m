@@ -1,6 +1,7 @@
 #import "FBTSettingsViewController.h"
 #import "FBTLocalConfigViewController.h"
 #import "FBTNamesDiagnosticsViewController.h"
+#import "FBTNativeTraceViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
@@ -186,6 +187,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"nav", @"title": @"Diagnóstico do download de nomes", @"subtitle": @"Capturar, ver o erro remoto e compartilhar pelo iPhone.", @"dest": @"namesdiagnostic" },
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
             @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
+            @{ @"kind": @"nav", @"title": @"ObjC BOOL Live", @"subtitle": @"Observar sem alterar retorno ou manter Force ON/OFF persistido.", @"dest": @"boollive" },
+            @{ @"kind": @"nav", @"title": @"Native Live Trace", @"subtitle": @"Eventos BOOL + QE/Tigon, buffer em memória e exportação JSON; sem Frida.", @"dest": @"livetrace" },
             @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
             @{ @"kind": @"nav", @"title": @"Dump completo de flags", @"subtitle": @"FBTFlags.json empacotado.", @"dest": @"flags" },
             @{ @"kind": @"nav", @"title": @"Query configs enviados", @"subtitle": @"GraphQL IDs/variáveis empacotados no bundle.", @"dest": @"queries" },
@@ -418,6 +421,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         else if ([dest isEqualToString:@"namesdiagnostic"]) vc = [[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
+        else if ([dest isEqualToString:@"boollive"]) vc = [[FBTRuntimeBoolViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        else if ([dest isEqualToString:@"livetrace"]) vc = [[FBTNativeTraceViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest hasPrefix:@"feat:"]) vc = [[FBTFeatureParamsViewController alloc] initWithFeatureId:[dest substringFromIndex:5]];
         else if ([dest isEqualToString:@"headline"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = YES; vc = f; }
         else if ([dest isEqualToString:@"flags"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = NO; vc = f; }
@@ -824,7 +829,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [super viewDidLoad];
     self.title = @"ObjC BOOL Runtime";
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Buscar" style:UIBarButtonItemStylePlain target:self action:@selector(runSearch)];
+    self.navigationItem.rightBarButtonItems = @[
+        [[UIBarButtonItem alloc] initWithTitle:@"Trace" style:UIBarButtonItemStylePlain target:self action:@selector(showNativeTrace)],
+        [[UIBarButtonItem alloc] initWithTitle:@"Buscar" style:UIBarButtonItemStylePlain target:self action:@selector(runSearch)]
+    ];
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -844,6 +852,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [self.tableView reloadData];
 }
 
+- (void)showNativeTrace {
+    [self.navigationController pushViewController:[[FBTNativeTraceViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
+}
 - (void)runSearch {
     NSString *q = self.searchController.searchBar.text ?: @"";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -872,7 +883,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *e = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = [NSString stringWithFormat:@"%@%@", [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"selector"] ?: @""];
-    NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : @"";
+    NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : ([e[@"observing"] boolValue] ? @" · OBSERVE" : @"");
     NSString *hookState = e[@"installState"] ?: @"unknown";
     id original = e[@"observedOriginal"];
     id effective = e[@"observedEffective"];
@@ -894,6 +905,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *e = self.filtered[indexPath.row];
     NSString *msg = [NSString stringWithFormat:@"%@\n%@", e[@"class"] ?: @"", e[@"image"] ?: @""];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:e[@"selector"] message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    [a addAction:[UIAlertAction actionWithTitle:@"Observar (sem forçar)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolObserve(e); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Desfazer override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolClearOverride(e); [self runSearch]; }]];
