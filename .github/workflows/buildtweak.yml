@@ -71,6 +71,13 @@ jobs:
         env:
           THEOS: ${{ github.workspace }}/theos
 
+      - name: Test Native Live Trace (portable collector + integration)
+        run: |
+          cd main
+          clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/NativeTraceCoreTests.cpp -o /tmp/fbt-native-trace-tests
+          /tmp/fbt-native-trace-tests
+          python3 -m unittest discover -s tests -p "test_native_trace_contract.py" -v
+
       - name: Test runtime BOOL persistence and employee sweep cleanup
         run: |
           cd main
