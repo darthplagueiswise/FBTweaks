@@ -287,9 +287,6 @@ static BOOL FBTSweepCandidateMatches(NSDictionary *hit, NSString *mode) {
     NSString *m = mode.lowercaseString ?: @"";
 
     NSDictionary<NSString *, NSSet<NSString *> *> *allowlists = @{
-        @"employee": [NSSet setWithArray:@[
-            @"isEmployee", @"isViewerEmployee", @"isFbEmployee", @"isFBUserEmployee"
-        ]],
         @"dogfood": [NSSet setWithArray:@[
             @"enableDogfoodingView", @"triageToDogfoodingAssistantSession",
             @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"
@@ -335,7 +332,6 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     sBoolBrowserEnabled = YES;
 
     NSDictionary<NSString *, NSArray<NSString *> *> *queriesByMode = @{
-        @"employee": @[@"isEmployee", @"isViewerEmployee", @"isFbEmployee", @"isFBUserEmployee"],
         @"dogfood": @[@"enableDogfoodingView", @"triageToDogfoodingAssistantSession", @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"],
         @"internaldebug": @[@"devMenuEnabled", @"isDeviceDebuggingAvailable", @"isShakeToShowDevMenuEnabled", @"isShakeGestureEnabled", @"isDebugOptionsEnabled", @"isDebugOverlayEnabled", @"isInternalSettingsEnabled", @"isInternalBuild"],
     };
@@ -392,10 +388,15 @@ void FBTRuntimeBoolClearSweep(NSString *mode) {
     NSString *source = [@"sweep:" stringByAppendingString:(mode.lowercaseString ?: @"")];
     NSMutableDictionary *all = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
     NSArray *keys = [all allKeys];
+    BOOL changed = NO;
     for (NSString *key in keys) {
         NSDictionary *entry = [all[key] isKindOfClass:[NSDictionary class]] ? all[key] : nil;
-        if ([entry[@"source"] isEqualToString:source]) [all removeObjectForKey:key];
+        if ([entry[@"source"] isEqualToString:source]) {
+            [all removeObjectForKey:key];
+            changed = YES;
+        }
     }
+    if (!changed) return;
     [FBTDefaults setDict:all forKey:FBTKeyRuntimeBoolOverrides];
     FBTRuntimeBoolReloadPrefs();
 }
