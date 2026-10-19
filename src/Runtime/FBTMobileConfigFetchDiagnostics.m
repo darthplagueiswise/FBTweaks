@@ -1,4 +1,5 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNativeTrace.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
 #import "FBTMobileConfigResponseCapture.h"
@@ -301,8 +302,11 @@ static NSDictionary *FBTDiagSessionSettings(void) {
 }
 
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    BOOL fullLogEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+    if (!fullLogEnabled && !FBTNativeTraceIsEnabled()) return;
     NSDictionary *safeEvent = FBTDiagSafeEvent(event, details ?: @{});
+    FBTNativeTraceRecordNetwork(event, safeEvent);
+    if (!fullLogEnabled) return;
     pthread_mutex_lock(&sDiagLock);
     if (!sDiagEvents) {
         NSDictionary *existing = FBTDiagLoadExisting();
