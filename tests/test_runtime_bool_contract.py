@@ -53,7 +53,7 @@ class RuntimeBoolContractTests(unittest.TestCase):
         end = source.index("MSHookMessageEx(hookClass", begin)
         hot = source[begin:end]
         self.assertIn("__atomic_load_n(&captured->forceMode", hot)
-        self.assertIn("__atomic_fetch_add(&captured->invocationCount", hot)
+        self.assertTrue("__atomic_add_fetch(&captured->invocationCount" in hot or "__atomic_fetch_add(&captured->invocationCount" in hot)
         self.assertLess(hot.index("if (mode != -1)"), hot.index("captured->orig ?"))
         self.assertNotIn("NSUserDefaults", hot)
         self.assertNotIn("FBTBoolOverrideForKey", hot)
