@@ -71,6 +71,11 @@ jobs:
         env:
           THEOS: ${{ github.workspace }}/theos
 
+      - name: Test runtime BOOL persistence and employee sweep cleanup
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_runtime_bool_contract.py" -v
+
       - name: Test override file preservation
         run: |
           cd main
