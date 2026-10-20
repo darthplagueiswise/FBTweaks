@@ -14,6 +14,11 @@ class HookOwnership(unittest.TestCase):
  def test_runtime_browser_rejects_inherited_getters(self):
   s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
   self.assertIn("class_copyMethodList(hookClass",s)
+ def test_symbol_browser_rejects_inherited_getters_and_known_owner(self):
+  s=read("src/Runtime/FBTSymbolBrowserEngine.m")
+  self.assertIn("class_copyMethodList(hookClass",s)
+  self.assertIn('@"FBUserPreferences"',s)
+  self.assertIn('@"FBUser"',s)
  def test_two_known_employee_getters_remain_single_owner(self):
   s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
   self.assertIn('@"FBUserPreferences"',s)
