@@ -178,6 +178,10 @@ void FBTRuntimeBoolReinstallPersistedHooks(void) {
     if (!sBoolBrowserEnabled) return;
     NSDictionary *ovs = FBTRuntimeBoolOverridesSnapshot();
     for (NSString *key in ovs) {
+        // Observation is session-scoped: preserve selection but do not
+        // rearm a potentially unsafe hook automatically after a crash.
+        NSDictionary *entry = [ovs[key] isKindOfClass:[NSDictionary class]] ? ovs[key] : nil;
+        if ([entry[@"source"] isEqualToString:@"observe"]) continue;
         NSString *cls = nil;
         NSString *sel = nil;
         BOOL isClass = NO;
