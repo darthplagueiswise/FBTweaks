@@ -161,6 +161,7 @@ static NSError *fbt_NSError_initWithDomain(id self, SEL _cmd, NSString *domain,
 }
 
 static void FBTInstallNSErrorMetadataHook(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return; // Never hook NSError across all of Facebook for QE diagnostics.
     if (sNSErrorInitHookInstalled) return;
     Class cls = objc_getClass("NSError");
     SEL sel = @selector(initWithDomain:code:userInfo:);
@@ -214,6 +215,7 @@ static bool fbt_FBMobileConfigQEInfoFetch(void *manager, void *query,
 }
 
 static void FBTInstallQEInfoFetchImportHook(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return;
     if (sQEInfoFetchImportHookInstalled ||
         ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     FBTInstallNSErrorMetadataHook();
@@ -260,6 +262,7 @@ static void fbt_FBMobileConfigQEInfoRefreshNames(void *manager, bool force,
 }
 
 static void FBTInstallQEInfoRefreshNamesImportHook(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return;
     if (sQEInfoRefreshNamesImportHookInstalled ||
         ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     struct rebinding binding = {
@@ -380,6 +383,7 @@ static UIAlertController *FBTNamesAlertFactory(id cls, SEL selector, NSString *t
     return alert;
 }
 static void FBTInstallNamesAlertReporting(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return; // Avoid a global UIAlertController metaclass hook.
     @synchronized(UIAlertController.class) {
         if (sOriginalNamesAlertFactory) return;
         Class meta = object_getClass(UIAlertController.class);
