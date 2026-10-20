@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Guard one hook owner per Objective-C selector and verify method ownership."""
-import unittest
+"""One Objective-C hook owner shared by both browsers."""
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def read(name):return (ROOT/name).read_text(encoding="utf-8")
+import unittest
+R=Path(__file__).resolve().parents[1]
+def read(p):return (R/p).read_text(encoding="utf-8")
 class HookOwnership(unittest.TestCase):
- def test_runtime_browser_rejects_selectors_owned_by_symbol_browser(self):
-  s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
-  self.assertIn("hookInstalledForKey:key",s)
- def test_symbol_browser_rejects_runtime_browser_ownership(self):
-  s=read("src/Runtime/FBTSymbolBrowserEngine.m")
-  self.assertIn("FBTRuntimeBoolHookInstalledForKey(key)",s)
- def test_runtime_browser_rejects_inherited_getters(self):
-  s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
-  self.assertIn("class_copyMethodList(hookClass",s)
- def test_symbol_browser_rejects_inherited_getters_and_known_owner(self):
-  s=read("src/Runtime/FBTSymbolBrowserEngine.m")
-  self.assertIn("class_copyMethodList(hookClass",s)
-  self.assertIn('@"FBUserPreferences"',s)
-  self.assertIn('@"FBUser"',s)
- def test_two_known_employee_getters_remain_single_owner(self):
-  s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
-  self.assertIn('@"FBUserPreferences"',s)
-  self.assertIn('@"FBUser"',s)
-  self.assertIn('@"isEmployee"',s)
-if __name__=="__main__": unittest.main()
+ def test_only_one_dynamic_bool_installer(self):
+  symbol=read("src/Runtime/FBTSymbolBrowserEngine.m")
+  core=read("src/Runtime/FBTRuntimeBoolBrowser.m")
+  self.assertNotIn("MSHookMessageEx(",symbol)
+  self.assertIn("MSHookMessageEx(hookClass",core)
+  self.assertIn("FBTRuntimeBoolInstallPersistedKey(key)",symbol)
+ def test_previous_symbol_preferences_migrate_preserving_existing(self):
+  core=read("src/Runtime/FBTRuntimeBoolBrowser.m")
+  self.assertIn('@"fbt_symbol_overrides_migrated_v1"',core)
+  self.assertIn("|| merged[key]) continue;",core)
+  self.assertIn('@"symbol-legacy"',core)
+ def test_unknown_native_values_not_invoked_from_list(self):
+  browser=read("src/Runtime/FBTSymbolBrowserEngine.m")
+  self.assertNotIn("objc_msgSend",browser)
+  self.assertIn("FBTRuntimeBoolObservedOriginal",browser)
+ def test_exact_abi_and_known_employee_selector_ownership(self):
+  core=read("src/Runtime/FBTRuntimeBoolBrowser.m")
+  for value in ('strcmp(encoding,"B16@0:8")','strcmp(encoding,"c16@0:8")','class_copyMethodList(hookClass','@"FBUserPreferences"','@"FBUser"'):
+   self.assertIn(value,core)
+if __name__=="__main__":unittest.main()
