@@ -1,5 +1,6 @@
 #import "FBTRuntimeBoolBrowser.h"
 #import "FBTNativeTrace.h"
+#import "FBTSymbolBrowserEngine.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
@@ -114,9 +115,42 @@ NSDictionary *FBTRuntimeBoolOverridesSnapshot(void) {
     return snapshot;
 }
 
+BOOL FBTRuntimeBoolHookInstalledForKey(NSString *key) {
+    if (!key.length) return NO;
+    pthread_mutex_lock(&sBoolLock);
+    BOOL installed = sInstalled[key] != nil;
+    pthread_mutex_unlock(&sBoolLock);
+    return installed;
+}
+
+// class_getInstanceMethod() also finds inherited methods. Only hook methods
+// implemented on the selected class/metaclass, not its whole inheritance tree.
+static BOOL FBTBoolClassImplementsSelector(Class hookClass, SEL sel) {
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(hookClass, &count);
+    BOOL found = NO;
+    for (unsigned int i = 0; i < count; i++) {
+        if (method_getName(methods[i]) == sel) { found = YES; break; }
+    }
+    if (methods) free(methods);
+    return found;
+}
+
 static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName, BOOL isClassMethod) {
     if (!className.length || !selectorName.length) return NO;
     NSString *key = FBTBoolKey(className, selectorName, isClassMethod);
+    // These exact getters are already owned by the verified Employee hooks.
+    if (!isClassMethod && [selectorName isEqualToString:@"isEmployee"] &&
+        ([className isEqualToString:@"FBUserPreferences"] ||
+         [className isEqualToString:@"FBUser"])) {
+        FBTLog(@"runtime BOOL skip known employee owner: %@", key);
+        return NO;
+    }
+    // Avoid stacking two different runtime browsers onto one IMP.
+    if ([FBTSymbolBrowserEngine hookInstalledForKey:key]) {
+        FBTLog(@"runtime BOOL skip duplicate symbol browser owner: %@", key);
+        return NO;
+    }
 
     pthread_mutex_lock(&sBoolLock);
     if (sInstalled[key]) { pthread_mutex_unlock(&sBoolLock); return YES; }
@@ -126,6 +160,7 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     if (!cls) return NO;
     Class hookClass = isClassMethod ? object_getClass(cls) : cls;
     SEL sel = NSSelectorFromString(selectorName);
+    if (!FBTBoolClassImplementsSelector(hookClass, sel)) return NO;
     Method m = class_getInstanceMethod(hookClass, sel);
     if (!m) return NO;
     if (method_getNumberOfArguments(m) != 2) return NO;
