@@ -470,6 +470,7 @@ static void FBTInstallURLSessionHookOnClass(Class cls, SEL selector, Class sessi
 }
 
 void FBTMobileConfigResponseCaptureInstall(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return; // Avoid process-wide NSURLSession and C++ transport interception.
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         sCaptureLock = [[NSLock alloc] init];
