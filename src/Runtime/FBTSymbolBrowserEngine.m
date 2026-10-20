@@ -1,5 +1,7 @@
 // FBTSymbolBrowserEngine.m
 #import "FBTSymbolBrowserEngine.h"
+#import "FBTRuntimeBoolBrowser.h"
+#import "../FBTDefaults.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
@@ -153,6 +155,12 @@ static BOOL fbtInstallRuntimeOverrideForKey(NSString *key) {
 	if (!key.length) return NO;
 	if (!sInstalledOverrideKeys) sInstalledOverrideKeys = [NSMutableSet set];
 	if ([sInstalledOverrideKeys containsObject:key]) return YES;
+    // One trampoline per exact method across the two runtime browsers.
+    if (FBTRuntimeBoolHookInstalledForKey(key)) return NO;
+    NSDictionary *browserTargets = [FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides];
+    NSDictionary *browserEntry = [browserTargets[key] isKindOfClass:[NSDictionary class]] ? browserTargets[key] : nil;
+    if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled] &&
+        [browserEntry[@"force"] respondsToSelector:@selector(boolValue)]) return NO;
 
 	NSString *className = nil;
 	NSString *selectorName = nil;
