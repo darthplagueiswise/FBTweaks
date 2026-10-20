@@ -310,6 +310,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
 }
 
 void FBTMobileConfigFetcherCaptureInstall(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return; // Native asyncFetch ABI not validated for this live IPA.
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     if (sFetcherInstalled) { FBTMCInstallAuthReadHook(); return; }
     static const unsigned char uuid[16] = {76,76,68,254,85,85,49,68,161,194,108,202,228,237,37,151};
