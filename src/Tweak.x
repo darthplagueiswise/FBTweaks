@@ -27,6 +27,10 @@ extern void FBTInstallKnownGateRuntimeHooks(void);
 extern void FBTInitFloatingTabBarGroup(void);
 extern void FBTInitDatingGroup(void);
 
+// Do not restore user-selected runtime hooks in dyld initializers.
+// Hook recovery is deferred until the host view is displayed.
+static BOOL sFBTRuntimeBrowserReady = NO;
+
 static void FBTInstallEnabledKnownFamilies(void) {
     BOOL employeeOn = [FBTDefaults boolForKey:FBTKeyEmployeeEnabled];
     BOOL testUserOn = [FBTDefaults boolForKey:FBTKeyTestUserEnabled];
@@ -76,8 +80,20 @@ static void FBTInstallEnabledKnownFamilies(void) {
     // Retry exato e idempotente para Swift/Dynamic/RN/RarelyUsed que podem ser
     // carregados depois do constructor. Não enumera classes globalmente.
     FBTInstallEnabledKnownFamilies();
-    // Late-loaded classes: retry only persisted BOOL targets (throttled).
-    FBTRuntimeBoolRetryPendingHooks();
+    // Delayed, exact-target restoration: post-launch only. Never install
+    // arbitrary persisted selectors from the dyld constructor.
+    static dispatch_once_t restoreOnce;
+    dispatch_once(&restoreOnce, ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
+                FBTRuntimeBoolReinstallPersistedHooks();
+                [FBTSymbolBrowserEngine reinstallPersistedHooks];
+            }
+            sFBTRuntimeBrowserReady = YES;
+        });
+    });
+    if (sFBTRuntimeBrowserReady) FBTRuntimeBoolRetryPendingHooks();
 
     FBTRetryEntryPoints();
 }
@@ -114,12 +130,9 @@ static void FBTInstallEnabledKnownFamilies(void) {
             FBTInitDatingGroup();
         }
 
-        // Sweeps globais nunca executam no launch. Só reinstalamos alvos exatos
-        // já persistidos, sem class scan/dladdr em initializers do dyld.
-        if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
-            FBTRuntimeBoolReinstallPersistedHooks();
-            [FBTSymbolBrowserEngine reinstallPersistedHooks];
-        }
+        // No arbitrary persisted selector hooks from %ctor: a stale target or
+        // colliding hook can otherwise make the IPA abort before first frame.
+        // The host view restores only eligible post-launch targets.
 
         // O bootstrap só registra um observer filtrado e tenta classes exatas.
         if ([FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled] ||
