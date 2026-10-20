@@ -80,6 +80,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
     // Retry exato e idempotente para Swift/Dynamic/RN/RarelyUsed que podem ser
     // carregados depois do constructor. Não enumera classes globalmente.
     FBTInstallEnabledKnownFamilies();
+    FBTNativeTraceReloadPrefs();
     // Delayed, exact-target restoration: post-launch only. Never install
     // arbitrary persisted selectors from the dyld constructor.
     static dispatch_once_t restoreOnce;
@@ -87,8 +88,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             if ([FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
-                FBTRuntimeBoolReinstallPersistedHooks();
-                [FBTSymbolBrowserEngine reinstallPersistedHooks];
+                FBTRuntimeBoolReinstallPersistedHooks(); // single hook owner
             }
             sFBTRuntimeBrowserReady = YES;
         });
@@ -109,7 +109,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
 %ctor {
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
-        FBTNativeTraceReloadPrefs();
+        // Ring buffer initialized on demand after the host UI appears.
         // Migrate away from the duplicate employee sweep before loading hooks.
         // Only sweep:employee entries are removed; manual overrides remain.
         FBTRuntimeBoolClearSweep(@"employee");
