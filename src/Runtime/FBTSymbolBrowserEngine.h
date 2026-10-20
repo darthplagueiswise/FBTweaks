@@ -1,21 +1,4 @@
-// FBTSymbolBrowserEngine.h
-//
-// Shared runtime engine for the two dynamic symbol browsers (Instagram exec and
-// FBSharedFramework). It enumerates ObjC classes belonging to one image, lists
-// their hookable BOOL getters, reports each getter's LIVE current value, and
-// lets the user persist a force override.
-//
-// Runtime-force timing model:
-//   • Persistence: one NSUserDefaults dict (fbt_symbol_overrides) via NSUserDefaults,
-//     registered in FBTDefaults so backup/export includes it.
-//   • Hooking: persisted overrides are installed once from Logos bootstrap.
-//     A newly selected getter is saved and installed live immediately; the
-//     replacement reads the in-memory cache, not NSUserDefaults.
-//   • Replacement hot path never reads NSUserDefaults. It reads only a static
-//     immutable cache refreshed when the settings UI changes.
-//   • Enumeration remains on-demand when the browser opens; no class crawling at
-//     launch unless the user already saved overrides.
-
+// Browse-only facade: one hook owner in FBTRuntimeBoolBrowser.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
