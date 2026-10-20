@@ -24,4 +24,16 @@ class HookOwnership(unittest.TestCase):
   core=read("src/Runtime/FBTRuntimeBoolBrowser.m")
   for value in ('strcmp(encoding,"B16@0:8")','strcmp(encoding,"c16@0:8")','class_copyMethodList(hookClass','@"FBUserPreferences"','@"FBUser"'):
    self.assertIn(value,core)
+ def test_all_known_bool_owners_remain_reserved(self):
+  core=read("src/Runtime/FBTRuntimeBoolBrowser.m")
+  for cls in ("FBUserPreferences","FBUser","FBBugReportConfiguration",
+              "FBProductTagCreationLogger","FBSnacksThreadOwnerMessengerContact",
+              "RCDMobileConfigParams","MBUISimpleParticipantModel",
+              "FBLoggedOutImageNetworkerConfiguration","FBSessionImageNetworkerConfiguration",
+              "FBBugReportInitialCoordinator","FBSnacksAdsDeliveryConfig",
+              "FBClientRageShakeBugReporterIssueComponentState",
+              "FBClientRageShakeBugReporterIssueModel",
+              "FFDBInternalSettingsWebViewController"):
+   self.assertIn(f'@"{cls}":',core)
+  self.assertIn("[knownOwners[className] containsObject:selectorName]",core)
 if __name__=="__main__":unittest.main()
