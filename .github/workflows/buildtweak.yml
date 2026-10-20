@@ -133,6 +133,11 @@ jobs:
           clang -fobjc-arc -Wno-incomplete-implementation -Wl,-export_dynamic -framework Foundation tests/LocalConfigDescriptorTests.m src/Runtime/FBTLocalConfigCatalog.m -lz -o /tmp/fbt-descriptor-tests
           /tmp/fbt-descriptor-tests
 
+      - name: Validate safe dynamic hooking architecture
+        run: |
+          cd main
+          python3 scripts/validate_hook_architecture.py
+
       - name: Build rootless
         run: |
           cd main
@@ -142,6 +147,7 @@ jobs:
           test -n "$DEB"
           cp "$DEB" "release/${OUTPUT_BASENAME}.deb"
           ls -la release
+          bash scripts/verify_macho_installation.sh "$DEB"
         env:
           THEOS: ${{ github.workspace }}/theos
           THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
