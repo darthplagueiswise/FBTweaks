@@ -1,6 +1,5 @@
 #import "FBTRuntimeBoolBrowser.h"
 #import "FBTNativeTrace.h"
-#import "FBTSymbolBrowserEngine.h"
 #import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
@@ -115,6 +114,16 @@ NSDictionary *FBTRuntimeBoolOverridesSnapshot(void) {
     return snapshot;
 }
 
+NSNumber *FBTRuntimeBoolObservedOriginal(NSString *key) {
+    if (!key.length) return nil;
+    pthread_mutex_lock(&sBoolLock);
+    FBTBoolHookDescriptor *desc = [sInstalled[key] pointerValue];
+    pthread_mutex_unlock(&sBoolLock);
+    if (!desc) return nil;
+    int original = __atomic_load_n(&desc->observedOriginal,__ATOMIC_ACQUIRE);
+    return original < 0 ? nil : @(original != 0);
+}
+
 BOOL FBTRuntimeBoolHookInstalledForKey(NSString *key) {
     if (!key.length) return NO;
     pthread_mutex_lock(&sBoolLock);
@@ -146,11 +155,6 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
         FBTLog(@"runtime BOOL skip known employee owner: %@", key);
         return NO;
     }
-    // Avoid stacking two different runtime browsers onto one IMP.
-    if ([FBTSymbolBrowserEngine hookInstalledForKey:key]) {
-        FBTLog(@"runtime BOOL skip duplicate symbol browser owner: %@", key);
-        return NO;
-    }
 
     pthread_mutex_lock(&sBoolLock);
     if (sInstalled[key]) { pthread_mutex_unlock(&sBoolLock); return YES; }
@@ -167,6 +171,8 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     char ret[16] = {0};
     method_getReturnType(m, ret, sizeof(ret));
     if (!(ret[0] == 'B' || ret[0] == 'c')) return NO;
+    const char *encoding = method_getTypeEncoding(m);
+    if (!encoding || (strcmp(encoding,"B16@0:8") && strcmp(encoding,"c16@0:8"))) return NO;
 
     FBTBoolHookDescriptor *desc = calloc(1, sizeof(FBTBoolHookDescriptor));
     if (!desc) return NO;
@@ -208,7 +214,36 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     return YES;
 }
 
+void FBTRuntimeBoolMigrateLegacySymbolOverrides(void) {
+    NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    static NSString *const marker = @"fbt_symbol_overrides_migrated_v1";
+    if ([ud boolForKey:marker]) return;
+    NSDictionary *legacy = [ud dictionaryForKey:@"fbt_symbol_overrides"];
+    NSMutableDictionary *merged = [[FBTDefaults dictForKey:FBTKeyRuntimeBoolOverrides] mutableCopy] ?: [NSMutableDictionary dictionary];
+    BOOL changed = NO;
+    for (id key in legacy) {
+        if (![key isKindOfClass:NSString.class]) continue;
+        NSNumber *force = legacy[key];
+        if (![force isKindOfClass:NSNumber.class] || merged[key]) continue;
+        NSString *cls = nil, *selector = nil; BOOL meta = NO;
+        if (!FBTBoolDecodeKey(key,&cls,&selector,&meta)) continue;
+        merged[key] = @{@"class":cls,@"selector":selector,@"classMethod":@(meta),
+                        @"force":@(force.boolValue),@"source":@"symbol-legacy"};
+        changed = YES;
+    }
+    if (changed) [ud setObject:merged forKey:FBTKeyRuntimeBoolOverrides];
+    [ud setBool:YES forKey:marker];
+    if (changed) FBTRuntimeBoolReloadPrefs();
+}
+BOOL FBTRuntimeBoolInstallPersistedKey(NSString *key) {
+    NSString *cls=nil,*selector=nil;BOOL meta=NO;
+    if (!FBTBoolDecodeKey(key,&cls,&selector,&meta)) return NO;
+    NSDictionary *entry=FBTRuntimeBoolOverridesSnapshot()[key];
+    if (![entry[@"force"] respondsToSelector:@selector(boolValue)]) return NO;
+    return FBTRuntimeBoolInstallOne(cls,selector,meta);
+}
 void FBTRuntimeBoolReinstallPersistedHooks(void) {
+    FBTRuntimeBoolMigrateLegacySymbolOverrides();
     FBTRuntimeBoolReloadPrefs();
     if (!sBoolBrowserEnabled) return;
     NSDictionary *ovs = FBTRuntimeBoolOverridesSnapshot();
