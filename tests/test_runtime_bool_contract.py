@@ -30,8 +30,10 @@ class RuntimeBoolContractTests(unittest.TestCase):
     def test_legacy_migration_is_scoped(self):
         boot = text("src/Tweak.x")
         runtime = text("src/Runtime/FBTRuntimeBoolBrowser.m")
-        self.assertLess(boot.index('FBTRuntimeBoolClearSweep(@"employee");'),
-                        boot.index("FBTRuntimeBoolReinstallPersistedHooks();"))
+        # The migration runs in %ctor, but automatic restoration now occurs
+        # post-launch in viewDidAppear; source order no longer means run order.
+        self.assertIn('FBTRuntimeBoolClearSweep(@"employee");', boot[boot.index('%ctor {'):])
+        self.assertIn('FBTRuntimeBoolReinstallPersistedHooks();', boot[:boot.index('%ctor {')])
         self.assertIn('[entry[@"source"] isEqualToString:source]', runtime)
         self.assertIn('if (!changed) return;', runtime)
 
