@@ -178,7 +178,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @[
             @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Log de fetch QE-info (ON/OFF)", @"subtitle": @"Registra eventos, erros e payloads nas rotas capturadas. Não ativa o aquecimento; veja a cobertura no diagnóstico exportado.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
+            @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa. Captura profunda de Tigon/C++/NSURLSession/NSError desativada nesta build por risco de crash; sem corpo HTTP.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
