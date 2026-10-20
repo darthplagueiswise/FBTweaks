@@ -103,6 +103,15 @@ jobs:
           clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/EmployeeDiagnosticsTests.m -o /tmp/fbt-employee-tests
           /tmp/fbt-employee-tests
 
+      - name: Test QE diagnostics safe mode crash containment
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_qe_safe_diagnostics.py" -v
+          if grep -En 'FBT_ENABLE_QE_INVASIVE_HOOKS[[:space:]]*=[[:space:]]*1|-DFBT_ENABLE_QE_INVASIVE_HOOKS=1' Makefile build.sh; then
+            echo 'Unsafe QE invasive hooks enabled in default sideload build' >&2
+            exit 1
+          fi
+
       - name: Test Tigon error response capture
         run: |
           cd main
