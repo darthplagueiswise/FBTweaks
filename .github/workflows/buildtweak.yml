@@ -78,6 +78,12 @@ jobs:
           /tmp/fbt-native-trace-tests
           python3 -m unittest discover -s tests -p "test_native_trace_contract.py" -v
 
+      - name: Test safe hook bootstrap and single-owner contract
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_safe_hook_bootstrap.py" -v
+          python3 -m unittest discover -s tests -p "test_hook_ownership.py" -v
+
       - name: Test runtime BOOL persistence and employee sweep cleanup
         run: |
           cd main
