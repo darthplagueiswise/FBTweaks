@@ -9,12 +9,12 @@ class SafeHookBootstrap(unittest.TestCase):
         src=read("src/Tweak.x")
         ctor=src[src.index("%ctor {"):]
         self.assertNotIn("FBTRuntimeBoolReinstallPersistedHooks();",ctor)
-        self.assertNotIn("[FBTSymbolBrowserEngine reinstallPersistedHooks];",ctor)
+        self.assertNotIn("FBTNativeTraceReloadPrefs();",ctor.split("FBTNotificationPrefsChanged")[0])
     def test_restore_deferred_until_ui_is_alive(self):
         src=read("src/Tweak.x")
         self.assertIn("dispatch_after(",src)
         self.assertIn("FBTRuntimeBoolReinstallPersistedHooks();",src)
-        self.assertIn("[FBTSymbolBrowserEngine reinstallPersistedHooks];",src)
+        self.assertNotIn("[FBTSymbolBrowserEngine reinstallPersistedHooks];",src)
     def test_passive_observers_are_not_automatically_reinstalled(self):
         src=read("src/Runtime/FBTRuntimeBoolBrowser.m")
         start=src.index("void FBTRuntimeBoolReinstallPersistedHooks(void)")
