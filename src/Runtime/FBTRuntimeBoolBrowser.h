@@ -8,6 +8,7 @@ void FBTRuntimeBoolReinstallPersistedHooks(void);
 void FBTRuntimeBoolRetryPendingHooks(void);
 NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit);
 NSDictionary *FBTRuntimeBoolOverridesSnapshot(void);
+BOOL FBTRuntimeBoolHookInstalledForKey(NSString *key);
 void FBTRuntimeBoolSetOverride(NSDictionary *candidate, BOOL forcedValue);
 void FBTRuntimeBoolClearOverride(NSDictionary *candidate);
 void FBTRuntimeBoolObserve(NSDictionary *candidate);
