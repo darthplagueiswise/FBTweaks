@@ -148,11 +148,30 @@ static BOOL FBTBoolClassImplementsSelector(Class hookClass, SEL sel) {
 static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName, BOOL isClassMethod) {
     if (!className.length || !selectorName.length) return NO;
     NSString *key = FBTBoolKey(className, selectorName, isClassMethod);
-    // These exact getters are already owned by the verified Employee hooks.
-    if (!isClassMethod && [selectorName isEqualToString:@"isEmployee"] &&
-        ([className isEqualToString:@"FBUserPreferences"] ||
-         [className isEqualToString:@"FBUser"])) {
-        FBTLog(@"runtime BOOL skip known employee owner: %@", key);
+    // Known Logos/semantic hooks own these specific getters, even when their
+    // feature toggle is OFF. Never add a competing runtime trampoline.
+    static NSDictionary<NSString *, NSSet<NSString *> *> *knownOwners;
+    static dispatch_once_t knownOnce;
+    dispatch_once(&knownOnce, ^{
+        knownOwners = @{
+          @"FBUserPreferences": [NSSet setWithObject:@"isEmployee"],
+          @"FBUser": [NSSet setWithObject:@"isEmployee"],
+          @"FBBugReportConfiguration": [NSSet setWithObject:@"isEmployee"],
+          @"FBProductTagCreationLogger": [NSSet setWithObject:@"isEmployee"],
+          @"FBSnacksThreadOwnerMessengerContact": [NSSet setWithObject:@"isEmployee"],
+          @"RCDMobileConfigParams": [NSSet setWithObject:@"isEmployee"],
+          @"MBUISimpleParticipantModel": [NSSet setWithObject:@"isEmployee"],
+          @"FBLoggedOutImageNetworkerConfiguration": [NSSet setWithObject:@"isViewerEmployee"],
+          @"FBSessionImageNetworkerConfiguration": [NSSet setWithObject:@"isViewerEmployee"],
+          @"FBBugReportInitialCoordinator": [NSSet setWithObject:@"triageToDogfoodingAssistantSession"],
+          @"FBSnacksAdsDeliveryConfig": [NSSet setWithObject:@"enableDogfoodingView"],
+          @"FBClientRageShakeBugReporterIssueComponentState": [NSSet setWithObject:@"triageToDogfoodingAssistantSession"],
+          @"FBClientRageShakeBugReporterIssueModel": [NSSet setWithObject:@"triageToDogfoodingAssistantSession"],
+          @"FFDBInternalSettingsWebViewController": [NSSet setWithObject:@"isInternLoggedIn"]
+        };
+    });
+    if (!isClassMethod && [knownOwners[className] containsObject:selectorName]) {
+        FBTLog(@"runtime BOOL skipped (known hook owns %@)",key);
         return NO;
     }
 
