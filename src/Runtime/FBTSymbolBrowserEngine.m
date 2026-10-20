@@ -151,6 +151,17 @@ static void fbtAppendBoolGettersForClass(NSMutableArray<FBTSymbolGetter *> *gett
 	(void)ownerClass;
 }
 
+static BOOL fbtClassImplementsGetter(Class hookClass, SEL selector) {
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(hookClass, &count);
+    BOOL found = NO;
+    for (unsigned int i = 0; i < count; ++i) {
+        if (method_getName(methods[i]) == selector) { found = YES; break; }
+    }
+    if (methods) free(methods);
+    return found;
+}
+
 static BOOL fbtInstallRuntimeOverrideForKey(NSString *key) {
 	if (!key.length) return NO;
 	if (!sInstalledOverrideKeys) sInstalledOverrideKeys = [NSMutableSet set];
@@ -166,12 +177,18 @@ static BOOL fbtInstallRuntimeOverrideForKey(NSString *key) {
 	NSString *selectorName = nil;
 	BOOL isClassMethod = NO;
 	if (!fbtParseOverrideKey(key, &className, &selectorName, &isClassMethod)) return NO;
+    if (!isClassMethod && [selectorName isEqualToString:@"isEmployee"] &&
+        ([className isEqualToString:@"FBUserPreferences"] ||
+         [className isEqualToString:@"FBUser"])) {
+        return NO; // Employee getter ownership belongs to verified known hooks.
+    }
 
 	Class cls = NSClassFromString(className);
 	if (!cls) return NO;
 	SEL sel = NSSelectorFromString(selectorName);
 	if (!sel) return NO;
 	Class hookClass = isClassMethod ? object_getClass(cls) : cls;
+	if (!fbtClassImplementsGetter(hookClass, sel)) return NO;
 	Method method = isClassMethod ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
 	if (!fbtMethodIsNoArgBool(method)) return NO;
 
