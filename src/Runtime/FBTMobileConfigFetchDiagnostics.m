@@ -342,6 +342,8 @@ void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *detail
                              @"events": [sDiagEvents copy],
                              @"names_assessments": FBTNamesAssessHistory(sDiagEvents, FBTDiagProcessSessionID()),
                              @"capture_enabled": @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] && ![event isEqualToString:@"capture_paused"]),
+                             @"qe_capture_mode": FBTQEInvasiveHooksAllowed() ? @"experimental_transport_hooks" : @"native_ui_only",
+                             @"deep_transport_hooks_allowed": @(FBTQEInvasiveHooksAllowed()),
                              @"cache_state": sDiagCacheState ?: @{},
                              @"runtime": FBTMobileConfigRuntimeStatus(),
                              @"transport": FBTMobileConfigResponseCaptureStatus(),
@@ -369,6 +371,8 @@ NSDictionary *FBTMobileConfigFetchDiagnosticsSnapshot(void) {
     report[@"employee_identity"] = FBTEmployeeDiagnosticsSnapshot();
     report[@"names_assessments"] = FBTNamesAssessHistory(events, FBTDiagProcessSessionID());
     report[@"capture_enabled"] = @([FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]);
+    report[@"qe_capture_mode"] = FBTQEInvasiveHooksAllowed() ? @"experimental_transport_hooks" : @"native_ui_only";
+    report[@"deep_transport_hooks_allowed"] = @(FBTQEInvasiveHooksAllowed());
     report[@"cache_state"] = FBTDiagCacheSummary();
     report[@"process_session_id"] = FBTDiagProcessSessionID();
     report[@"native_hooks"] = FBTMobileConfigDebugUIHookStatus();
