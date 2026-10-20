@@ -598,6 +598,7 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
 }
 
 void FBTMobileConfigResponseCaptureInstallTigon(void) {
+    if (!FBTQEInvasiveHooksAllowed()) return; // Never patch Tigon C++ callbacks in ordinary sideload builds.
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         sTigonCaptureLock = [[NSLock alloc] init];
