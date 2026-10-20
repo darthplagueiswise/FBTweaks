@@ -1,12 +1,21 @@
 #import "FBTNativeTrace.h"
 #import "FBTNativeTraceCore.hpp"
 #import "../FBTDefaults.h"
-static fbt_trace::Ring sTrace;
-void FBTNativeTraceReloadPrefs(void){sTrace.setEnabled([FBTDefaults boolForKey:FBTKeyNativeTraceEnabled]);}
-BOOL FBTNativeTraceIsEnabled(void){return sTrace.enabled();}
+// No dynamic global C++ object in dyld image initializers.
+static fbt_trace::Ring &FBTTraceRing(void) {
+    static fbt_trace::Ring instance;
+    return instance;
+}
+static int sTraceEnabled = 0;
+void FBTNativeTraceReloadPrefs(void) {
+ BOOL enabled=[FBTDefaults boolForKey:FBTKeyNativeTraceEnabled];
+ FBTTraceRing().setEnabled(enabled);
+ __atomic_store_n(&sTraceEnabled,enabled?1:0,__ATOMIC_RELEASE);
+}
+BOOL FBTNativeTraceIsEnabled(void){return __atomic_load_n(&sTraceEnabled,__ATOMIC_ACQUIRE)!=0;}
 void FBTNativeTraceRecordBool(NSString *methodKey,int original,int effective){
- if(!sTrace.enabled())return;
- sTrace.add(fbt_trace::BOOL_CALL,methodKey.UTF8String,"",original,effective);
+ if(!FBTNativeTraceIsEnabled())return;
+ FBTTraceRing().add(fbt_trace::BOOL_CALL,methodKey.UTF8String,"",original,effective);
 }
 static BOOL FBTTraceNetworkEventName(NSString *event){
  return [event hasPrefix:@"qe_info_"]||[event hasPrefix:@"name_download_"]||
@@ -14,7 +23,7 @@ static BOOL FBTTraceNetworkEventName(NSString *event){
         [event hasPrefix:@"mobileconfig_"]||[event hasPrefix:@"native_mc_"];
 }
 void FBTNativeTraceRecordNetwork(NSString *event,NSDictionary *safeDetails){
- if(!sTrace.enabled()||![event isKindOfClass:[NSString class]]||!FBTTraceNetworkEventName(event))return;
+ if(!FBTNativeTraceIsEnabled()||![event isKindOfClass:[NSString class]]||!FBTTraceNetworkEventName(event))return;
  NSMutableArray<NSString*> *meta=[NSMutableArray array];
  for(NSString *key in @[@"request_id",@"http_status",@"server_error_code",@"network_error_code",@"error_code",@"request_path"]){
   id v=safeDetails[key];
@@ -25,10 +34,10 @@ void FBTNativeTraceRecordNetwork(NSString *event,NSDictionary *safeDetails){
   }
  }
  NSString *note=[meta componentsJoinedByString:@" "];
- sTrace.add(fbt_trace::NETWORK,event.UTF8String,note.UTF8String,-1,-1);
+ FBTTraceRing().add(fbt_trace::NETWORK,event.UTF8String,note.UTF8String,-1,-1);
 }
 NSDictionary *FBTNativeTraceSnapshot(void){
- std::vector<fbt_trace::Record>records=sTrace.snapshot();
+ std::vector<fbt_trace::Record>records=FBTTraceRing().snapshot();
  NSMutableArray *events=[NSMutableArray arrayWithCapacity:records.size()];
  for(auto it=records.rbegin();it!=records.rend();++it){
   const fbt_trace::Record &r=*it;
@@ -41,7 +50,7 @@ NSDictionary *FBTNativeTraceSnapshot(void){
    @"effective":r.effective<0?(id)[NSNull null]:@(r.effective!=0)
   }];
  }
- return @{@"schema_version":@1,@"enabled":@(sTrace.enabled()),@"capacity":@(fbt_trace::CAPACITY),
-          @"dropped_on_contention":@(sTrace.dropped()),@"events":events};
+ return @{@"schema_version":@1,@"enabled":@(FBTNativeTraceIsEnabled()),@"capacity":@(fbt_trace::CAPACITY),
+          @"dropped_on_contention":@(FBTTraceRing().dropped()),@"events":events};
 }
-void FBTNativeTraceClear(void){sTrace.clear();}
+void FBTNativeTraceClear(void){FBTTraceRing().clear();}
