@@ -1,7 +1,7 @@
 name: Build FBTweaks
 on:
   push:
-    branches: [main, experiments]
+    branches: [main, experiments, restore/81d550d8]
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +14,7 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+          ref: 81d550d8d7b0e5b9092d50439a01da4f3d471df4
       - run: chmod +x build.sh build-fast.sh scripts/*.sh scripts/*.py || true
       - run: brew install ldid dpkg make
       - run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
