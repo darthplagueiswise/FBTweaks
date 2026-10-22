@@ -14,6 +14,7 @@
 #import "../Runtime/FBTMCPreferencesAudit.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
+#import "../Runtime/FBTMCNativeSessionProbes.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #include <stdlib.h>
@@ -178,7 +179,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @[
             @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa. Captura profunda de Tigon/C++/NSURLSession/NSError desativada nesta build por risco de crash; sem corpo HTTP.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
+            @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa, sem interceptação global. Ative antes dos probes nativos.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
+            @{ @"kind": @"switch", @"title": @"Probe Tigon nativo (sessão / experimental)", @"subtitle": @"Captura status e callback TigonSimpleCallbacks com slots+UUID verificados. Não intercepta NSURLSession ou __TEXT. Desativa ao reiniciar.", @"key": FBTMCNativeProbeTigonKey },
+            @{ @"kind": @"switch", @"title": @"Probe fetch MobileConfig (sessão / experimental)", @"subtitle": @"Observa asyncFetch e callback original do FBMobileConfigTigonFetcher; nenhum parâmetro enviado é alterado. Desativa ao reiniciar.", @"key": FBTMCNativeProbeFetcherKey },
             @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
             @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
         ],
@@ -244,7 +247,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if ([kind isEqualToString:@"switch"]) {
         FBTSettingsSwitch *sw = [FBTSettingsSwitch new];
         sw.prefKey = item[@"key"];
-        sw.on = [[NSUserDefaults standardUserDefaults] boolForKey:sw.prefKey];
+        sw.on = FBTMCNativeProbeIsKey(sw.prefKey) ?
+            FBTMCNativeProbeIsEnabled(sw.prefKey) :
+            [[NSUserDefaults standardUserDefaults] boolForKey:sw.prefKey];
         [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -261,6 +266,16 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
+    if (FBTMCNativeProbeIsKey(sender.prefKey)) {
+        NSString *reason = nil;
+        BOOL ok = FBTMCNativeProbeSetEnabled(sender.prefKey, sender.isOn, &reason);
+        sender.on = FBTMCNativeProbeIsEnabled(sender.prefKey);
+        [self showInfoTitle:ok ? @"Probe MobileConfig" : @"Probe recusado"
+                    message:reason ?: (sender.on ?
+                        @"Ativo somente nesta sessão. Reproduza o fetch e exporte os diagnósticos." :
+                        @"Desarmado. Os wrappers já instalados continuam encaminhando o original sem observação.")];
+        return;
+    }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled] && !sender.isOn) {
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
     }

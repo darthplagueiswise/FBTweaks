@@ -1,4 +1,5 @@
 #import "FBTMobileConfigResponseCapture.h"
+#import "FBTMCNativeSessionProbes.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
@@ -181,11 +182,15 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         const std::string &purpose, const FBTMCRequestPairs &params,
         FBTMCCompletion completion, const std::string &routingHint, uint64_t target) {
     if (!sOriginalFetch) return;
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] ||
+        (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey))) {
         FBTMobileConfigCancelEmployeeExperiment();
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
+    // Session-only diagnostics are strictly observational; the legacy LAB
+    // request-field A/B experiment is never applied through this toggle.
+    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
     auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
@@ -293,7 +298,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             // Avoid duplicate files and an artificial HTTP=0 event after HTTP=200.
             BOOL capturedAtTerminal = [nativeResponse[@"response_body_bytes"] unsignedIntegerValue] > 0 &&
                 [nativeResponse[@"native_tigon_correlation"] hasPrefix:@"native_mc_completion_inside_simple_"];
-            if (success && !capturedAtTerminal && body.size() <= 2 * 1024 * 1024) {
+            if (FBTQEInvasiveHooksAllowed() && success && !capturedAtTerminal &&
+                body.size() <= 2 * 1024 * 1024) {
                 NSData *data = [NSData dataWithBytes:body.data() length:body.size()];
                 FBTMobileConfigResponseCaptureWriteRawBody(data, @"", @"", requestMethod, response,
                     requestLabel, [response[@"http_status"] integerValue], @"", @"FBMobileConfigTigonFetcher");
@@ -310,15 +316,20 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
 }
 
 void FBTMobileConfigFetcherCaptureInstall(void) {
-    if (!FBTQEInvasiveHooksAllowed()) return; // Native asyncFetch ABI not validated for this live IPA.
+    // Exact UUID, RVA and __DATA_CONST slot validation happens in the rebinder.
+    // This is session-only, manually armed. Global LAB mechanisms stay disabled.
+    if (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)) return;
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
-    if (sFetcherInstalled) { FBTMCInstallAuthReadHook(); return; }
+    if (sFetcherInstalled) {
+        if (FBTQEInvasiveHooksAllowed()) FBTMCInstallAuthReadHook();
+        return;
+    }
     static const unsigned char uuid[16] = {76,76,68,254,85,85,49,68,161,194,108,202,228,237,37,151};
     NSString *failure = nil;
     sFetcherInstalled = FBTRebindVerifiedImageConstSlot("FBSharedFramework", 0x8161f88ULL,
         uuid, 0xa17f70ULL, (void *)FBTMCAsyncFetch, (void **)&sOriginalFetch, &failure);
     sFetcherFailure = [failure copy];
-    FBTMCInstallAuthReadHook();
+    if (FBTQEInvasiveHooksAllowed()) FBTMCInstallAuthReadHook();
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetcher_hook", @{
         @"hook_installed": @(sFetcherInstalled), @"message": sFetcherFailure ?: @"",
         @"capture_surface": @"UUID-verified FBMobileConfigTigonFetcher asyncFetch data slot; native decoded completion"});

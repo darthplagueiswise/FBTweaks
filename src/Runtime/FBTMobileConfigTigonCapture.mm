@@ -1,4 +1,5 @@
 #import "FBTMobileConfigResponseCapture.h"
+#import "FBTMCNativeSessionProbes.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTNamesResponseSummary.h"
 #import <QuartzCore/QuartzCore.h>
@@ -190,6 +191,7 @@ static NSMutableDictionary *FBTTigonContextForObject(void *self) {
 }
 
 static NSMutableDictionary *FBTTigonProvisionalContext(void *self) {
+    if (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)) return nil;
     if (!self || !sTigonCaptureLock || ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return nil;
     [sTigonCaptureLock lock];
     FBTTigonPruneLocked();
@@ -263,6 +265,7 @@ static NSData *FBTCopyIOBufChain(void *rawHead, BOOL *tooLarge, BOOL *invalid) {
 }
 
 static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple) {
+    if (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)) return;
     if (!self || !request || ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSDictionary *arm = FBTMobileConfigResponseCaptureArmInfo();
     NSString *reason = [arm[@"reason"] isKindOfClass:[NSString class]] ? arm[@"reason"] : @"";
@@ -406,11 +409,16 @@ static void FBTTigonFinishCapture(void *self) {
             @"body_capture_status": captureStatus,
             @"response_bytes": @(body.length)
         });
-    } else {
+    } else if (FBTQEInvasiveHooksAllowed()) {
         FBTMobileConfigResponseCaptureWriteRawBody(body ?: [NSData data],
             context[@"request_host"], context[@"request_path"], context[@"request_method"],
             context, context[@"capture_reason"], [context[@"http_status"] integerValue], @"",
             context[@"transport"] ?: @"TigonForwardingRequestCallbacks");
+    } else {
+        // Opt-in session probe writes only metadata; no response body on disk.
+        FBTTigonRecordContextEvent(@"tigon_native_response_metadata", context, @{
+            @"response_bytes": @(body.length), @"http_status": context[@"http_status"] ?: @0
+        });
     }
     [sTigonCaptureLock lock];
     sTigonBodyCount++;
@@ -598,7 +606,9 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
 }
 
 void FBTMobileConfigResponseCaptureInstallTigon(void) {
-    if (!FBTQEInvasiveHooksAllowed()) return; // Never patch Tigon C++ callbacks in ordinary sideload builds.
+    // The session-only UI toggle enables only the ABI-checked SimpleCallbacks
+    // data slots. Global forwarding/NSURLSession interception stays quarantined.
+    if (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)) return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         sTigonCaptureLock = [[NSLock alloc] init];
@@ -616,6 +626,7 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (!sTigonURLPath) sTigonURLPath = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getPathEv");
     if (!sTigonURLQuery) sTigonURLQuery = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl8getQueryEv");
     FBTInstallSimpleHooks();
+    if (!FBTQEInvasiveHooksAllowed()) return; // Session probe ends here; no fishhook or global callbacks.
     if (!sFindHeader && sSimpleHooksInstalled) {
         void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
         Dl_info info = {};
