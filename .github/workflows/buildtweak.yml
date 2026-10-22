@@ -103,6 +103,12 @@ jobs:
           clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/EmployeeDiagnosticsTests.m -o /tmp/fbt-employee-tests
           /tmp/fbt-employee-tests
 
+      - name: Test session-only native MobileConfig probe safety
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_mc_native_session_probes.py" -v
+          python3 -m unittest discover -s tests -p "test_mc_readonly_source_contract.py" -v
+
       - name: Test QE diagnostics safe mode crash containment
         run: |
           cd main
