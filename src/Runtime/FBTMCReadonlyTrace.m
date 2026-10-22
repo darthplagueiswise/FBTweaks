@@ -1,4 +1,5 @@
 #import "FBTMCReadonlyTrace.h"
+#import "FBTMobileConfigFetchDiagnostics.h"
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <QuartzCore/QuartzCore.h>
@@ -49,6 +50,14 @@ static void FBTMCReadOnlyInit(void) {
         sRequestOrder=[NSMutableArray array];
         sUUIDMatch=FBTMCReadOnlyImageUUIDMatches("Facebook",kMainUUID) &&
             FBTMCReadOnlyImageUUIDMatches("FBSharedFramework",kSharedUUID);
+        // The native reader depends only on Foundation and stays independently
+        // linkable. This listener is installed with the diagnostics module.
+        [[NSNotificationCenter defaultCenter] addObserverForName:@"FBTMCNativeValueSourceObserved"
+            object:nil queue:nil usingBlock:^(NSNotification *note) {
+                if (!FBTMCReadonlyTracePermitSourceRead()) return;
+                FBTMobileConfigFetchDiagnosticsRecord(@"mc_native_value_source_observed",
+                    note.userInfo ?: @{});
+            }];
     });
 }
 

@@ -16,11 +16,16 @@ class MCReadonlySourceContract(unittest.TestCase):
         self.assertIn('mc_value_source_bucket',s)
     def test_source_read_is_observational_and_optional(self):
         s=src("src/Runtime/FBTMobileConfigValueReader.m")
-        self.assertIn('weak_import',s)
-        self.assertIn('mc_native_value_source_observed',s)
+        self.assertIn('FBTMCNativeValueSourceObserved',s)
+        self.assertIn('postNotificationName:',s)
+        self.assertNotIn('FBTMobileConfigFetchDiagnosticsRecord(',s)
         self.assertIn('@"SERVER"',s)
         self.assertIn('@"DEFAULT"',s)
         self.assertNotIn('setBool:YES forKey',s)
+    def test_source_notification_bridge(self):
+        s=src("src/Runtime/FBTMCReadonlyTrace.m")
+        self.assertIn('addObserverForName:@"FBTMCNativeValueSourceObserved"',s)
+        self.assertIn('mc_native_value_source_observed',s)
     def test_no_unsafe_override_to_build_defaults(self):
         s=src("src/Runtime/FBTMobileConfigFetchDiagnostics.h")
         self.assertIn('#define FBT_ENABLE_QE_INVASIVE_HOOKS 0',s)

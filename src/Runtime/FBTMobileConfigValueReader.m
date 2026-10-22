@@ -1,10 +1,4 @@
 #import "FBTMobileConfigValueReader.h"
-#import "FBTMCReadonlyTrace.h"
-#import "FBTMobileConfigFetchDiagnostics.h"
-// These observers are optional in Foundation-only unit tests linking this file
-// without the full FBTweak; the production target always provides both.
-extern BOOL FBTMCReadonlyTracePermitSourceRead(void) __attribute__((weak_import));
-extern void FBTMobileConfigFetchDiagnosticsRecord(NSString *, NSDictionary *) __attribute__((weak_import));
 #import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
@@ -133,9 +127,10 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             @"reader": NSStringFromClass([selected class]), @"read_at": @([NSDate date].timeIntervalSince1970)};
         // This records the native reported source ONLY; never export a parameter value.
         // SERVER may be disk-backed; DEFAULT is not proof of a successful remote fetch.
-        if (FBTMCReadonlyTracePermitSourceRead && FBTMobileConfigFetchDiagnosticsRecord &&
-            FBTMCReadonlyTracePermitSourceRead()) {
-            FBTMobileConfigFetchDiagnosticsRecord(@"mc_native_value_source_observed", @{
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:@"FBTMCNativeValueSourceObserved"
+            object:nil
+            userInfo:@{
                 @"mc_config_name": configuration[@"name"] ?: @"unknown",
                 @"mc_config_key": configuration[@"id"] ?: @(-1),
                 @"mc_param_name": parameter[@"name"] ?: @"unknown",
@@ -144,8 +139,7 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
                 @"mc_value_source_raw": @(source),
                 @"mc_value_source_bucket": [sourceName isEqualToString:@"SERVER"] ? @"SERVER" :
                     ([sourceName hasPrefix:@"DEFAULT"] ? @"DEFAULT" : @"OTHER")
-            });
-        }
+            }];
         return inspection;
     } @catch (NSException *exception) {
         return FBTUnavailable([NSString stringWithFormat:@"Leitor nativo recusou a leitura (%@).", exception.name]);
