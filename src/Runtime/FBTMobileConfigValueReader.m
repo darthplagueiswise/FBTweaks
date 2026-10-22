@@ -1,4 +1,6 @@
 #import "FBTMobileConfigValueReader.h"
+#import "FBTMCReadonlyTrace.h"
+#import "FBTMobileConfigFetchDiagnostics.h"
 #import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
@@ -114,7 +116,7 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
         NSDictionary *runtimeOverride = FBTMobileConfigOverrideForKey(key);
         id effective = FBTRead(selected, selector, key, type, effectiveOptions);
         NSInteger effectiveSource = ((NSInteger (*)(id, SEL))objc_msgSend)(effectiveOptions, NSSelectorFromString(@"valueSource"));
-        return @{@"available": @YES,
+        NSDictionary *inspection = @{@"available": @YES,
             @"key": [NSString stringWithFormat:@"%llu", (unsigned long long)key],
             @"key_hex": [NSString stringWithFormat:@"0x%016llx", (unsigned long long)key],
             @"unit": @(unit), @"type": type,
@@ -125,6 +127,21 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             @"source_raw": @(source), @"source": sourceName, @"source_hint": FBTSourceHint(sourceName),
             @"effective_source": runtimeOverride ? @"Override da tweak" : FBTNativeSourceName(effectiveSource),
             @"reader": NSStringFromClass([selected class]), @"read_at": @([NSDate date].timeIntervalSince1970)};
+        // This records the native reported source ONLY; never export a parameter value.
+        // SERVER may be disk-backed; DEFAULT is not proof of a successful remote fetch.
+        if (FBTMCReadonlyTracePermitSourceRead()) {
+            FBTMobileConfigFetchDiagnosticsRecord(@"mc_native_value_source_observed", @{
+                @"mc_config_name": configuration[@"name"] ?: @"unknown",
+                @"mc_config_key": configuration[@"id"] ?: @(-1),
+                @"mc_param_name": parameter[@"name"] ?: @"unknown",
+                @"mc_param_key": parameter[@"id"] ?: @(-1),
+                @"mc_value_source": sourceName ?: @"unknown",
+                @"mc_value_source_raw": @(source),
+                @"mc_value_source_bucket": [sourceName isEqualToString:@"SERVER"] ? @"SERVER" :
+                    ([sourceName hasPrefix:@"DEFAULT"] ? @"DEFAULT" : @"OTHER")
+            });
+        }
+        return inspection;
     } @catch (NSException *exception) {
         return FBTUnavailable([NSString stringWithFormat:@"Leitor nativo recusou a leitura (%@).", exception.name]);
     }

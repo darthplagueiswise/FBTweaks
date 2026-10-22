@@ -1,4 +1,5 @@
 #import "FBTLocalConfigViewController.h"
+#import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTLocalConfigCatalog.h"
 #import "../Runtime/FBTMCOverridesFile.h"
 #import "../Runtime/FBTMobileConfigValueReader.h"
@@ -66,6 +67,13 @@
     [self.refreshControl endRefreshing];
 }
 - (void)refreshEffectiveValues {
+    // Local inspection only; does not initiate server fetch or mutate MobileConfig.
+    if (self.configuration) {
+        FBTMobileConfigFetchDiagnosticsRecord(@"mc_source_inspection_started", @{
+            @"mc_config_name": self.configuration[@"name"] ?: @"unknown",
+            @"mc_config_key": self.configuration[@"id"] ?: @(-1)
+        });
+    }
     [self reloadValues];
     self.readings = @{};
     self.inspectedCount = 0;

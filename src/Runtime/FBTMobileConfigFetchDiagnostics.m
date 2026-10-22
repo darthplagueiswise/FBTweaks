@@ -1,4 +1,5 @@
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTMCReadonlyTrace.h"
 #import "FBTNativeTrace.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
@@ -160,10 +161,15 @@ static NSDictionary *FBTDiagSafeEvent(NSString *event, NSDictionary *details) {
     for (NSString *key in @[@"tigon_service_snapshot", @"auth_validation_read_snapshot"]) {
         if ([details[key] isKindOfClass:NSString.class]) safe[key] = details[key];
     }
-    for (NSString *key in allowed) {
+    NSSet *traceKeys = [NSSet setWithArray:@[@"mc_trace_sequence", @"mc_trace_uuid_match",
+        @"mc_trace_attempt", @"mc_trace_link", @"mc_config_name", @"mc_param_name",
+        @"mc_config_key", @"mc_param_key", @"mc_value_source",
+        @"mc_value_source_raw", @"mc_value_source_bucket"]];
+    for (NSString *key in [allowed setByAddingObjectsFromSet:traceKeys]) {
         id value = details[key];
         if (!value || value == (id)kCFNull) continue;
-        if (([key isEqualToString:@"server_error_message"] || [key isEqualToString:@"server_error_type"] || [key isEqualToString:@"backend"] || [key isEqualToString:@"alert"] || [key isEqualToString:@"alert_message"] || [key isEqualToString:@"arg2"] || [key isEqualToString:@"arg3"] || [key isEqualToString:@"error_domain"] || [key isEqualToString:@"message"]) && [value isKindOfClass:[NSString class]]) {
+        if (([key isEqualToString:@"server_error_message"] || [key isEqualToString:@"server_error_type"] || [key isEqualToString:@"backend"] || [key isEqualToString:@"alert"] || [key isEqualToString:@"alert_message"] || [key isEqualToString:@"arg2"] || [key isEqualToString:@"arg3"] || [key isEqualToString:@"error_domain"] || [key isEqualToString:@"message"] || [key isEqualToString:@"mc_config_name"] ||
+             [key isEqualToString:@"mc_param_name"]) && [value isKindOfClass:[NSString class]]) {
             // Backend labels can contain numeric account/admin identifiers.
             NSString *label = FBTDiagRedactText(value);
             NSError *error = nil;
@@ -304,7 +310,7 @@ static NSDictionary *FBTDiagSessionSettings(void) {
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) {
     BOOL fullLogEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
     if (!fullLogEnabled && !FBTNativeTraceIsEnabled()) return;
-    NSDictionary *safeEvent = FBTDiagSafeEvent(event, details ?: @{});
+    NSDictionary *safeEvent = FBTDiagSafeEvent(event, FBTMCReadonlyTraceEnrich(event, details ?: @{}));
     FBTNativeTraceRecordNetwork(event, safeEvent);
     if (!fullLogEnabled) return;
     pthread_mutex_lock(&sDiagLock);
