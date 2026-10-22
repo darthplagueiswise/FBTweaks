@@ -31,6 +31,12 @@ class MCNativeSessionProbes(unittest.TestCase):
         self.assertIn("if (FBTQEInvasiveHooksAllowed() && success",fetch)
         self.assertIn("} else if (FBTQEInvasiveHooksAllowed()) {",tig)
         self.assertIn('@"tigon_native_response_metadata"',tig)
+    def test_legacy_lab_fixture_has_explicit_separate_opt_in(self):
+        fixture = src("tests/TigonCaptureTests.mm")
+        self.assertIn("#define FBT_ENABLE_QE_INVASIVE_HOOKS 1", fixture)
+        self.assertIn("BOOL FBTMCNativeProbeIsEnabled(NSString *key)", fixture)
+        self.assertIn("FBTMCNativeProbeFetcherKey", fixture)
+        self.assertIn("FBTMCNativeProbeTigonKey", fixture)
     def test_no_default_invasive_mode(self):
         hdr = src("src/Runtime/FBTMobileConfigFetchDiagnostics.h")
         self.assertIn("#define FBT_ENABLE_QE_INVASIVE_HOOKS 0",hdr)
