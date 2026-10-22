@@ -1,9 +1,15 @@
 #import <Foundation/Foundation.h>
+// This fixture explicitly tests the legacy LAB A/B behavior. Production
+// sideload builds retain FBT_ENABLE_QE_INVASIVE_HOOKS=0.
+#define FBT_ENABLE_QE_INVASIVE_HOOKS 1
 #include <cstring>
 #import "../src/Runtime/FBTNamesResponseSummary.m"
 #import "../src/Runtime/FBTMobileConfigTigonCapture.mm"
 #import "../src/Runtime/FBTMobileConfigFetcherCapture.mm"
 
+NSString * const FBTMCNativeProbeTigonKey = @"test.probe.tigon";
+NSString * const FBTMCNativeProbeFetcherKey = @"test.probe.fetcher";
+BOOL FBTMCNativeProbeIsEnabled(NSString *key) { (void)key; return NO; }
 NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.capture";
 NSString * const FBTKeyEmployeeEnabled = @"test.employee";
 static BOOL sEnabled = YES;
