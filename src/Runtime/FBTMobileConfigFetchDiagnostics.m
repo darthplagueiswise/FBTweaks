@@ -310,7 +310,9 @@ static NSDictionary *FBTDiagSessionSettings(void) {
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) {
     BOOL fullLogEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
     if (!fullLogEnabled && !FBTNativeTraceIsEnabled()) return;
-    NSDictionary *safeEvent = FBTDiagSafeEvent(event, FBTMCReadonlyTraceEnrich(event, details ?: @{}));
+    // Preserve the NativeTrace contract: sanitize the same 'details' argument.
+    details = FBTMCReadonlyTraceEnrich(event, details ?: @{});
+    NSDictionary *safeEvent = FBTDiagSafeEvent(event, details ?: @{});
     FBTNativeTraceRecordNetwork(event, safeEvent);
     if (!fullLogEnabled) return;
     pthread_mutex_lock(&sDiagLock);

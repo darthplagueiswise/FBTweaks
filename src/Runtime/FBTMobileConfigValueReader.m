@@ -1,6 +1,10 @@
 #import "FBTMobileConfigValueReader.h"
 #import "FBTMCReadonlyTrace.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+// These observers are optional in Foundation-only unit tests linking this file
+// without the full FBTweak; the production target always provides both.
+extern BOOL FBTMCReadonlyTracePermitSourceRead(void) __attribute__((weak_import));
+extern void FBTMobileConfigFetchDiagnosticsRecord(NSString *, NSDictionary *) __attribute__((weak_import));
 #import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
@@ -129,7 +133,8 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             @"reader": NSStringFromClass([selected class]), @"read_at": @([NSDate date].timeIntervalSince1970)};
         // This records the native reported source ONLY; never export a parameter value.
         // SERVER may be disk-backed; DEFAULT is not proof of a successful remote fetch.
-        if (FBTMCReadonlyTracePermitSourceRead()) {
+        if (FBTMCReadonlyTracePermitSourceRead && FBTMobileConfigFetchDiagnosticsRecord &&
+            FBTMCReadonlyTracePermitSourceRead()) {
             FBTMobileConfigFetchDiagnosticsRecord(@"mc_native_value_source_observed", @{
                 @"mc_config_name": configuration[@"name"] ?: @"unknown",
                 @"mc_config_key": configuration[@"id"] ?: @(-1),
