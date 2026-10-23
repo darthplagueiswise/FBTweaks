@@ -1,0 +1,65 @@
+name: Transfer verified Ghidra 12.1.2 engine
+on:
+  push:
+    branches: [flags]
+    paths:
+      - .github/workflows/transfer-ghidra-engine.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fetch-and-split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download exact release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://github.com/heaven-hm/re-agent/releases/download/engine-preview-2026-10-13/ghidra_12.1.2_PUBLIC_20260605.zip'
+          curl --fail --show-error --silent --location --retry 4 --retry-all-errors \
+            --connect-timeout 30 --max-time 900 "$URL" -o ghidra.zip
+          echo 'b62e81a0390618466c019c60d8c2f796ced2509c4c1aea4a37644a77272cf99d  ghidra.zip' | sha256sum -c -
+          test "$(stat -c%s ghidra.zip)" -eq 572803866
+          split -b 144m -d -a 2 ghidra.zip ghidra.part.
+          sha256sum ghidra.part.* | tee ghidra.parts.sha256
+          ls -lh ghidra.part.*
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-1212-00
+          path: ghidra.part.00
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-1212-01
+          path: ghidra.part.01
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-1212-02
+          path: ghidra.part.02
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-1212-03
+          path: ghidra.part.03
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-1212-checksums
+          path: ghidra.parts.sha256
+          retention-days: 1
+          if-no-files-found: error
