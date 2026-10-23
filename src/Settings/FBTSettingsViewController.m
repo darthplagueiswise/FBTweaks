@@ -277,6 +277,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         return;
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled] && !sender.isOn) {
+        FBTMCNativeProbeDisableAll();
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
     }
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
@@ -296,6 +297,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             [self showInfoTitle:@"QE-info diagnostics ativado"
                         message:@"Reproduza agora o fetch na tela nativa de parâmetros. Depois abra FBTweak → Runtime → MobileConfig Live → Fetch log. O arquivo fica em AppGroup/mobileconfig/fbt_fetch_diagnostics.json."];
         } else {
+            [self.tableView reloadData]; // Session-only native probes are OFF in the UI too.
             [self showInfoTitle:@"QE-info diagnostics pausado"
                         message:@"Novos eventos não serão registrados. Os logs existentes permanecem no AppGroup."];
         }

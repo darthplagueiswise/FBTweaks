@@ -15,6 +15,14 @@ class MCNativeSessionProbes(unittest.TestCase):
         self.assertNotIn("setBool:",state)
         self.assertNotIn("standardUserDefaults",state)
         self.assertIn("if (!installed) atomic_store_explicit",state)
+    def test_qe_diagnostics_off_disarms_both_probe_switches(self):
+        state = src("src/Runtime/FBTMCNativeSessionProbes.m")
+        ui = src("src/Settings/FBTSettingsViewController.m")
+        self.assertIn("void FBTMCNativeProbeDisableAll(void)", state)
+        self.assertIn("atomic_store_explicit(&sTigonEnabled, false", state)
+        self.assertIn("atomic_store_explicit(&sFetcherEnabled, false", state)
+        self.assertIn("FBTMCNativeProbeDisableAll();", ui)
+        self.assertIn("[self.tableView reloadData]; // Session-only native probes", ui)
     def test_uuid_slot_binding_not_text_patching(self):
         tig = src("src/Runtime/FBTMobileConfigTigonCapture.mm")
         fetch = src("src/Runtime/FBTMobileConfigFetcherCapture.mm")

@@ -24,6 +24,11 @@ BOOL FBTMCNativeProbeAnyEnabled(void) {
     return atomic_load_explicit(&sTigonEnabled, memory_order_acquire) ||
         atomic_load_explicit(&sFetcherEnabled, memory_order_acquire);
 }
+void FBTMCNativeProbeDisableAll(void) {
+    atomic_store_explicit(&sTigonEnabled, false, memory_order_release);
+    atomic_store_explicit(&sFetcherEnabled, false, memory_order_release);
+}
+
 NSDictionary *FBTMCNativeProbeStatus(void) {
     return @{
         @"tigon_session_enabled": @(FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)),

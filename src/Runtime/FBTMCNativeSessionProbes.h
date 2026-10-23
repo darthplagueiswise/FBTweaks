@@ -11,6 +11,9 @@ FOUNDATION_EXPORT NSString * const FBTMCNativeProbeFetcherKey;
 BOOL FBTMCNativeProbeIsKey(NSString *key);
 BOOL FBTMCNativeProbeIsEnabled(NSString *key);
 BOOL FBTMCNativeProbeAnyEnabled(void);
+// Stop observation when the parent QE-info diagnostic switch is disabled.
+// Existing verified data-slot wrappers remain forwarding-only until process exit.
+void FBTMCNativeProbeDisableAll(void);
 BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason);
 NSDictionary *FBTMCNativeProbeStatus(void);
 #endif
