@@ -1,0 +1,17 @@
+name: REA syntax checks
+on:
+  pull_request:
+    paths:
+      - 'scripts/rea-*'
+      - 'docs/rea-ghidra-mobileconfig.md'
+      - '.github/workflows/rea-integration-check.yml'
+  workflow_dispatch:
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n scripts/rea-ghidra-setup.sh scripts/rea-mobileconfig-investigate.sh
+      - run: python3 -m py_compile scripts/rea-ipa-extract.py
