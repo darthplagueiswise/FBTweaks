@@ -263,6 +263,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             [rawPairs addObject:@{@"name": FBTMCText(pair.first), @"value": FBTMCText(pair.second)}];
         }
         NSMutableDictionary *inspectorInfo = [details mutableCopy];
+        inspectorInfo[@"inspector_request_truncated"] = @(total > 1024 * 1024);
         inspectorInfo[@"inspector_routing_hint"] = FBTMCText(routingHint);
         inspectorInfo[@"inspector_target"] = [NSString stringWithFormat:@"0x%llx", (unsigned long long)target];
         FBTNetworkInspectorRecordRequest(inspectorInfo, rawPairs);

@@ -149,7 +149,7 @@ void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionar
         record[@"method"] = copy[@"request_method"] ?: @"unknown";
         record[@"transport"] = @"FBMobileConfigTigonFetcher";
         record[@"request_parameter_pairs"] = copyPairs;
-        record[@"request_parameter_capture"] = bytes > kMaxRequestBytes ? @"truncated_at_1mb" : @"complete";
+        record[@"request_parameter_capture"] = (bytes > kMaxRequestBytes || [copy[@"inspector_request_truncated"] boolValue]) ? @"truncated_at_1mb" : @"complete";
         record[@"request_parameter_total_count"] = copy[@"request_param_count"] ?: @(copyPairs.count);
         record[@"request_parameter_captured_count"] = @(copyPairs.count);
         record[@"routing_hint"] = copy[@"inspector_routing_hint"] ?: @"";
@@ -162,7 +162,11 @@ void FBTNetworkInspectorRecordTigon(NSDictionary *context, NSData *body) {
     if (!FBTNetworkInspectorIsCapturing()) return;
     NSNumber *rid = context[@"request_id"];
     NSDictionary *copy = [context copy];
-    NSDictionary *encoded = FBTNIEncodedBody(body, kMaxResponseBytes);
+    NSString *bodyState = [context[@"body_capture_status"] isKindOfClass:NSString.class]
+        ? context[@"body_capture_status"] : (body.length ? @"ready" : @"not_delivered_to_observed_callback");
+    NSDictionary *encoded = [bodyState isEqualToString:@"ready"]
+        ? FBTNIEncodedBody(body, kMaxResponseBytes)
+        : @{@"capture_status": bodyState, @"length": @(body.length)};
     FBTNIUpdate(rid, ^(NSMutableDictionary *record) {
         record[@"tigon_http_status"] = copy[@"http_status"] ?: @0;
         record[@"tigon_status_source"] = copy[@"http_status_source"] ?: @"not_observed";
@@ -210,7 +214,8 @@ NSArray<NSDictionary *> *FBTNetworkInspectorSummaries(void) {
             [items addObject:@{@"record_id": record[@"record_id"] ?: @"",
                 @"created_at": record[@"created_at"] ?: @"",
                 @"purpose": record[@"purpose"] ?: @"unknown",
-                @"http_status": record[@"tigon_http_status"] ?: record[@"native_completion_status"] ?: @0,
+                @"http_status": [record[@"tigon_http_status"] integerValue] >= 100
+                    ? record[@"tigon_http_status"] : (record[@"native_completion_status"] ?: @0),
                 @"stage": record[@"stage"] ?: @"unknown",
                 @"request_id": record[@"request_id"] ?: @0}];
         }

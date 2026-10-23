@@ -12,8 +12,8 @@ class NetworkInspectorContract(unittest.TestCase):
         self.assertIn("FBTNetworkInspectorRecordCompletion", fetcher)
         self.assertIn("FBTNetworkInspectorRecordTigon", tigon)
         self.assertIn("FBTMobileConfigTigonCaptureObserveNativeCompletion", fetcher)
-        self.assertIn("F B T".replace(" ", ""), fetcher)
-        self.assertIn("F B T".replace(" ", ""), tigon)
+        self.assertIn("FBTNetworkInspectorIsCapturing()", fetcher)
+        self.assertIn("FBTNetworkInspectorIsCapturing()", tigon)
 
     def test_no_proxy_dependency(self):
         files = [

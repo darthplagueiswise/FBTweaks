@@ -48,9 +48,27 @@ int main(void) { @autoreleasepool {
     Assert([exact isEqualToData:response], @"raw server response byte exact");
     Assert([entry[@"native_completion_body"][@"base64"] isKindOfClass:NSString.class], @"transport error separate from HTTP response");
     Assert(FBTNetworkInspectorExportURLs().count == 1, @"export selected JSONs");
+    FBTNetworkInspectorRecordRequest(@{@"request_id": @5,
+        @"capture_reason": @"mobileconfigsessionless",
+        @"request_method": @"POST"}, @[]);
+    FBTNetworkInspectorRecordTigon(@{@"request_id": @5, @"http_status": @0}, nil);
+    FBTNetworkInspectorRecordCompletion(@{@"request_id": @5,
+        @"http_status": @400, @"native_transport_success": @NO}, UTF8(@"error"));
+    NSArray *records = FBTNetworkInspectorSummaries();
+    Assert(records.count == 2, @"second request captured");
+    NSDictionary *secondSummary = nil;
+    for (NSDictionary *candidate in records) {
+        if ([candidate[@"request_id"] integerValue] == 5) secondSummary = candidate;
+    }
+    Assert(secondSummary != nil, @"second request searchable by ID");
+    NSDictionary *second = FBTNetworkInspectorRecordWithID(secondSummary[@"record_id"]);
+    Assert([second[@"http_response_body"][@"capture_status"] isEqual:@"not_delivered_to_observed_callback"],
+           @"missing Tigon body not mistaken for an empty HTTP response");
+    Assert([secondSummary[@"http_status"] integerValue] == 400,
+           @"missing Tigon status falls back to native status");
     FBTNetworkInspectorSetCapturing(NO);
-    FBTNetworkInspectorRecordRequest(@{@"request_id": @5}, @[]);
-    Assert(FBTNetworkInspectorSummaries().count == 1, @"disarmed ignores later requests");
+    FBTNetworkInspectorRecordRequest(@{@"request_id": @6}, @[]);
+    Assert(FBTNetworkInspectorSummaries().count == 2, @"disarmed ignores later requests");
     FBTNetworkInspectorClear();
     Assert(FBTNetworkInspectorSummaries().count == 0, @"purge eliminates raw files");
     NSLog(@"PASS: %d Network Inspector checks", checks);
