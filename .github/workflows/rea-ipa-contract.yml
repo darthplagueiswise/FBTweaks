@@ -1,0 +1,35 @@
+name: REA IPA pipeline contract tests
+
+on:
+  push:
+    branches: [flags]
+    paths:
+      - 'scripts/rea/**'
+      - 'tests/test_rea_pipeline.py'
+      - 'docs/rea-ghidra-ipa.md'
+      - '.github/workflows/rea-ipa-contract.yml'
+  pull_request:
+    paths:
+      - 'scripts/rea/**'
+      - 'tests/test_rea_pipeline.py'
+      - '.github/workflows/rea-ipa-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python runner
+        run: |
+          python3 -m py_compile scripts/rea/prepare_ipa.py scripts/rea/analyze_ipa.py
+          python3 -m unittest discover -s tests -p 'test_rea_pipeline.py' -v
+      - name: Validate install and run wrappers
+        run: |
+          for file in scripts/rea/*.sh; do bash -n "$file"; done
+      - name: Ensure no proprietary IPA is bundled
+        run: |
+          test -z "$(git ls-files '*.ipa' 'scripts/rea/*.zip' 'scripts/rea/*.dylib')"

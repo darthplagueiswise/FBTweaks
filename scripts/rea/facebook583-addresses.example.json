@@ -1,0 +1,10 @@
+{
+  "note": "Example anchors from earlier FB583 analysis, NOT proof of semantics. Skip all addresses unless the module UUID matches the actual IPA; verify each function in REA.",
+  "targets": [
+    {
+      "name": "FBSharedFramework",
+      "uuid": "4c4c44fe55553144a1c26ccae4ed2597",
+      "addresses": ["0x49dfe60", "0x4c0416c", "0x4c04270", "0x46e800", "0xa18580", "0x4a54b58", "0x46e5ac", "0x53cb60"]
+    }
+  ]
+}

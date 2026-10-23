@@ -13,3 +13,12 @@ scratch/
 .local-backups/
 FBTweak*.log
 
+# Offline REA / Ghidra engine and potentially proprietary extracted data
+.rea-tools/
+rea_ipa_analysis/
+analysis-output/
+scripts/rea/__pycache__/
+tests/__pycache__/
+*.gpr
+*.rep/
+*.gzf
