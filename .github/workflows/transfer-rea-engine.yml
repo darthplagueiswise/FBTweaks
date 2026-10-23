@@ -1,0 +1,46 @@
+name: Transfer REA and compatible Node engine
+on:
+  push:
+    branches: [flags]
+    paths:
+      - .github/workflows/transfer-rea-engine.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fetch-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install REA CLI into portable prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/rea bundle/node
+          node -v
+          npm -v
+          npm install --prefix "$PWD/bundle/rea" --no-audit --no-fund --save-exact rea-agents@6.7.0
+          cp -L "$(command -v node)" bundle/node/node
+          node -e 'const p=require("./bundle/rea/node_modules/rea-agents/package.json"); console.log("REA", p.name, p.version, p.bin)'
+          PATH="$PWD/bundle/node:$PATH" bundle/rea/node_modules/.bin/rea --help >/dev/null
+          tar -czf rea-node24-linux-x64.tar.gz -C bundle .
+          sha256sum rea-node24-linux-x64.tar.gz | tee rea-node24.sha256
+          ls -lh rea-node24-linux-x64.tar.gz
+      - name: Upload REA bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-node24-linux-x64
+          path: rea-node24-linux-x64.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload bundle checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-node24-checksum
+          path: rea-node24.sha256
+          retention-days: 1
+          if-no-files-found: error
