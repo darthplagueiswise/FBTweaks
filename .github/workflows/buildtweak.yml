@@ -112,7 +112,9 @@ jobs:
       - name: Test native probe session lifecycle and link isolation
         run: |
           cd main
-          clang -std=c11 -fobjc-arc -framework Foundation tests/MCNativeSessionProbeTests.m -o /tmp/fbt-mc-probe-tests
+          clang -std=c11 -fobjc-arc -c tests/MCNativeSessionProbeTests.m -o /tmp/fbt-mc-probe-tests.o
+          clang++ -std=c++11 -fobjc-arc -c tests/MCNativeProbeLinkTests.mm -o /tmp/fbt-mc-probe-link-tests.o
+          clang++ -framework Foundation /tmp/fbt-mc-probe-tests.o /tmp/fbt-mc-probe-link-tests.o -o /tmp/fbt-mc-probe-tests
           /tmp/fbt-mc-probe-tests
 
       - name: Test QE diagnostics safe mode crash containment

@@ -6,6 +6,10 @@
 // Toggle-only, ephemeral session probes. Never stored in NSUserDefaults.
 // Installing a verified data callback may not be reversible at runtime;
 // turning OFF makes its installed wrapper forward the original unchanged.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 FOUNDATION_EXPORT NSString * const FBTMCNativeProbeTigonKey;
 FOUNDATION_EXPORT NSString * const FBTMCNativeProbeFetcherKey;
 BOOL FBTMCNativeProbeIsKey(NSString *key);
@@ -16,4 +20,8 @@ BOOL FBTMCNativeProbeAnyEnabled(void);
 void FBTMCNativeProbeDisableAll(void);
 BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason);
 NSDictionary *FBTMCNativeProbeStatus(void);
+
+#ifdef __cplusplus
+}
+#endif
 #endif

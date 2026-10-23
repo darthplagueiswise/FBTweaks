@@ -15,6 +15,14 @@ class MCNativeSessionProbes(unittest.TestCase):
         self.assertNotIn("setBool:",state)
         self.assertNotIn("standardUserDefaults",state)
         self.assertIn("if (!installed) atomic_store_explicit",state)
+    def test_cpp_linkage_for_objective_c_native_session_probes(self):
+        header = src("src/Runtime/FBTMCNativeSessionProbes.h")
+        self.assertIn('extern "C" {', header)
+        self.assertIn('#ifdef __cplusplus\n}\n#endif', header)
+        smoke = src("tests/MCNativeProbeLinkTests.mm")
+        self.assertIn('FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)', smoke)
+        workflow = src(".github/workflows/buildtweak.yml")
+        self.assertIn('tests/MCNativeProbeLinkTests.mm', workflow)
     def test_qe_diagnostics_off_disarms_both_probe_switches(self):
         state = src("src/Runtime/FBTMCNativeSessionProbes.m")
         ui = src("src/Settings/FBTSettingsViewController.m")
