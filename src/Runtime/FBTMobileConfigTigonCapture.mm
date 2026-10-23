@@ -1,6 +1,7 @@
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMCNativeSessionProbes.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNetworkInspectorStore.h"
 #import "FBTNamesResponseSummary.h"
 #import <QuartzCore/QuartzCore.h>
 #import "FBTDataSlotRebinding.h"
@@ -89,6 +90,24 @@ static NSDictionary *FBTObserveRequestAuthorization(const void *request) {
         return summary;
     }
     return @{@"authorization_state": @"not_found_by_native_lookup", @"authorization_observation_stage": @"TigonCallbacks.onStarted_not_wire_or_token_validation"};
+}
+
+// Only the known names are accessible with the verified findHeader getter.
+// Exact values stay inside the opt-in on-device inspector, not the safe logs.
+static NSString *FBTTigonString(const std::string &value);
+static NSDictionary *FBTInspectorKnownHeaders(const void *request) {
+    if (!sFindHeader || !request || !FBTNetworkInspectorIsCapturing()) return @{};
+    NSMutableDictionary *items = [NSMutableDictionary dictionary];
+    for (const char *name : {"Authorization", "Cookie", "Content-Type", "Accept", "User-Agent",
+                             "X-FB-Friendly-Name", "X-FB-App-ID", "X-FB-Connection-Type", "X-FB-Device-Group"}) {
+        FBTHeaderResult found = sFindHeader(request, std::string(name));
+        if (!found.bytes[24]) continue;
+        std::string *value = reinterpret_cast<std::string *>(found.bytes);
+        if (value->size() <= 32768)
+            items[[NSString stringWithUTF8String:name]] = FBTTigonString(*value);
+        value->~basic_string();
+    }
+    return [items copy];
 }
 
 static NSLock *sTigonCaptureLock = nil;
@@ -315,6 +334,12 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
         [context addEntriesFromDictionary:FBTObserveRequestAuthorization(request)];
+        if (FBTNetworkInspectorIsCapturing()) {
+            context[@"inspector_raw_host"] = host ?: @"";
+            context[@"inspector_raw_path"] = path ?: @"";
+            if (sTigonURLQuery) context[@"inspector_query"] = FBTTigonString(sTigonURLQuery(url));
+            context[@"inspector_headers"] = FBTInspectorKnownHeaders(request);
+        }
 
         [sTigonCaptureLock lock];
         NSValue *key = [NSValue valueWithPointer:self];
@@ -395,6 +420,9 @@ static void FBTTigonFinishCapture(void *self) {
     if (!context || ![context[@"mc_correlated"] boolValue]) return;
 
     NSMutableData *body = [context[@"body"] isKindOfClass:[NSMutableData class]] ? context[@"body"] : nil;
+    if (FBTNetworkInspectorIsCapturing() && context[@"request_id"]) {
+        FBTNetworkInspectorRecordTigon(context, body);
+    }
     NSString *captureStatus = [context[@"body_capture_status"] isKindOfClass:[NSString class]]
         ? context[@"body_capture_status"] : @"ready";
     if ([captureStatus isEqualToString:@"ready"] && !body.length) captureStatus = @"not_delivered_to_observed_callback";
@@ -626,6 +654,15 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (!sTigonURLPath) sTigonURLPath = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl7getPathEv");
     if (!sTigonURLQuery) sTigonURLQuery = (FBTTigonStringGetterFn)dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon3url8TigonUrl8getQueryEv");
     FBTInstallSimpleHooks();
+    // Read-only known-header lookup; validate image and RVA before calling.
+    if (!sFindHeader && sSimpleHooksInstalled) {
+        void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
+        Dl_info info = {};
+        if (candidate && dladdr(candidate, &info) && info.dli_fname && info.dli_fbase &&
+            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0 &&
+            (uintptr_t)candidate - (uintptr_t)info.dli_fbase == 0x561d4c)
+            sFindHeader = (FBTFindHeaderFn)candidate;
+    }
     if (!FBTQEInvasiveHooksAllowed()) return; // Session probe ends here; no fishhook or global callbacks.
     if (!sFindHeader && sSimpleHooksInstalled) {
         void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");

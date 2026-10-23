@@ -16,6 +16,16 @@ Veja [evidências, mudanças e validação](docs/flags-facebook-583.md).
 - QueryConfigs atualizados no bundle.
 
 
+## Network Inspector — sem computador
+
+A FBTweak oferece **Network Inspector — 100% iPhone** para capturar, correlacionar
+e exportar requisições/respostas observadas nos hooks MobileConfig/QE-info/Tigon.
+Funciona sem CA ou proxy, com opção explícita de ativação, armazenamento protegido
+no sandbox do app e inspeção separada do corpo HTTP Tigon e callback nativo.
+Leia [uso e limites técnicos](docs/network-inspector-on-device.md). O request
+exposto é o payload de `asyncFetch` (pré-serialização), com headers de nomes
+conhecidos; não é prometida captura universal de todo o Facebook.
+
 ## O que esta versão entrega
 
 - **UI UIKit pura**, sem Swift, sem bridging header, sem modulemap. O painel usa `UITableViewStyleInsetGrouped`, `UISearchController`, `UINavigationController` e `UINavigationBarAppearance configureWithDefaultBackground`, deixando o iOS aplicar o Liquid Glass/default background nativo.

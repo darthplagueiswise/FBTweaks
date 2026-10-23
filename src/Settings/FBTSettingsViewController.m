@@ -1,6 +1,7 @@
 #import "FBTSettingsViewController.h"
 #import "FBTLocalConfigViewController.h"
 #import "FBTNamesDiagnosticsViewController.h"
+#import "FBTNetworkInspectorViewController.h"
 #import "FBTNativeTraceViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
@@ -187,6 +188,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"nav", @"title": @"MobileConfig local — todos os mapas", @"subtitle": @"Busca por nome/ID e edição de overrides sem depender de QE-info.", @"dest": @"localconfig" },
+            @{ @"kind": @"nav", @"title": @"Network Inspector — 100% iPhone", @"subtitle": @"Request/response MobileConfig e QE-info, correlação Tigon, exportação de bytes e headers conhecidos. Sem proxy.", @"dest": @"networkinspector" },
             @{ @"kind": @"nav", @"title": @"Diagnóstico do download de nomes", @"subtitle": @"Capturar, ver o erro remoto e compartilhar pelo iPhone.", @"dest": @"namesdiagnostic" },
             @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
             @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
@@ -436,6 +438,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         UIViewController *vc = nil;
         if ([dest isEqualToString:@"localconfig"]) vc = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
         else if ([dest isEqualToString:@"namesdiagnostic"]) vc = [[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        else if ([dest isEqualToString:@"networkinspector"]) vc = [[FBTNetworkInspectorViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
         else if ([dest isEqualToString:@"boollive"]) vc = [[FBTRuntimeBoolViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];

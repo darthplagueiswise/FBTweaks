@@ -138,6 +138,13 @@ jobs:
           clang -fobjc-arc -framework Foundation tests/QueryContextTests.m src/Runtime/FBTMobileConfigQueryContext.m -o /tmp/fbt-query-tests
           /tmp/fbt-query-tests
 
+      - name: Test on-device Network Inspector and request/callback correlation
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_network_inspector_contract.py" -v
+          clang -std=c11 -fobjc-arc -framework Foundation tests/NetworkInspectorStoreTests.m src/Runtime/FBTNetworkInspectorStore.m -o /tmp/fbt-network-inspector-tests
+          /tmp/fbt-network-inspector-tests
+
       - name: Test on-device names diagnostics decoding
         run: |
           cd main

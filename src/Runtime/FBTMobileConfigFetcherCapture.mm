@@ -1,6 +1,7 @@
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMCNativeSessionProbes.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNetworkInspectorStore.h"
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
 #import "FBTEmployeeDiagnostics.h"
@@ -253,6 +254,19 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     details[@"identity_read_sequence_at_start"] = FBTEmployeeDiagnosticsSnapshot()[@"sequence"];
     details[@"local_employee_enabled"] = @([FBTDefaults boolForKey:FBTKeyEmployeeEnabled]);
     details[@"tw_probe_armed_at_start"] = FBTEmployeeDiagnosticsSnapshot()[@"tw_probe_armed"];
+    if (FBTNetworkInspectorIsCapturing()) {
+        NSMutableArray<NSDictionary *> *rawPairs = [NSMutableArray arrayWithCapacity:outgoing->size()];
+        NSUInteger total = 0;
+        for (const auto &pair : *outgoing) {
+            total += pair.first.size() + pair.second.size();
+            if (total > 1024 * 1024) break;
+            [rawPairs addObject:@{@"name": FBTMCText(pair.first), @"value": FBTMCText(pair.second)}];
+        }
+        NSMutableDictionary *inspectorInfo = [details mutableCopy];
+        inspectorInfo[@"inspector_routing_hint"] = FBTMCText(routingHint);
+        inspectorInfo[@"inspector_target"] = [NSString stringWithFormat:@"0x%llx", (unsigned long long)target];
+        FBTNetworkInspectorRecordRequest(inspectorInfo, rawPairs);
+    }
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_started", details);
     FBTMobileConfigTigonCaptureExpectRequest(details);
     auto original = std::make_shared<FBTMCCompletion>(std::move(completion));
@@ -293,6 +307,11 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
                 if (nativeResponse[key]) response[key] = nativeResponse[key];
             }
             if (observation && response[@"http_status"]) observation->httpStatus.store([response[@"http_status"] intValue]);
+            if (FBTNetworkInspectorIsCapturing()) {
+                NSData *decoded = body.size() <= 2 * 1024 * 1024
+                    ? [NSData dataWithBytes:body.data() length:body.size()] : nil;
+                FBTNetworkInspectorRecordCompletion(response, decoded);
+            }
             FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetch_completed", response);
             // The terminal observer already persisted/diagnosed these exact bytes.
             // Avoid duplicate files and an artificial HTTP=0 event after HTTP=200.
