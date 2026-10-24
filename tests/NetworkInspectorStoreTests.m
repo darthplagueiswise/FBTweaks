@@ -71,5 +71,22 @@ int main(void) { @autoreleasepool {
     Assert(FBTNetworkInspectorSummaries().count == 2, @"disarmed ignores later requests");
     FBTNetworkInspectorClear();
     Assert(FBTNetworkInspectorSummaries().count == 0, @"purge eliminates raw files");
+    FBTNetworkInspectorSetCapturing(YES);
+    FBTNetworkInspectorRecordRequest(@{@"request_id": @7,
+        @"capture_reason": @"mobileconfig_qe_info", @"request_method": @"POST"},
+        @[@{@"name": @"queries", @"value": @"[\"35:1:2\",\"4627:42\"]"},
+          @{@"name": @"device_id", @"value": @"device_id"},
+          @{@"name": @"needs_name", @"value": @"true"},
+          @{@"name": @"skip_qe", @"value": @"true"},
+          @{@"name": @"api_version", @"value": @"9"}]);
+    NSArray *one = FBTNetworkInspectorSummaries();
+    Assert(one.count == 1, @"diagnostics request stored");
+    NSDictionary *diag = FBTNetworkInspectorRecordWithID(one.firstObject[@"record_id"])[@"request_diagnostics"];
+    Assert([diag[@"query_config_count"] integerValue] == 2, @"counts distinct requests without guessing");
+    Assert([diag[@"query_parameter_index_count"] integerValue] == 3, @"counts parameter indices");
+    Assert([diag[@"device_id_state"] isEqual:@"literal_parameter_name"], @"labels prebuilder placeholder");
+    Assert([diag[@"query_parse_status"] isEqual:@"complete_numeric_list"], @"validates query schema");
+    FBTNetworkInspectorSetCapturing(NO);
+    FBTNetworkInspectorClear();
     NSLog(@"PASS: %d Network Inspector checks", checks);
 } return 0; }

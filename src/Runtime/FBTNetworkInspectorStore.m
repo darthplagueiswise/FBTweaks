@@ -129,6 +129,54 @@ void FBTNetworkInspectorSetCapturing(BOOL enabled) {
     FBTNIInit();
     atomic_store_explicit(&sCapturing, enabled, memory_order_release);
 }
+// Parse only observable pre-builder parameters. Values here are NOT a proof
+// of the final TigonRequest encoding or of the backend's rejection reason.
+static NSDictionary *FBTNIParameterDiagnostics(NSArray<NSDictionary *> *pairs) {
+    NSMutableDictionary<NSString *, NSString *> *names = [NSMutableDictionary dictionary];
+    for (NSDictionary *pair in pairs) {
+        NSString *key = pair[@"name"], *value = pair[@"value"];
+        if ([key isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class])
+            names[key] = value;
+    }
+    NSString *device = names[@"device_id"];
+    NSMutableDictionary *facts = [@{
+        @"source": @"asyncFetch_pre_request_builder_only",
+        @"device_id_state": !device ? @"absent" :
+            [device isEqualToString:@"device_id"] ? @"literal_parameter_name" : @"value_present",
+        @"needs_name": names[@"needs_name"] ?: @"not_observed",
+        @"skip_qe": names[@"skip_qe"] ?: @"not_observed",
+        @"api_version": names[@"api_version"] ?: @"not_observed",
+        @"query_parse_status": @"not_observed"
+    } mutableCopy];
+    NSString *serialized = names[@"queries"];
+    if (serialized.length && serialized.length <= 1024 * 1024) {
+        NSData *encoded = [serialized dataUsingEncoding:NSUTF8StringEncoding];
+        NSArray *queries = [NSJSONSerialization JSONObjectWithData:encoded options:0 error:nil];
+        if ([queries isKindOfClass:NSArray.class]) {
+            NSUInteger params = 0, valid = 0;
+            for (id item in queries) {
+                if (![item isKindOfClass:NSString.class]) continue;
+                NSArray *components = [item componentsSeparatedByString:@":"];
+                if (!components.count) continue;
+                NSCharacterSet *other = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+                BOOL numeric = YES;
+                for (NSString *part in components)
+                    if (!part.length || [part rangeOfCharacterFromSet:other].location != NSNotFound) {
+                        numeric = NO; break;
+                    }
+                if (!numeric) continue;
+                ++valid;
+                params += components.count - 1;
+            }
+            facts[@"query_parse_status"] = valid == queries.count ? @"complete_numeric_list" : @"mixed_items";
+            facts[@"query_config_count"] = @(queries.count);
+            facts[@"query_parameter_index_count"] = @(params);
+            facts[@"queries_utf8_bytes"] = @(encoded.length);
+        } else facts[@"query_parse_status"] = @"invalid_json_or_not_array";
+    }
+    return facts;
+}
+
 void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionary *> *pairs) {
     if (!FBTNetworkInspectorIsCapturing()) return;
     NSNumber *rid = request[@"request_id"];
@@ -142,6 +190,7 @@ void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionar
         [bounded addObject:@{@"name": name, @"value": value}];
     }
     NSArray *copyPairs = [bounded copy];
+    NSDictionary *diagnostics = FBTNIParameterDiagnostics(copyPairs);
     NSDictionary *copy = [request copy];
     FBTNIUpdate(rid, ^(NSMutableDictionary *record) {
         record[@"stage"] = @"request_started";
@@ -149,6 +198,7 @@ void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionar
         record[@"method"] = copy[@"request_method"] ?: @"unknown";
         record[@"transport"] = @"FBMobileConfigTigonFetcher";
         record[@"request_parameter_pairs"] = copyPairs;
+        record[@"request_diagnostics"] = diagnostics;
         record[@"request_parameter_capture"] = (bytes > kMaxRequestBytes || [copy[@"inspector_request_truncated"] boolValue]) ? @"truncated_at_1mb" : @"complete";
         record[@"request_parameter_total_count"] = copy[@"request_param_count"] ?: @(copyPairs.count);
         record[@"request_parameter_captured_count"] = @(copyPairs.count);

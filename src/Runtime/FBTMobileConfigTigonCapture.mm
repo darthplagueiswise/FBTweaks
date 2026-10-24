@@ -15,6 +15,13 @@
 #include <atomic>
 #include <cfloat>
 #include <new>
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <mach-o/loader.h>
+
+// Theos includes CydiaSubstrate through FBTPrefix.h; declare the standard
+// ABI explicitly for the portable Objective-C++ callback fixture as well.
+extern "C" void MSHookFunction(void *symbol, void *replace, void **result);
 
 typedef void (*FBTTigonStartedOrig)(void *, const void *);
 typedef void (*FBTTigonBodyOrig)(void *, void *);
@@ -47,6 +54,9 @@ static std::atomic<unsigned long long> sSimpleStartedCalls(0), sSimpleResponseCa
     sSimpleBodyCalls(0), sSimpleEOMCalls(0), sSimpleErrorCalls(0), sNativeCorrelations(0);
 static std::atomic<unsigned long long> sStandaloneTigonIDs(1000000000000ULL);
 static NSUInteger sSymbolDiscoveredSimpleHooks = 0;
+static NSUInteger sExportedFunctionHooks = 0;
+static BOOL sExportedOnStartedAvailable = NO;
+static NSString *sSimpleInstallKind = @"not_installed";
 struct FBTSimpleEndScope {
     void *previous;
     BOOL previousCaptured, previousError;
@@ -507,7 +517,9 @@ static void FBTSimpleOnResponse(void *self, void *response) {
         memcpy(&status, response, sizeof(status));
         if (status >= 100 && status <= 599) {
             context[@"http_status"] = @(status);
-            context[@"http_status_source"] = @"verified_tigon_response_status";
+            context[@"http_status_source"] = sExportedFunctionHooks ?
+                @"observed_response_status_candidate_unverified_build_layout" :
+                @"verified_tigon_response_status";
         }
         context[@"payload_provenance"] = @"http_response_body_before_native_status_conversion";
         if ([context[@"mc_correlated"] boolValue]) FBTTigonRecordContextEvent(@"tigon_response_received", context, @{
@@ -546,7 +558,10 @@ NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *r
     context[@"transport"] = @"TigonSimpleCallbacks";
     context[@"native_tigon_correlation"] = sCurrentSimpleIsError ? @"native_mc_completion_inside_simple_error" : @"native_mc_completion_inside_simple_eom";
     context[@"payload_provenance"] = @"http_response_body_before_native_status_conversion";
-    if (!sCurrentSimpleIsError) {
+    if (!sCurrentSimpleIsError && !sExportedFunctionHooks) {
+        // self+0x48/status and self+0x80/body were decompiled only for the
+        // original UUID. Never dereference version-specific C++ object offsets
+        // in symbol-entry fallback on an unknown build.
         uint16_t status = 0;
         memcpy(&status, (const uint8_t *)sCurrentSimpleEnd + 0x48, sizeof(status));
         if (status >= 100 && status <= 599) {
@@ -577,6 +592,58 @@ NSDictionary *FBTMobileConfigTigonCaptureObserveNativeCompletion(NSDictionary *r
     FBTTigonFinishCapture(sCurrentSimpleEnd);
     sCurrentSimpleWasCaptured = YES;
     return details;
+}
+
+// vtable slots can hold compiler thunks or pointer-authenticated targets even
+// when the class exports the C++ callback methods. Prefer the verified vtable,
+// but allow a method-entry trampoline as a separate (non-vtable) fallback.
+static BOOL FBTSimpleMethodInLoadedImage(void *method, const char *imageName) {
+    if (!method || !imageName) return NO;
+    Dl_info info = {};
+    if (!dladdr(method, &info) || !info.dli_fname) return NO;
+    const char *base = strrchr(info.dli_fname, '/');
+    if (strcmp(base ? base + 1 : info.dli_fname, imageName) != 0) return NO;
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
+        const char *path = _dyld_get_image_name(i);
+        if (!path) continue;
+        const char *name = strrchr(path, '/');
+        if (strcmp(name ? name + 1 : path, imageName) != 0) continue;
+        const struct mach_header_64 *header =
+            (const struct mach_header_64 *)_dyld_get_image_header(i);
+        if (!header || header->magic != MH_MAGIC_64 || header->cputype != CPU_TYPE_ARM64)
+            return NO;
+        const struct section_64 *text =
+            getsectbynamefromheader_64(header, "__TEXT", "__text");
+        if (!text) return NO;
+        uintptr_t first = (uintptr_t)text->addr + _dyld_get_image_vmaddr_slide(i);
+        uintptr_t end = first + text->size;
+        uintptr_t value = (uintptr_t)method;
+        return end > first && value >= first && value < end - sizeof(uint32_t);
+    }
+    return NO;
+}
+
+static BOOL FBTSimpleInstallMethodEntry(const char *symbol, void *replacement,
+        void **original, NSString **error) {
+    if (!symbol || !replacement || !original || *original) {
+        if (error) *error = @"invalid_or_previously_installed_method";
+        return NO;
+    }
+    void *method = dlsym(RTLD_DEFAULT, symbol);
+    if (!FBTSimpleMethodInLoadedImage(method, "FBSharedFramework")) {
+        if (error) *error = @"method_symbol_not_in_loaded_shared_text";
+        return NO;
+    }
+    void *trampoline = nullptr;
+    // MSHookFunction replaces the verified C++ method implementation, *not*
+    // an unverified vtable pointer. Original is always forwarded once.
+    MSHookFunction(method, replacement, &trampoline);
+    if (!trampoline || trampoline == replacement) {
+        if (error) *error = @"substrate_trampoline_not_returned";
+        return NO;
+    }
+    *original = trampoline;
+    return YES;
 }
 
 static void FBTInstallSimpleHooks(void) {
@@ -626,12 +693,63 @@ static void FBTInstallSimpleHooks(void) {
         }
         complete = complete && ok;
     }
+    NSUInteger methodEntryCount = 0;
+    BOOL optionalStarted = NO;
+    if (!complete && dynamicCount == 0 && legacyCount == 0) {
+        // Fallback only when *none* of the vtable slots was changed; mixing
+        // method-entry trampolines and vtable patches can double-invoke hooks.
+        // Each function must be exported by FBSharedFramework and executable.
+        NSMutableArray *methodFailures = [NSMutableArray array];
+        for (NSUInteger n = 1; n < sizeof(slots) / sizeof(slots[0]); ++n) {
+            NSString *failure = nil;
+            if (FBTSimpleInstallMethodEntry(methodSymbols[n], slots[n].replacement,
+                    slots[n].original, &failure)) ++methodEntryCount;
+            else [methodFailures addObject:[NSString stringWithFormat:@"method%lu:%@",
+                (unsigned long)n, failure ?: @"unknown"]];
+        }
+        // onStarted is often a compiler-merged one-instruction RET shared by
+        // many unrelated virtual slots. Hooking that address globally would
+        // intercept arbitrary no-op callbacks and cannot identify requests.
+        void *started = dlsym(RTLD_DEFAULT, methodSymbols[0]);
+        if (FBTSimpleMethodInLoadedImage(started, "FBSharedFramework")) {
+            uint32_t firstInstruction = 0;
+            memcpy(&firstInstruction, started, sizeof(firstInstruction));
+            if (firstInstruction != 0xd65f03c0) {
+                NSString *failure = nil;
+                optionalStarted = FBTSimpleInstallMethodEntry(methodSymbols[0],
+                    slots[0].replacement, slots[0].original, &failure);
+                if (!optionalStarted) [methodFailures addObject:
+                    [NSString stringWithFormat:@"onStarted:%@", failure ?: @"unknown"]];
+            }
+        }
+        // HTTP response/body and both terminal events must be covered to
+        // advertise this as a functioning response capture surface.
+        complete = methodEntryCount == 4;
+        if (complete) {
+            [failures removeAllObjects];
+            sSimpleInstallKind = optionalStarted ?
+                @"exported_method_entry_all_five" :
+                @"exported_method_entry_four_without_noop_onStarted";
+        } else {
+            [failures addObjectsFromArray:methodFailures];
+            sSimpleInstallKind = @"partial_exported_method_entries";
+        }
+    } else if (complete) {
+        sSimpleInstallKind = dynamicCount ? @"live_vtable_symbols" : @"legacy_UUID_vtable";
+    } else {
+        sSimpleInstallKind = @"partial_vtable_slots";
+    }
+    sExportedFunctionHooks = methodEntryCount;
+    sExportedOnStartedAvailable = optionalStarted;
     sSimpleHooksInstalled = complete;
     sSymbolDiscoveredSimpleHooks = dynamicCount;
     sSimpleFailure = [failures componentsJoinedByString:@"; "];
     FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_vtable_discovery", @{
         @"dynamic_symbols_installed": @(dynamicCount),
         @"legacy_uuid_installed": @(legacyCount),
+        @"exported_function_hooks_installed": @(methodEntryCount),
+        @"exported_onStarted_installed": @(optionalStarted),
+        @"hook_kind": sSimpleInstallKind ?: @"unknown",
         @"all_callbacks_installed": @(complete),
         @"failure": sSimpleFailure ?: @"",
         @"match_type": dynamicCount ? @"loaded_CXX_symbol_and_vtable_pointer" :
@@ -639,7 +757,7 @@ static void FBTInstallSimpleHooks(void) {
     });
     FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_simple_callback_hooks", @{
         @"hook_installed": @(complete), @"message": sSimpleFailure ?: @"",
-        @"capture_surface": @"UUID-verified shared TigonSimpleCallbacks data slots; HTTP status/body before native error conversion"
+        @"capture_surface": @"Verified TigonSimpleCallbacks vtable or exported C++ method-entry hooks; HTTP status/body before native error conversion"
     });
 }
 
@@ -681,6 +799,9 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
         @"native_tigon_correlations": @(sNativeCorrelations.load()),
         @"simple_callback_hooks_installed": @(sSimpleHooksInstalled),
         @"simple_symbol_resolved_callbacks": @(sSymbolDiscoveredSimpleHooks),
+        @"simple_exported_function_hooks": @(sExportedFunctionHooks),
+        @"simple_exported_onStarted_available": @(sExportedOnStartedAvailable),
+        @"simple_hook_kind": sSimpleInstallKind ?: @"unknown",
         @"simple_callback_failure": sSimpleFailure ?: @"not_attempted",
         @"tigon_hooks_installed": @(sTigonHooksInstalled),
         @"tigon_request_hook_installed": @(sOrigTigonStarted != nullptr),

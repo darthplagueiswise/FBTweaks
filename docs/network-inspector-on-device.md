@@ -54,6 +54,46 @@ um pode conter JSON do servidor, enquanto o callback pode conter apenas
 `None domain: FBHTTPErrorDomain code: 400 detail:`. A distinção evita
 atribuir o texto de erro do SDK ao JSON original do backend.
 
+
+## Diagnóstico de vtables incompatíveis (Tigon)
+
+Se os callbacks mostrarem `ambiguous_or_missing_vtable_anchor`, o Inspector
+agora tenta um **segundo mecanismo somente para essa classe C++**:
+interceptação das implementações exportadas de `onResponse`, `onBody`,
+`onEOM` e `onError` por trampolins do CydiaSubstrate. Cada método precisa
+resolver para código executável de `FBSharedFramework`; as chamadas
+originais continuam sendo encaminhadas.
+
+`onStarted` é opcional: várias builds compartilham um método vazio (`RET`)
+entre dezenas de entradas virtuais. Interceptá-lo como se fosse um callback
+exclusivo capturaria operações não relacionadas. Por isso, quando esse método
+estiver vazio, a ferramenta o deixa intacto e identifica limitações de
+metadados HTTP (host/path/headers). Os outros quatro callbacks podem recuperar
+o corpo e os sinais de término da requisição.
+
+O status de probes indica `tigon_hook_kind`, a quantidade de métodos
+interceptados e as chamadas realmente observadas. Interceptar os símbolos
+não garante que uma versão diferente despache por eles; só uma observação
+real confirma uso. Não se atribuem corpos de respostas genéricas ao QE-info
+sem correlação explícita.
+
+Em fallback de método exportado, o Inspector **não lê offsets internos de
+objetos conhecidos somente da versão 583** (tais como `self+0x48` ou
+`self+0x80`). Quando a origem não tiver layout comprovado, o status é
+classificado como candidato até confirmação.
+
+### Diagnóstico automático dos parâmetros
+
+Na aba Request, `request_diagnostics` mostra os números de configurações e
+índices dentro de `queries`, além de `needs_name`, `skip_qe` e
+`api_version`. `device_id_state=literal_parameter_name` destaca uma
+eventual string placeholder, **somente antes do builder HTTP**.
+
+Uma lista muito extensa e o placeholder merecem comparação com a requisição
+serializada, mas não demonstram isoladamente a causa de um HTTP 400.
+A resposta HTTP original continua sendo necessária para diferenciar payload
+inválido, autenticação e elegibilidade remota.
+
 ## Segurança de armazenamento
 
 A captura está **desligada no lançamento** e exige confirmação explícita.

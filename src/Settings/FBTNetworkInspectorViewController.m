@@ -64,6 +64,7 @@ static NSString *FBTNIJSON(NSDictionary *record) {
                             @"query": record[@"inspector_query"] ?: @"",
                             @"headers_known": record[@"known_request_headers"] ?: @{},
                             @"parameter_pairs": record[@"request_parameter_pairs"] ?: @[],
+                            @"request_diagnostics": record[@"request_diagnostics"] ?: @{},
                             @"capture_state": record[@"request_parameter_capture"] ?: @"not_observed"};
                 break;
         case 2: visible = @{@"http_status": record[@"tigon_http_status"] ?: @0,

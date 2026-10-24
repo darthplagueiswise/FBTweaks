@@ -42,6 +42,12 @@ BOOL FBTRebindImageVtableSlotBySymbols(const char *, const char *, const char *,
 BOOL FBTRebindImageFirstVirtualByRTTI(const char *, const char *, void *,
         void **, NSString **) { return NO; }
 int rebind_symbols(struct rebinding[], size_t) { return 0; }
+extern "C" void MSHookFunction(void *, void *, void **original) {
+    // CI fixture has no iOS Substrate; method-entry fallback is never
+    // considered valid unless it resolves to the real FBSharedFramework.
+    if (original) *original = nullptr;
+}
+
 
 struct TestRequest { std::string host, path, method, query; };
 static const void *URL(const void *r) { return r; }

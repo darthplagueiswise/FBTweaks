@@ -36,6 +36,8 @@ NSDictionary *FBTMCNativeProbeStatus(void) {
         @"tigon_simple_callbacks": FBTMobileConfigTigonCaptureStatus()[@"simple_callback_hooks_installed"] ?: @NO,
         @"fetcher_async_callback": FBTMobileConfigFetcherCaptureStatus()[@"native_mc_fetcher_installed"] ?: @NO,
         @"tigon_dynamic_symbol_count": FBTMobileConfigTigonCaptureStatus()[@"simple_symbol_resolved_callbacks"] ?: @0,
+        @"tigon_method_entry_hook_count": FBTMobileConfigTigonCaptureStatus()[@"simple_exported_function_hooks"] ?: @0,
+        @"tigon_hook_kind": FBTMobileConfigTigonCaptureStatus()[@"simple_hook_kind"] ?: @"not_attempted",
         @"fetcher_resolution": FBTMobileConfigFetcherCaptureStatus()[@"native_mc_fetcher_failure"] ?: @"unknown",
         @"nonpersistent": @YES
     };

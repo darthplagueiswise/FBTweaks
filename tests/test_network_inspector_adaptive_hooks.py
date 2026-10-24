@@ -49,6 +49,13 @@ class AdaptiveHooksTests(unittest.TestCase):
         self.assertIn('Fetcher somente', inspector)
         self.assertNotIn('if (!fetcher || !tigon)', inspector)
 
+    def test_non_uuid_callback_fallback(self):
+        native = src('src/Runtime/FBTMobileConfigTigonCapture.mm')
+        self.assertIn('FBTSimpleInstallMethodEntry', native)
+        self.assertIn('methodEntryCount == 4', native)
+        self.assertIn('simple_hook_kind', native)
+        self.assertIn('sExportedFunctionHooks', native)
+
     def test_no_blind_patching_on_mismatch(self):
         implementation = src("src/Runtime/FBTDataSlotRebinding.m")
         self.assertIn('selected - slide, uuid, expectedMethod', implementation)
