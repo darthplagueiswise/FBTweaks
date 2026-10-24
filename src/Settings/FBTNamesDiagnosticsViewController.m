@@ -139,6 +139,14 @@ extern void FBTInitEmployeeGroup(void);
         request[@"device_id_state"] ?: @"não observado", request[@"device_id_field_count"] ?: @"?",
         request[@"device_id_bytes"] ?: @"?", request[@"device_id_format"] ?: @"não observado",
         [request[@"device_id_observation_id"] unsignedLongLongValue] ? request[@"device_id_observation_id"] : @"não disponível", request[@"qe_request_options_state"] ?: @"não observado"];
+    NSString *hashScopeText = request ? [NSString stringWithFormat:
+        @"Hashes — caminhos distintos\nQE-info, query_hash: %@\nQE-info, one_query_hash: %@\nHash embarcado one_query_hash.txt: %@\nrequest_data_query_hash do Requester (sync): %@\nObservação: %@\n\nO hash do bundle NÃO é automaticamente um argumento da consulta QE-info. A resposta OAuthException #100 indica recusa remota de elegibilidade; não preencher hashes arbitrários para contorná-la.",
+        request[@"query_hash_state"] ?: @"não observado",
+        request[@"one_query_hash_state"] ?: @"não observado",
+        request[@"one_query_hash_bundle_resource_state"] ?: @"não verificado",
+        request[@"sync_request_data_query_hash_state"] ?: @"não observado",
+        request[@"hash_observation_scope"] ?: @"não observado"] :
+        @"Sem captura de pares nativos QE-info para determinar a presença de hash.";
     NSMutableArray *controls = [@[@"Iniciar nova captura", @"Armar probes desta sessão", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local", @"Cancelar testes temporários"] mutableCopy];
     NSMutableArray *commands = [@[@"start", @"probes", @"pause", @"copy", @"local", @"cancel"] mutableCopy];
     [controls addObject:@"Opções dos pedidos QE / Force Name Download"];
@@ -151,7 +159,7 @@ extern void FBTInitEmployeeGroup(void);
     self.controlIDs = commands;
     self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
+        @[requestText, hashScopeText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
         @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
