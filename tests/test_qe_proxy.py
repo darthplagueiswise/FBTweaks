@@ -263,8 +263,17 @@ class CATests(unittest.TestCase):
             self.assertIn('qe_output=' + str(session['events']), cmd)
             self.assertNotIn('ssl_insecure=true', cmd)
             self.assertNotIn('-w', cmd)
-            trusted = proxy_command(session, 'mitmdump', '127.0.0.1', 8080, upstream_ca=Path(tmp) / 'fixture-ca.pem')
-            self.assertIn('ssl_verify_upstream_trusted_ca=' + str(Path(tmp) / 'fixture-ca.pem'), trusted)
+            fixture = Path(tmp) / 'fixture-ca.pem'
+            fixture.write_text('public fixture placeholder')
+            trusted = proxy_command(session, 'mitmdump', '127.0.0.1', 8080, upstream_ca=fixture)
+            option = next(x for x in trusted if x.startswith('ssl_verify_upstream_trusted_ca='))
+            self.assertTrue(os.path.samefile(option.split('=', 1)[1], fixture))
+            # macOS /var maps to /private/var; preserve identity through symlinks.
+            alias = Path(tmp) / 'alias.pem'
+            alias.symlink_to(fixture)
+            trusted = proxy_command(session, 'mitmdump', '127.0.0.1', 8080, upstream_ca=alias)
+            option = next(x for x in trusted if x.startswith('ssl_verify_upstream_trusted_ca='))
+            self.assertTrue(os.path.samefile(option.split('=', 1)[1], fixture))
             with self.assertRaises(FileExistsError):
                 prepare_session(Path(tmp) / 'session')
 
