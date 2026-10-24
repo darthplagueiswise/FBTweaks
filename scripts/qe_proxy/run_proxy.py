@@ -26,7 +26,7 @@ def prepare_session(directory):
 def proxy_command(session, executable, listen_host, listen_port, upstream_ca=None):
     command = [str(executable), '--quiet', '--listen-host', listen_host, '--listen-port', str(listen_port),
             '--set', 'confdir=' + str(session['confdir']),
-            '--set', 'flow_detail=0', '--set', 'stream_large_bodies=64k',
+            '--set', 'flow_detail=0', '--set', 'stream_large_bodies=256k',
             '--set', 'store_streamed_bodies=false',
             '--scripts', str(Path(__file__).with_name('addon.py').resolve()),
             '--set', 'qe_output=' + str(session['events'])]
