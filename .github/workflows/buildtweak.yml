@@ -209,6 +209,30 @@ jobs:
           name: FBTweak.1.0.${{ github.run_number }}
           path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
           if-no-files-found: error
+      # Lab distribution is restricted to this experimental PR branch. Normal
+      # flags/main builds and unrelated PRs remain read-only and unchanged.
+      - name: Build explicitly labeled QE LAB artifact
+        if: github.event_name == 'pull_request' && github.head_ref == 'codex/qe-full-metadata-pr5'
+        run: |
+          cd main
+          FBT_QE_LAB=1 ./build.sh rootless
+          DEB="$(ls -t packages/*.deb 2>/dev/null | head -n1)"
+          test -n "$DEB"
+          cp "$DEB" "release/FBTweak.1.0.${{ github.run_number }}.QE-LAB.deb"
+          bash scripts/verify_macho_installation.sh "$DEB"
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
+          THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: 9
+
+      - name: Upload QE LAB artifact
+        if: github.event_name == 'pull_request' && github.head_ref == 'codex/qe-full-metadata-pr5'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FBTweak.1.0.${{ github.run_number }}.QE-LAB
+          path: main/release/FBTweak.1.0.${{ github.run_number }}.QE-LAB.deb
+          if-no-files-found: error
+
 
 
 
