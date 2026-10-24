@@ -5,6 +5,8 @@ on:
     branches:
       - 'flags'
       - 'main'
+      # Validate this read-only PR5 derivation without changing flags/main.
+      - 'codex/qe-safe-proxy-pr5'
   workflow_dispatch:
   pull_request:
     branches: ['flags']
@@ -143,6 +145,8 @@ jobs:
           clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
           /tmp/fbt-service-tests
           python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_compare.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_no_invasive_regression.py" -v
 
       - name: Test native query correlation
         run: |
