@@ -38,7 +38,7 @@ if [[ "$arch" == arm64 ]]; then platform_target=arm64-apple-ios16.3-simulator; e
 xcrun --sdk iphonesimulator clang -target "$platform_target" -isysroot "$sdk_path" -fobjc-arc -Werror=unguarded-availability-new -Wno-deprecated-declarations \
   -I "$repo_root/src" -I "$repo_root/src/UI" -I "$repo_root/src/Settings" \
   "$repo_root/src/UI/FBTUIKit26LiquidGlass.m" "$repo_root/src/Settings/FBTSettingsCatalog.m" "$repo_root/src/Settings/FBTSettingsPresentation.m" "$repo_root/src/FBTDefaults.m" "$repo_root/tests/preview/SettingsPreview.m" \
-  -framework UIKit -framework Foundation -framework QuartzCore -o "$app_dir/FBTStylePreview"
+  -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics -o "$app_dir/FBTStylePreview"
 cat > "$app_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>dev.fbtweaks.StylePreview</string>
