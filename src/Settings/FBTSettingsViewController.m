@@ -336,7 +336,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @"Teste isolado gravado em mc_overrides.json.\n\n"
          @"mobileconfig_use_legacy_refresh: %@\n"
          @"use_builtin_query_hash: %@\n\n"
-         @"Reinicie o Facebook, ative o log QE-info e execute Force name download. Compare name_download_completed, qe_info_request_returned e query_hash_state.\n\n"
+         @"Reinicie o Facebook e, no Inspetor de Rede, capture a sincronização mobileconfig/mobileconfigsessionless. Compare query_hash e one_query_hash com a linha de base. O fluxo QE-info / Force name download não envia esses hashes e não valida esta comparação.\n\n"
          @"Importante: isso confirma apenas o estado gravado no arquivo, não que a versão atual do app reconheça esses parâmetros. No AppGroup analisado, os dois configs não apareceram nos sidecars ativos de nomes; se não houver mudança, o próximo passo é confirmar resolução/schema, não desligar outras flags em lote.\n\n"
          @"Flag isolada neste teste: %@%@",
         FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag,
@@ -344,7 +344,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @"\nATENÇÃO: legacy refresh já estava OFF na linha de base; a intervenção não muda esse valor." :
         (([variant isEqualToString:@"hash"] && hashState == FBTMCStateOff) ?
             @"\nATENÇÃO: builtin query hash já estava OFF na linha de base; a intervenção não muda esse valor." : @"")];
-    [self showInfoTitle:@"Teste A/B QE-info preparado" message:message];
+    [self showInfoTitle:@"Teste A/B preparado" message:message];
 }
 
 - (void)restoreQEFlagABTest {

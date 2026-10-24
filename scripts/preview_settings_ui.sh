@@ -35,7 +35,7 @@ mkdir -p "$app_dir"
 sdk_path="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 arch="$(uname -m)"
 if [[ "$arch" == arm64 ]]; then platform_target=arm64-apple-ios16.3-simulator; else platform_target=x86_64-apple-ios16.3-simulator; fi
-xcrun --sdk iphonesimulator clang -target "$platform_target" -isysroot "$sdk_path" -fobjc-arc -Werror=unguarded-availability-new -Wno-deprecated-declarations \
+xcrun --sdk iphonesimulator clang -target "$platform_target" -isysroot "$sdk_path" -fobjc-arc -DFBT_BUILD_NUMBER="${GITHUB_RUN_NUMBER:-0}" -Werror=unguarded-availability-new -Wno-deprecated-declarations \
   -I "$repo_root/src" -I "$repo_root/src/UI" -I "$repo_root/src/Settings" \
   "$repo_root/src/UI/FBTUIKit26LiquidGlass.m" "$repo_root/src/Settings/FBTSettingsCatalog.m" "$repo_root/src/Settings/FBTSettingsPresentation.m" "$repo_root/src/FBTDefaults.m" "$repo_root/tests/preview/SettingsPreview.m" \
   -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics -o "$app_dir/FBTStylePreview"
@@ -63,20 +63,23 @@ trap cleanup EXIT
 xcrun simctl boot "$simulator_id"
 xcrun simctl bootstatus "$simulator_id" -b
 xcrun simctl install "$simulator_id" "$app_dir"
-# Configure the *system* preference store, then restart this disposable device
-# so UIKit reads the updated accessibility state before the fresh app launch.
-# The app verifies the public UIAccessibility APIs; a write alone is not a pass.
-configure_accessibility() {
-  xcrun simctl spawn "$simulator_id" defaults write com.apple.Accessibility ReduceTransparency -bool "$1"
-  xcrun simctl spawn "$simulator_id" defaults write com.apple.Accessibility DarkenSystemColors -bool "$2"
-  xcrun simctl shutdown "$simulator_id"
-  xcrun simctl boot "$simulator_id"
-  xcrun simctl bootstatus "$simulator_id" -b
-}
-configure_accessibility NO NO
-for variant in light dark accessibility reduce-transparency high-contrast; do
-  if [[ "$variant" == reduce-transparency ]]; then configure_accessibility YES NO; fi
-  if [[ "$variant" == high-contrast ]]; then configure_accessibility NO YES; fi
+# The disposable simulator starts with accessibility defaults. Verify those in
+# the first three variants instead of paying for an unnecessary initial reboot.
+# Increase Contrast has a supported simctl UI command. Reduce Transparency uses
+# its actual AX-domain key and a restart; public UIKit API assertions below are
+# authoritative, so an ignored preference remains a test failure.
+xcrun simctl help ui > "$output_dir/simctl-ui-help.txt"
+for variant in light dark accessibility high-contrast reduce-transparency; do
+  contrast=disabled
+  if [[ "$variant" == high-contrast ]]; then contrast=enabled; fi
+  xcrun simctl ui "$simulator_id" increase_contrast "$contrast"
+  if [[ "$variant" == reduce-transparency ]]; then
+    xcrun simctl spawn "$simulator_id" defaults write com.apple.Accessibility ReduceTransparencyEnabled -bool YES
+    xcrun simctl spawn "$simulator_id" defaults read com.apple.Accessibility > "$output_dir/accessibility-preferences.txt"
+    xcrun simctl shutdown "$simulator_id"
+    xcrun simctl boot "$simulator_id"
+    xcrun simctl bootstatus "$simulator_id" -b
+  fi
   appearance=light
   if [[ "$variant" == dark ]]; then appearance=dark; fi
   xcrun simctl ui "$simulator_id" appearance "$appearance"
