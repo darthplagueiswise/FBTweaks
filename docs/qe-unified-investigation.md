@@ -19,6 +19,7 @@ O end-to-end é **uma investigação**, mesmo quando há diferentes endpoints: p
 1. Estados nativos de hash ausente passam a `absent_in_native_pairs`, origem `native_request_parameter_pairs_before_serialization`, e contrato `not_verified_for_qe_info`. O contador/estado de hash presente mantém o comportamento anterior. **Nenhum hash foi fabricado ou inserido na requisição**.
 2. Estados do Tigon provenientes da URL mudam para `not_in_url_query`, com origem `url_query_only_not_form_body`. A captura não alega observar o POST body final.
 3. O request inicial agora conta consultas estruturadas, entradas com formato inesperado e duplicação (com limite de memória), sem exportar strings das consultas.
+3a. O proxy Whitehat de leitura agora aceita os três hosts Graph explicitamente observados e corpos de até 256 KiB. Os campos `body_shape.hash_fields.query_hash` e `body_shape.hash_fields.one_query_hash` fornecem **presença e comprimento no corpo POST efetivamente visto pelo proxy**, nunca o valor do hash. Isso distingue definitivamente a etapa pré-Tigon da etapa de rede em uma captura autorizada.
 4. O painel **Fetch e contexto QE** mostra todas as etapas causalmente, até o código remoto e a ausência de confirmação de importação/persistência.
 5. `scripts/qe_pipeline_audit.py` consome capturas locais autorizadas e resume o processo num **JSON minificado de linha única**, sem OAuth, IDs, queries, headers ou textos livres.
 
@@ -31,6 +32,8 @@ python3 scripts/qe_pipeline_audit.py registro-73.json registro-9.json
 Faça também uma execução autorizada com `mobileconfig` e `mobileconfigsessionless` e guarde os eventos/sync responses **sem headers de credencial** para verificar seus hashes e a aplicação dos valores. Esse outro tipo de request não é intercambiável com `/mobileconfig_qe_info`, mas deve ser relacionado pelo contexto autenticado, tempo e sequência de execução. **Nenhum esquema de hash QE-info foi comprovado**; não gere MD5/SHA improvisado nem copie `query_hash` do endpoint de valores para QE-info.
 
 `4626:mobileconfig_session` índice 4 (`use_builtin_query_hash`) é uma possível linha de pesquisa para o sync nativo. Sua leitura efetiva e o efeito nessa IPA ainda não foram estabelecidos causalmente para QE-info. Ativar o override local sem essa prova não resolve o erro de elegibilidade do servidor.
+
+O teste de hash no corpo do POST exige o proxy configurado com a CA correspondente, com TLS upstream validado. Se a resposta ao proxy não for visível, o diagnóstico fica `not_observed` e não pode ser substituído por uma conclusão de ausência.
 
 O REA/Ghidra fornecido anteriormente identifica `FBMobileConfigQEInfoManager::refreshNames`, `fetchQEInfoSynchronously`, `FBMobileConfigTigonFetcher::asyncFetch` e as callbacks de resposta. O REA não contém o predicado privado de autorização executado no backend Meta; não afirmar que ele foi descoberto.
 
