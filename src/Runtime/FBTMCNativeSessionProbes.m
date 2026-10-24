@@ -2,6 +2,7 @@
 #import "../FBTDefaults.h"
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTMCQEIsolatedProfile.h"
 #include <stdatomic.h>
 
 NSString * const FBTMCNativeProbeTigonKey = @"fbt_mc_native_tigon_probe_session";
@@ -50,6 +51,10 @@ BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason) 
         atomic_store_explicit(enabledFlag, false, memory_order_release);
         if (reason) *reason = @"Desarmado nesta sessão. Reiniciar restaura o estado sem hooks.";
         return YES;
+    }
+    if (FBTMCQEIsolatedProfileInstalled()) {
+        if (reason) *reason = @"Slot QE isolado instalado nesta sessão. Reinicie o app para usar os probes antigos.";
+        return NO;
     }
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
         if (reason) *reason = @"Ative primeiro Log QE-info (seguro).";
