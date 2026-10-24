@@ -5,6 +5,8 @@ on:
     branches:
       - 'flags'
       - 'main'
+      # Validate this read-only PR5 derivation without changing flags/main.
+      - 'codex/qe-safe-proxy-pr5'
   workflow_dispatch:
   pull_request:
     branches: ['flags']
