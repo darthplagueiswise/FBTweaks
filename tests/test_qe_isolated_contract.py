@@ -30,7 +30,6 @@ class IsolatedQEContract(unittest.TestCase):
                 continue
             self.assertNotIn(banned, isolated)
         self.assertIn('FBTMCNativeProbeAnyEnabled()', isolated)
-        self.assertIn('FBTMCNativeProbeFetcherCaptureInstall', read("src/Runtime/FBTMCNativeSessionProbes.m")) if False else None
         self.assertIn('FBTMCQEIsolatedProfileInstalled()', read("src/Runtime/FBTMCNativeSessionProbes.m"))
         self.assertIn('if (FBTQEInvasiveHooksAllowed() ||', isolated)
         self.assertIn('#if FBT_ENABLE_QE_ISOLATED_PROFILE', isolated)
