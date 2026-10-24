@@ -284,8 +284,10 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         // request_data_query_hash inside FBMobileConfigRequester sync requests.
         @"query_hash_state": @"absent_in_native_arguments",
         @"one_query_hash_state": @"absent_in_native_arguments",
-        @"hash_observation_scope": @"asyncFetch_native_pairs_not_wire",
-        @"sync_request_data_query_hash_state": @"not_observed_in_qe_info",
+        @"hash_observation_scope": purpose == "mobileconfig_qe_info" ?
+            @"qe_info_native_pairs_not_wire" : @"native_fetcher_pairs_not_sync_requester",
+        @"sync_request_data_query_hash_state": purpose == "mobileconfig_qe_info" ?
+            @"not_observed_in_qe_info" : @"not_observed_in_this_layer",
         @"one_query_hash_bundle_resource_state": FBTMCOneQueryBundleHashState()
         } mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
