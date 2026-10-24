@@ -145,11 +145,11 @@ static NSString *FBTTigonString(const std::string &value) {
 
 static NSDictionary *FBTTigonQueryHashState(const std::string &query) {
     NSMutableDictionary *state = [@{
-        @"query_hash_state": @"missing",
+        @"query_hash_state": @"not_in_url_query",
         @"query_hash_length": @0,
-        @"one_query_hash_state": @"missing",
+        @"one_query_hash_state": @"not_in_url_query",
         @"one_query_hash_length": @0,
-        @"query_hash_source": @"url_query_only"
+        @"query_hash_source": @"url_query_only_not_form_body"
     } mutableCopy];
     size_t start = 0;
     while (start <= query.size()) {
@@ -294,7 +294,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
     if (!sTigonRequestURL || !sTigonURLHost || !sTigonURLPath || !sTigonRequestMethod) {
         FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_request_metadata_unavailable", @{
             @"capture_reason": reason,
-            @"query_hash_source": @"url_query_only"
+            @"query_hash_source": @"url_query_only_not_form_body"
         });
         return;
     }
@@ -330,7 +330,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
             @"request_method": method ?: @"",
             @"capture_reason": reason,
             @"body": [NSMutableData data], @"mc_correlated": @(confirmedEndpoint), @"created": @(CACurrentMediaTime()),
-            @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only"
+            @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only_not_form_body"
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
         [context addEntriesFromDictionary:FBTObserveRequestAuthorization(request)];
@@ -352,8 +352,8 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
 
         if (confirmedEndpoint) FBTTigonRecordContextEvent(@"tigon_request_started", context, @{
             @"request_body_persisted": @NO,
-            @"query_hash_state": hashState[@"query_hash_state"] ?: @"missing",
-            @"one_query_hash_state": hashState[@"one_query_hash_state"] ?: @"missing"
+            @"query_hash_state": hashState[@"query_hash_state"] ?: @"not_in_url_query",
+            @"one_query_hash_state": hashState[@"one_query_hash_state"] ?: @"not_in_url_query"
         });
     } @catch (__unused NSException *exception) {
         FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_request_metadata_exception", @{
