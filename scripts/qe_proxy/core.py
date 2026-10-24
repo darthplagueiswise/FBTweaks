@@ -13,7 +13,7 @@ import threading
 from urllib.parse import parse_qsl
 import uuid
 
-MAX_BODY = 65536
+MAX_BODY = 256 * 1024
 MAX_QUERY = 8192
 MAX_FIELDS = 64
 MAX_CREDENTIAL = 16384
@@ -21,6 +21,8 @@ MAX_CREDENTIAL = 16384
 _credential_observation_key = secrets.token_bytes(32)
 _CREDENTIAL = re.compile(r'(?:Bearer|OAuth) +([-A-Za-z0-9._~+/]+=*)', re.IGNORECASE | re.ASCII)
 ENDPOINTS = frozenset(('mobileconfig_qe_info', 'mobileconfig', 'mobileconfigsessionless'))
+# Exact hosts observed in native Tigon 583 captures; never arbitrary subdomains.
+QE_HOSTS = frozenset(('graph.facebook.com', 'graph.prod.facebook.com', 'graph.trunkstable.facebook.com'))
 SHAPE_FIELDS = frozenset(('queries', 'query', 'variables', 'params', 'data', 'configs', 'experiments', 'query_results', 'error'))
 BOOLEAN_FIELDS = frozenset(('needs_name', 'skip_qe', 'with_universe_params',
     'with_current_experiment_group', 'with_only_current_experiment_group',
@@ -158,7 +160,7 @@ def _credential_observation_id(authorization):
 
 def summarize_request(host, path, method, headers, body):
     # Do not normalize arbitrary hosts/paths into matches; no substring matching.
-    if host.lower() != 'graph.facebook.com':
+    if host.lower() not in QE_HOSTS:
         return None
     resource, _, query = path.partition('?')
     match = _PATH.fullmatch(resource)
