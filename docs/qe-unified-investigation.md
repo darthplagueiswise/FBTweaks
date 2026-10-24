@@ -27,11 +27,15 @@ O end-to-end é **uma investigação**, mesmo quando há diferentes endpoints: p
 
 ```bash
 python3 scripts/qe_pipeline_audit.py registro-73.json registro-9.json
+# Relatório único incluindo o request HTTP final, hashes e resposta do proxy:
+python3 scripts/qe_pipeline_audit.py registro-73.json --proxy-jsonl /privado/events.jsonl
 ```
 
 Faça também uma execução autorizada com `mobileconfig` e `mobileconfigsessionless` e guarde os eventos/sync responses **sem headers de credencial** para verificar seus hashes e a aplicação dos valores. Esse outro tipo de request não é intercambiável com `/mobileconfig_qe_info`, mas deve ser relacionado pelo contexto autenticado, tempo e sequência de execução. **Nenhum esquema de hash QE-info foi comprovado**; não gere MD5/SHA improvisado nem copie `query_hash` do endpoint de valores para QE-info.
 
 `4626:mobileconfig_session` índice 4 (`use_builtin_query_hash`) é uma possível linha de pesquisa para o sync nativo. Sua leitura efetiva e o efeito nessa IPA ainda não foram estabelecidos causalmente para QE-info. Ativar o override local sem essa prova não resolve o erro de elegibilidade do servidor.
+
+O auditor só combina o native record e o proxy quando a captura manual isola um único request QE-info completo. Ele **não inventa** um ID compartilhado: registra `exact_native_join=false` e `manual_capture_window_only`. Com múltiplos requests no proxy, o estado é `ambiguous_multiple_exchanges`, sem atribuição artificial.
 
 O teste de hash no corpo do POST exige o proxy configurado com a CA correspondente, com TLS upstream validado. Se a resposta ao proxy não for visível, o diagnóstico fica `not_observed` e não pode ser substituído por uma conclusão de ausência.
 
