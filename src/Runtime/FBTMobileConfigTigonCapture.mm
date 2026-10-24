@@ -337,7 +337,10 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         if (FBTNetworkInspectorIsCapturing()) {
             context[@"inspector_raw_host"] = host ?: @"";
             context[@"inspector_raw_path"] = path ?: @"";
-            if (sTigonURLQuery) context[@"inspector_query"] = FBTTigonString(sTigonURLQuery(url));
+            if (sTigonURLQuery) {
+                const std::string &urlQuery = sTigonURLQuery(url);
+                context[@"inspector_query"] = urlQuery.empty() ? @"" : @"[redacted_url_query]";
+            }
             context[@"inspector_headers"] = FBTInspectorKnownHeaders(request);
         }
 
