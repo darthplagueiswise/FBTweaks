@@ -56,7 +56,7 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.request(headers={'AUTHORIZATION': 'SECRET'})['authorization']['scheme'], 'other')
 
     def test_parsing_is_bounded_and_malformed_input_has_fixed_labels(self):
-        self.assertEqual(self.request(body=b'x' * 65537)['body_shape'], {'kind': 'oversize'})
+        self.assertEqual(self.request(body=b'x' * (core.MAX_BODY + 1))['body_shape'], {'kind': 'oversize'})
         self.assertEqual(self.request(body=b'{bad SECRET')['body_shape'], {'kind': 'invalid'})
         self.assertEqual(self.request(path='/mobileconfig?' + 'x=' + 's' * 8193)['query_shape'], {'kind': 'oversize'})
         self.assertEqual(self.request(body=b'[' * 1100)['body_shape'], {'kind': 'invalid'})
@@ -211,9 +211,9 @@ class AddonTests(unittest.TestCase):
         self.assertLess(len(encoded), 65536)
         shape = core.summarize_response(400, {'content-encoding': 'gzip'}, encoded)['body_shape']
         self.assertEqual(shape, {'kind': 'oversize', 'stage': 'decoded'})
-        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, b'x' * 65537)['body_shape']
+        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, b'x' * (core.MAX_BODY + 1))['body_shape']
         self.assertEqual(shape, {'kind': 'oversize'})
-        exact = gzip.compress(b'"' + b'S' * 65534 + b'"', mtime=0)
+        exact = gzip.compress(b'"' + b'S' * (core.MAX_BODY - 2) + b'"', mtime=0)
         self.assertEqual(core.summarize_response(200, {'content-encoding': 'gzip'}, exact)['body_shape'], {'kind': 'scalar'})
 
     def test_gzip_rejects_truncation_trailing_concatenation_and_corruption(self):
@@ -315,7 +315,7 @@ class CATests(unittest.TestCase):
             cmd = proxy_command(session, 'mitmdump', '127.0.0.1', 8080)
             self.assertIn('confdir=' + str(confdir), cmd)
             self.assertIn('flow_detail=0', cmd)
-            self.assertIn('stream_large_bodies=64k', cmd)
+            self.assertIn('stream_large_bodies=256k', cmd)
             self.assertIn('qe_output=' + str(session['events']), cmd)
             self.assertNotIn('ssl_insecure=true', cmd)
             self.assertNotIn('-w', cmd)

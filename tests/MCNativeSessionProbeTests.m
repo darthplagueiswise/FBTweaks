@@ -7,6 +7,8 @@ NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.qe_diag";
 static BOOL sDiagnosticsEnabled = NO;
 static BOOL sAllowNativeInstall = NO;
 static BOOL sTigonInstalled = NO;
+static BOOL sIsolatedInstalled = NO;
+BOOL FBTMCQEIsolatedProfileInstalled(void) { return sIsolatedInstalled; }
 static BOOL sFetcherInstalled = NO;
 static NSUInteger sTigonInstallCalls = 0, sFetcherInstallCalls = 0;
 static void Check(BOOL condition, NSString *message) {
@@ -49,6 +51,13 @@ int main(void) { @autoreleasepool {
           @"failed slot check rejects probe");
     Check(!FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey), @"failed install stays OFF");
     sAllowNativeInstall = YES;
+    sIsolatedInstalled = YES;
+    NSUInteger tigonBeforeIsolatedCheck = sTigonInstallCalls;
+    Check(!FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &reason),
+          @"installed isolated slot blocks native probe activation");
+    Check(sTigonInstallCalls == tigonBeforeIsolatedCheck,
+          @"exclusive slot check must not attempt another hook install");
+    sIsolatedInstalled = NO;
     Check(FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &reason),
           @"verified Tigon hook can arm");
     Check(FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &reason),
