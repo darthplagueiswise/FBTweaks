@@ -1,9 +1,11 @@
 """Behavioral privacy and endpoint tests for the opt-in proxy helper."""
 import json
+import gzip
 import os
 import hashlib
 import ssl
 import socket
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -44,7 +46,8 @@ class ProxyTests(unittest.TestCase):
         encoded = json.dumps(summary)
         for secret in ['SECRET', 'secret_account', 'access_token', 'graph.facebook.com', '?']:
             self.assertNotIn(secret, encoded)
-        self.assertEqual(summary['authorization'], {'present': True, 'scheme': 'bearer', 'stage': 'proxy_wire'})
+        self.assertEqual({key: summary['authorization'][key] for key in ('present', 'scheme', 'stage')},
+                         {'present': True, 'scheme': 'bearer', 'stage': 'proxy_wire'})
         self.assertEqual(summary['body_shape']['queries'], {'kind': 'object', 'count': 1})
         self.assertEqual(summary['query_shape'], {'kind': 'form', 'fields': [], 'app_id_present': False, 'app_id_count': 0})
         self.assertTrue(summary['body_auth_field_present'])
@@ -119,6 +122,29 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(duplicate['body_shape']['queries'], {'kind': 'invalid'})
         self.assertNotIn('SECRET', json.dumps(duplicate))
 
+    def test_credential_observation_ids_are_ephemeral_redacted_and_bounded(self):
+        same = self.request(headers={'authorization': 'Bearer SECRET_A'})['authorization']
+        repeated = self.request(headers={'authorization': 'OAuth SECRET_A'})['authorization']
+        other = self.request(headers={'authorization': 'Bearer SECRET_B'})['authorization']
+        self.assertRegex(same['credential_observation_id'], r'^[0-9a-f]{64}$')
+        self.assertEqual(same['credential_observation_id'], repeated['credential_observation_id'])
+        self.assertNotEqual(same['credential_observation_id'], other['credential_observation_id'])
+        self.assertNotIn('SECRET', json.dumps([same, repeated, other]))
+        self.assertNotIn(core._credential_observation_key.hex(), json.dumps([same, repeated, other]))
+        self.assertEqual(set(same), {'present', 'scheme', 'stage', 'credential_observation_id'})
+        for auth in ['', 'Basic SECRET_A', 'Bearer', 'Bearer SECRET token', 'Bearer ' + 'A' * 16385]:
+            result = self.request(headers={'authorization': auth})['authorization']
+            self.assertEqual(result['credential_observation_id'], 'unknown')
+        exact = self.request(headers={'authorization': 'Bearer ' + 'A' * 16384})['authorization']
+        self.assertNotEqual(exact['credential_observation_id'], 'unknown')
+        command = [sys.executable, '-c', 'import sys;sys.path.insert(0,sys.argv[1]);import core;'
+            'print(core.summarize_request("graph.facebook.com","/mobileconfig","POST",'
+            '{"authorization":"Bearer SECRET_A"},b"{}")['
+            '"authorization"]["credential_observation_id"])', str(ROOT / 'scripts' / 'qe_proxy')]
+        first = subprocess.check_output(command, text=True).strip()
+        second = subprocess.check_output(command, text=True).strip()
+        self.assertNotEqual(first, second)
+
     def test_private_bounded_writer_and_local_identifiers(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'events.jsonl'
@@ -164,10 +190,40 @@ class AddonTests(unittest.TestCase):
             addon.response(flow)
             self.assertEqual(len(path.read_text().splitlines()), 2)
 
-    def test_encoded_and_streamed_bodies_are_never_decompressed_or_invented(self):
+    def test_unsupported_encoding_streaming_and_malformed_gzip_have_fixed_labels(self):
         self.assertIsNotNone(core)
-        self.assertEqual(core.summarize_response(200, {'content-encoding': 'gzip'}, b'SECRET')['body_shape'], {'kind': 'encoded'})
+        self.assertEqual(core.summarize_response(200, {'content-encoding': 'br'}, b'SECRET')['body_shape'], {'kind': 'encoded'})
         self.assertEqual(core.summarize_response(200, {}, None)['body_shape'], {'kind': 'unavailable'})
+        self.assertEqual(core.summarize_response(200, {'content-encoding': 'gzip'}, b'abc')['body_shape'],
+                         {'kind': 'invalid_encoding', 'reason': 'invalid_gzip'})
+
+    def test_gzip_error_is_classified_without_exporting_decoded_values(self):
+        body = json.dumps({'error': {'type': 'OAuthException', 'code': 100,
+            'message': '(#100) Employee Account or Specific App Conditions',
+            'fbtrace_id': 'SECRET_TRACE', 'account': 'SECRET_ACCOUNT'}}).encode()
+        summary = core.summarize_response(400, {'content-encoding': 'gzip', 'content-type': 'application/json'}, gzip.compress(body, mtime=0))
+        self.assertEqual(summary['error']['classification'], 'eligibility')
+        self.assertNotIn('SECRET', json.dumps(summary))
+        self.assertNotIn('message', json.dumps(summary))
+
+    def test_gzip_bounds_raw_and_expanded_data_before_json_parsing(self):
+        encoded = gzip.compress(b' ' * 1000000, mtime=0)
+        self.assertLess(len(encoded), 65536)
+        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, encoded)['body_shape']
+        self.assertEqual(shape, {'kind': 'oversize', 'stage': 'decoded'})
+        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, b'x' * 65537)['body_shape']
+        self.assertEqual(shape, {'kind': 'oversize'})
+        exact = gzip.compress(b'"' + b'S' * 65534 + b'"', mtime=0)
+        self.assertEqual(core.summarize_response(200, {'content-encoding': 'gzip'}, exact)['body_shape'], {'kind': 'scalar'})
+
+    def test_gzip_rejects_truncation_trailing_concatenation_and_corruption(self):
+        valid = gzip.compress(b'{"SECRET":1}', mtime=0)
+        corrupt = valid[:-1] + bytes([valid[-1] ^ 1])
+        for encoded in [b'abc', valid[:-1], valid + b'SECRET', valid + valid, corrupt]:
+            summary = core.summarize_response(400, {'content-encoding': 'gzip'}, encoded)
+            self.assertEqual(summary['body_shape'], {'kind': 'invalid_encoding', 'reason': 'invalid_gzip'})
+            self.assertNotIn('SECRET', json.dumps(summary))
+            self.assertNotIn('error', summary)
 
 
 class CATests(unittest.TestCase):

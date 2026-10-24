@@ -2,6 +2,10 @@
 from datetime import datetime, timezone
 from collections import Counter
 import json
+import hashlib
+import hmac
+import secrets
+import zlib
 import os
 from pathlib import Path
 import re
@@ -12,6 +16,10 @@ import uuid
 MAX_BODY = 65536
 MAX_QUERY = 8192
 MAX_FIELDS = 64
+MAX_CREDENTIAL = 16384
+# One random key per proxy process; no registry, disk state or exported key.
+_credential_observation_key = secrets.token_bytes(32)
+_CREDENTIAL = re.compile(r'(?:Bearer|OAuth) +([-A-Za-z0-9._~+/]+=*)', re.IGNORECASE | re.ASCII)
 ENDPOINTS = frozenset(('mobileconfig_qe_info', 'mobileconfig', 'mobileconfigsessionless'))
 SHAPE_FIELDS = frozenset(('queries', 'query', 'variables', 'params', 'data', 'configs', 'experiments', 'query_results', 'error'))
 BOOLEAN_FIELDS = frozenset(('needs_name', 'skip_qe', 'with_universe_params',
@@ -70,7 +78,19 @@ def _body(body, headers):
         return None, {'kind': 'unavailable'}
     if len(body) > MAX_BODY:
         return None, {'kind': 'oversize'}
-    if _header(headers, 'content-encoding').lower() not in ('', 'identity'):
+    encoding = _header(headers, 'content-encoding').strip().lower()
+    if encoding == 'gzip':
+        try:
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            decoded = decoder.decompress(body, MAX_BODY + 1)
+            if len(decoded) > MAX_BODY or decoder.unconsumed_tail:
+                return None, {'kind': 'oversize', 'stage': 'decoded'}
+            if not decoder.eof or decoder.unused_data:
+                return None, {'kind': 'invalid_encoding', 'reason': 'invalid_gzip'}
+            body = decoded
+        except zlib.error:
+            return None, {'kind': 'invalid_encoding', 'reason': 'invalid_gzip'}
+    elif encoding not in ('', 'identity'):
         return None, {'kind': 'encoded'}
     media_type = _header(headers, 'content-type').split(';', 1)[0].strip().lower()
     return _parse(body, 'form' if media_type == 'application/x-www-form-urlencoded' else 'json', MAX_BODY)
@@ -126,6 +146,16 @@ def _request_fields(value, shape):
     return counts['access_token'] > 0
 
 
+def _credential_observation_id(authorization):
+    if not authorization or len(authorization) > MAX_CREDENTIAL + 7:
+        return 'unknown'
+    match = _CREDENTIAL.fullmatch(authorization)
+    if match is None or len(match.group(1)) > MAX_CREDENTIAL:
+        return 'unknown'
+    credential = match.group(1).encode('ascii')
+    return hmac.new(_credential_observation_key, credential, hashlib.sha256).hexdigest()
+
+
 def summarize_request(host, path, method, headers, body):
     # Do not normalize arbitrary hosts/paths into matches; no substring matching.
     if host.lower() != 'graph.facebook.com':
@@ -148,7 +178,8 @@ def summarize_request(host, path, method, headers, body):
     return {
         'endpoint': match.group(1),
         'method': method if method in ('GET', 'POST') else 'other',
-        'authorization': {'present': any(key.lower() == 'authorization' for key in headers), 'scheme': scheme if auth else 'none', 'stage': 'proxy_wire'},
+        'authorization': {'present': any(key.lower() == 'authorization' for key in headers), 'scheme': scheme if auth else 'none', 'stage': 'proxy_wire',
+                          'credential_observation_id': _credential_observation_id(auth)},
         'query_shape': query_shape,
         'body_shape': body_shape,
         'body_auth_field_present': body_auth_field_present,
