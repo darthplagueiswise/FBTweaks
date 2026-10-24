@@ -9,6 +9,7 @@
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTEmployeeDiagnostics.h"
 #import "../Runtime/FBTMCNativeSessionProbes.h"
+#import "../Runtime/FBTMCQEIsolatedProfile.h"
 extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
@@ -79,11 +80,31 @@ extern void FBTInitEmployeeGroup(void);
         [self.report[@"native_session_probes"][@"fetcher_session_enabled"] boolValue] &&
         [self.report[@"native_session_probes"][@"tigon_session_enabled"] boolValue];
     NSString *readiness = !enabled ? @"Captura pausada" : installed ? @"Captura nativa pronta" : @"Captura incompleta — verifique os hooks";
+    NSDictionary *isolated = FBTMCQEIsolatedProfileStatus();
     NSString *status = [NSString stringWithFormat:@"%@\nPedidos nativos: %@ · conclusões: %@\nCorrelações de transporte: %@\n%@%@",
         readiness, transport[@"native_mc_requests"] ?: @0, transport[@"native_mc_responses"] ?: @0,
         transport[@"native_tigon_correlations"] ?: @0,
         [transport[@"native_mc_fetcher_installed"] boolValue] ? @"" : (transport[@"native_mc_fetcher_failure"] ?: @"Fetcher não instalado. "),
         [transport[@"simple_callback_hooks_installed"] boolValue] ? @"" : (transport[@"simple_callback_failure"] ?: @"Callbacks não instalados.")];
+    NSString *isolatedStatusText = [NSString stringWithFormat:
+        @"Perfil QE isolado: compilado=%@, instalado=%@, armado=%@\nEstado do slot: %@\nHooks invasivos globais: %@",
+        isolated[@"compiled"], isolated[@"installed"], isolated[@"armed"],
+        isolated[@"last_install_state"], isolated[@"global_invasive_hooks"]];
+    NSDictionary *lastIsolated = nil, *lastIsolatedCompletion = nil;
+    for (NSDictionary *event in events.reverseObjectEnumerator) {
+        if (![event[@"process_session_id"] isEqual:process]) continue;
+        if (!lastIsolated && [event[@"event"] isEqual:@"qe_isolated_profile_request"]) lastIsolated = event;
+        if (!lastIsolatedCompletion && [event[@"event"] isEqual:@"qe_isolated_profile_completion"]) lastIsolatedCompletion = event;
+    }
+    NSString *isolatedComparison = lastIsolated ?
+        [NSString stringWithFormat:@"Perfil isolado: %@\nAlterações: %@ · motivo: %@\nAntes: %@\nDepois: %@\nConclusão nativa: %@\nConfirme HTTP real no proxy Whitehat.",
+            lastIsolated[@"experiment_state"] ?: @"não observado",
+            lastIsolated[@"qe_isolated_changed"] ?: @0,
+            lastIsolated[@"qe_isolated_reason"] ?: @"sem motivo",
+            lastIsolated[@"qe_isolated_before"] ?: @"{}",
+            lastIsolated[@"qe_isolated_after"] ?: @"{}",
+            lastIsolatedCompletion[@"native_transport_success"] ?: @"não observada"] :
+        @"Perfil isolado não utilizado nesta sessão; nenhum pedido QE foi modificado.";
     NSString *requestText = request ? [NSString stringWithFormat:@"Pedido %@ · %@ · %@\n%@",
         request[@"request_id"], request[@"request_method"] ?: @"?", request[@"time_utc"] ?: @"", request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa pelo menu nativo.";
     NSString *result = diagnostic.count ? [NSString stringWithFormat:@"HTTP %@ · %@\n%@ bytes recebidos\nCódigo %@ · subcódigo %@ · %@\n%@",
@@ -140,11 +161,15 @@ extern void FBTInitEmployeeGroup(void);
             [NSString stringWithFormat:@"LAB: Employee local %@", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]]];
         [commands addObjectsFromArray:@[@"A", @"B", @"tw", @"employee"]];
     }
+    if (FBTMCQEIsolatedProfileAvailable()) {
+        [controls addObject:@"LAB isolado: QE Full Metadata (1 pedido / 120 s)"];
+        [commands addObject:@"isolated_qe"];
+    }
     self.controlIDs = commands;
     self.rows = @[controls,
-        @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, identityText], historyText,
-        @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
+        @[[status stringByAppendingFormat:@"\n\n%@", isolatedStatusText], [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
+        @[isolatedComparison, requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, identityText], historyText,
+        @[@"Inicie uma captura e mantenha as opções locais constantes. Para usar o LAB QE Full Metadata ISOLADO não arme os probes nativos: eles disputam o mesmo slot e são mutuamente exclusivos. Para diagnóstico observacional tradicional, em Configurações da tweak arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
@@ -182,10 +207,19 @@ extern void FBTInitEmployeeGroup(void);
         FBTInitEmployeeGroup();
         FBTInstallMobileConfigRuntime();
         FBTMobileConfigCancelEmployeeExperiment();
+        FBTMCQEIsolatedProfileCancel();
         FBTEmployeeDiagnosticsReset();
         FBTMobileConfigFetchDiagnosticsReset();
         FBTMobileConfigResponseCaptureArm(@"force_name_download");
     } else if ([command isEqual:@"probes"]) {
+        if (FBTMCQEIsolatedProfileInstalled()) {
+            UIAlertController *warning = [UIAlertController alertControllerWithTitle:@"Probes incompatíveis"
+                message:@"O slot do perfil QE isolado já está instalado. Reinicie o Facebook para usar os probes nativos antigos."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [warning addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:warning animated:YES completion:nil];
+            return;
+        }
         NSString *reason = nil;
         FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &reason);
         FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &reason);
@@ -193,6 +227,7 @@ extern void FBTInitEmployeeGroup(void);
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMCNativeProbeDisableAll();
+        FBTMCQEIsolatedProfileCancel();
         FBTMobileConfigResponseCaptureDisarm();
         FBTMobileConfigCancelEmployeeExperiment();
         FBTEmployeeCancelTWProbe();
@@ -200,7 +235,19 @@ extern void FBTInitEmployeeGroup(void);
     else if ([command isEqual:@"local"]) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
     else if (FBTQEInvasiveHooksAllowed() && ([command isEqual:@"A"] || [command isEqual:@"B"])) FBTMobileConfigArmEmployeeExperiment([command isEqual:@"B"]);
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();
-    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
+    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTMCQEIsolatedProfileCancel(); FBTEmployeeCancelTWProbe(); }
+    else if ([command isEqual:@"isolated_qe"]) {
+        NSString *reason = nil;
+        BOOL armed = FBTMCQEIsolatedProfileArm(&reason);
+        UIAlertController *notice = [UIAlertController alertControllerWithTitle:
+            (armed ? @"QE Full Metadata isolado armado" : @"Perfil isolado indisponível")
+            message:(armed ?
+                @"O próximo POST mobileconfig_qe_info em até 120 segundos será alterado, se os nove campos forem válidos. Não arme os probes Tigon/fetcher. Execute Force Name Download e verifique o request final no proxy." :
+                [NSString stringWithFormat:@"Sem alteração de requisição: %@. Ative Log QE-info e reinicie o app caso já tenha armado os probes antigos.", reason ?: @"validação falhou"])
+            preferredStyle:UIAlertControllerStyleAlert];
+        [notice addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:notice animated:YES completion:nil];
+    }
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"employee"]) {
         [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
         FBTInitEmployeeGroup();
