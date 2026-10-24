@@ -5,6 +5,7 @@ on:
     branches:
       - 'flags'
       - 'main'
+      - 'codex/qe-unified-pipeline-diagnostics'
   workflow_dispatch:
   pull_request:
     branches: ['flags', 'codex/qe-session-proxy-debug']
@@ -153,6 +154,7 @@ jobs:
           clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
           /tmp/fbt-service-tests
           python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_pipeline_audit.py" -v
 
       - name: Test native query correlation
         run: |
