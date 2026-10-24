@@ -1,3 +1,4 @@
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTNetworkInspectorViewController.h"
 #import "../Runtime/FBTNetworkInspectorStore.h"
 #import "../Runtime/FBTMCNativeSessionProbes.h"
@@ -25,6 +26,8 @@ static NSString *FBTNIJSON(NSDictionary *record) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView);
     self.title = @"Request / Response";
     UISegmentedControl *tabs = [[UISegmentedControl alloc] initWithItems:@[@"Resumo", @"Request", @"HTTP", @"Nativo"]];
     tabs.selectedSegmentIndex = 0;
@@ -114,7 +117,9 @@ static NSString *FBTNIJSON(NSDictionary *record) {
 @implementation FBTNetworkInspectorViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Network Inspector";
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView);
+    self.title = @"Inspetor de rede";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 70;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -158,6 +163,7 @@ static NSString *FBTNIJSON(NSDictionary *record) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"FBTInspectorRow"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"FBTInspectorRow"];
+    FBTUIKit26ConfigureTableCell(cell);
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.textLabel.numberOfLines = 0;
     cell.detailTextLabel.numberOfLines = 0;

@@ -1,3 +1,4 @@
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTQERequestOptionsViewController.h"
 #import "../FBTDefaults.h"
 #import "../Runtime/FBTQERequestOptions.h"
@@ -12,7 +13,9 @@
         @"with_groups", @"with_group_params", @"with_gatekeepers", @"needs_name", @"skip_qe"];
 }
 - (void)viewDidLoad {
-    [super viewDidLoad]; self.title = @"Opções dos pedidos QE";
+    [super viewDidLoad];
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView); self.title = @"Opções dos pedidos QE";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 60;
 }
@@ -35,6 +38,7 @@
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    FBTUIKit26ConfigureTableCell(cell);
     cell.textLabel.numberOfLines = 0; cell.detailTextLabel.numberOfLines = 0;
     NSDictionary *state = FBTQERequestOptionsSnapshot();
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -47,10 +51,12 @@
             toggle.on = [state[path.row == 0 ? @"enabled" : @"all_qe_info"] boolValue];
         } else {
             NSString *key = self.optionKeys[path.row]; cell.textLabel.text = key;
-            cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+            cell.textLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote] scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
             toggle.on = [state[@"values"][key] boolValue];
         }
         [toggle addTarget:self action:@selector(optionChanged:) forControlEvents:UIControlEventValueChanged];
+        toggle.accessibilityLabel = cell.textLabel.text;
+        toggle.accessibilityIdentifier = path.section == 1 ? [@"fbtweak.qe." stringByAppendingString:self.optionKeys[path.row]] : path.row == 0 ? @"fbtweak.qe.enabled" : @"fbtweak.qe.all";
         cell.accessoryView = toggle;
     } else if (path.section == 2) {
         cell.textLabel.text = path.row == 0 ? @"Restaurar opções nativas de nomes" : @"Todos with_* = true; needs_name = true; skip_qe = false";

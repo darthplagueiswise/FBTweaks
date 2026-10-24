@@ -16,6 +16,16 @@ int main() { @autoreleasepool {
     Check(Has(home,@"dest",@"namesdiagnostic"),@"QE diagnosis must have a direct home route");
     Check(Has(home,@"dest",@"networkinspector"),@"network inspector must have a direct home route");
     Check([FBTSettingsCatalog categories].count==5,@"five clear areas");
+    NSMutableSet *reachableKeys=[NSMutableSet set];
+    for(NSDictionary *row in home) {
+        if(row[@"key"]) [reachableKeys addObject:row[@"key"]];
+        if([row[@"dest"] hasPrefix:@"category:"]) {
+            NSString *category=[row[@"dest"] substringFromIndex:9];
+            NSArray *children=Rows([FBTSettingsCatalog sectionsForCategory:category query:@""]);
+            Check(children.count>0,@"every home area opens a populated page");
+            for(NSDictionary *child in children) if(child[@"key"]) [reachableKeys addObject:child[@"key"]];
+        }
+    }
     NSMutableSet *switches=[NSMutableSet set], *destinations=[NSMutableSet set], *actions=[NSMutableSet set];
     for(NSDictionary *s in [FBTSettingsCatalog allSections]) for(NSDictionary *r in s[@"rows"]) {
         if(r[@"key"]) { Check(![switches containsObject:r[@"key"]],@"switch owned by one area"); [switches addObject:r[@"key"]]; }
@@ -24,13 +34,17 @@ int main() { @autoreleasepool {
         Check([r[@"title"] length]>0 && [r[@"icon"] length]>0,@"all rows have a title and symbol");
     }
     for(NSString *key in @[@"fbt_master_enabled",@"fbt_open_three_finger_double_tap_enabled",@"fbt_employee_enabled",@"fbt_test_user_enabled",@"fbt_known_dogfood_enabled",@"fbt_react_native_internal_enabled",@"fbt_beta_build_enabled",@"fbt_dogfood_sweep_enabled",@"fbt_internal_debug_sweep_enabled",@"fbt_internal_c_imports_enabled",@"fbt_easygating_internal_enabled",@"fbt_liquidglass_enabled",@"fbt_floating_tabbar_enabled",@"fbt_dating_enabled",@"fbt_mobileconfig_runtime_enabled",@"fbt_mobileconfig_native_ui_warmup_enabled",@"fbt_mobileconfig_capture_enabled",@"fbt_mobileconfig_fetch_diagnostics_enabled",@"fbt_mobileconfig_overrides_enabled",@"fbt_runtime_bool_browser_enabled",@"fbt_mc_native_tigon_probe_session",@"fbt_mc_native_fetcher_probe_session"])
-        Check([switches containsObject:key],[NSString stringWithFormat:@"existing preference preserved: %@",key]);
+        Check([switches containsObject:key] && [reachableKeys containsObject:key],[NSString stringWithFormat:@"existing preference preserved and reachable: %@",key]);
     for(NSString *dest in @[@"localconfig",@"qeoptions",@"namesdiagnostic",@"networkinspector",@"mobileconfig",@"bool",@"boollive",@"livetrace",@"headline",@"flags",@"queries",@"feat:LiquidGlass",@"feat:FloatingTab",@"feat:DatingGemstone"])
         Check([destinations containsObject:dest],@"existing destination preserved");
     for(NSString *action in @[@"native",@"rn_internal",@"whitehat",@"ensure_mc_file",@"qe_ab",@"clear"])
         Check([actions containsObject:action],@"existing action preserved");
     Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"FORCE NAME"]),@"dest",@"qeoptions"),@"search finds old vocabulary");
     Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"skip_qe"]),@"dest",@"qeoptions"),@"search finds protocol field");
+    Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"Aquecer"]),@"key",@"fbt_mobileconfig_native_ui_warmup_enabled"),@"renamed warmup remains searchable");
+    Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"Capturar leituras"]),@"key",@"fbt_mobileconfig_capture_enabled"),@"renamed read capture remains searchable");
+    Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"OS beta predicate"]),@"key",@"fbt_beta_build_enabled"),@"legacy beta name remains searchable");
+    Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"Criar mc_overrides.json nativo"]),@"action",@"ensure_mc_file"),@"legacy file action remains searchable");
     Check(Has(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"diagnostico qe"]),@"dest",@"namesdiagnostic"),@"search tolerates accents and all tokens");
     Check(Rows([FBTSettingsCatalog sectionsForCategory:nil query:@"no-such-setting-fixture"]).count==0,@"no results stays empty");
     Check(!Has(Rows([FBTSettingsCatalog sectionsForCategory:@"appearance" query:@"device"]),@"dest",@"namesdiagnostic"),@"category search cannot escape its area");

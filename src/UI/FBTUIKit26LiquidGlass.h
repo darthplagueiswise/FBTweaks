@@ -2,6 +2,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Opt-in styling for the tweak's own settings. Content uses grouped semantic
+// surfaces; UIKit owns navigation/control glass. Effects may be nil when the
+// accessibility preferences require an opaque surface.
 BOOL FBTUIKit26IsAvailable(void);
 UIVisualEffect *_Nullable FBTUIKit26GlassEffect(BOOL clearStyle, BOOL interactive, UIColor *_Nullable tintColor);
 UIVisualEffect *_Nullable FBTUIKit26GlassContainerEffect(CGFloat spacing);
@@ -12,6 +15,7 @@ UIColor *FBTUIKit26SeparatorColor(void);
 void FBTUIKit26ApplyContainerBackgroundToViewController(UIViewController *vc);
 void FBTUIKit26ConfigureViewController(UIViewController *vc);
 void FBTConfigureNavigationChromeForGlass(UIViewController *vc);
+// Compatibility names: remove only our legacy bubble and use the native title.
 void FBTUIKit26InstallNavigationTitleBubble(UIViewController *vc);
 void FBTUIKit26RefreshNavigationTitleBubble(UIViewController *vc);
 void FBTUIKit26ConfigureScrollView(UIScrollView *scrollView);

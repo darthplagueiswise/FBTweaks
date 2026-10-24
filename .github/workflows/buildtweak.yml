@@ -38,6 +38,20 @@ jobs:
           fi
           /tmp/fbt-settings-catalog-tests
 
+      - name: Render settings UIKit previews
+        timeout-minutes: 12
+        run: |
+          cd main
+          bash scripts/preview_settings_ui.sh "$RUNNER_TEMP/settings-preview"
+
+      - name: Upload settings UIKit previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FBTweak-Settings-Preview-${{ github.run_number }}
+          path: ${{ runner.temp }}/settings-preview
+          if-no-files-found: warn
+
       - name: Install Dependencies
         run: brew install ldid dpkg make
 

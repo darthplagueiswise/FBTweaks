@@ -1,3 +1,4 @@
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTLocalConfigViewController.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../Runtime/FBTLocalConfigCatalog.h"
@@ -28,6 +29,8 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView);
     self.title = self.configuration ? self.configuration[@"name"] : @"MobileConfig local";
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
@@ -181,6 +184,7 @@
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"local"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];
+    FBTUIKit26ConfigureTableCell(cell);
     NSDictionary *row = self.rows[indexPath.row];
     cell.textLabel.text = [NSString stringWithFormat:@"%@: %@", row[@"id"], row[@"name"]];
     cell.textLabel.numberOfLines = 0;

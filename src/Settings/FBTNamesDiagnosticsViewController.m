@@ -1,3 +1,4 @@
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTNamesDiagnosticsViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
@@ -18,13 +19,16 @@ extern void FBTInitEmployeeGroup(void);
 @property (nonatomic, copy) NSDictionary *report;
 @property (nonatomic, copy) NSArray<NSString *> *controlIDs;
 @property (nonatomic, copy) NSArray<NSDictionary *> *history;
+@property (nonatomic, assign) BOOL showTechnicalDetails;
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows;
 @end
 
 @implementation FBTNamesDiagnosticsViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Fetch e contexto QE";
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView);
+    self.title = @"Diagnóstico QE";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 64;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -141,17 +145,22 @@ extern void FBTInitEmployeeGroup(void);
         [request[@"device_id_observation_id"] unsignedLongLongValue] ? request[@"device_id_observation_id"] : @"não disponível", request[@"qe_request_options_state"] ?: @"não observado"];
     NSMutableArray *controls = [@[@"Iniciar nova captura", @"Armar probes desta sessão", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local", @"Cancelar testes temporários"] mutableCopy];
     NSMutableArray *commands = [@[@"start", @"probes", @"pause", @"copy", @"local", @"cancel"] mutableCopy];
-    [controls addObject:@"Opções dos pedidos QE / Force Name Download"];
+    [controls addObject:@"Opções dos pedidos QE"];
     [commands addObject:@"options"];
     if (FBTQEInvasiveHooksAllowed()) {
         [controls addObjectsFromArray:@[@"LAB: próximo pedido QE original", @"LAB: próximo pedido QE + is_employee=true", @"LAB: tw_is_employee=true por 120 s",
             [NSString stringWithFormat:@"LAB: Employee local %@", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]]];
         [commands addObjectsFromArray:@[@"A", @"B", @"tw", @"employee"]];
     }
+    [controls addObject:self.showTechnicalDetails ? @"Ocultar detalhes técnicos" : @"Mostrar detalhes técnicos"];
+    [commands addObject:@"details"];
     self.controlIDs = commands;
+    NSArray *evidenceRows = self.showTechnicalDetails ?
+        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText] :
+        @[requestText, result, deviceText];
     self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
+        evidenceRows, historyText,
         @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
@@ -163,10 +172,12 @@ extern void FBTInitEmployeeGroup(void);
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"NamesDiagnostic"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"NamesDiagnostic"];
+    FBTUIKit26ConfigureTableCell(cell);
     cell.textLabel.numberOfLines = 0;
     cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     cell.textLabel.text = self.rows[path.section][path.row];
     cell.textLabel.textColor = path.section == 0 ? UIColor.systemBlueColor : UIColor.labelColor;
+    cell.accessoryType = path.section == 3 && self.history.count ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
     cell.selectionStyle = (path.section == 0 || (path.section == 3 && self.history.count)) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
     return cell;
 }
@@ -207,6 +218,7 @@ extern void FBTInitEmployeeGroup(void);
         FBTEmployeeCancelTWProbe();
     } else if ([command isEqual:@"copy"]) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
     else if ([command isEqual:@"local"]) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if ([command isEqual:@"details"]) self.showTechnicalDetails = !self.showTechnicalDetails;
     else if ([command isEqual:@"options"]) [self.navigationController pushViewController:[[FBTQERequestOptionsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
     else if (FBTQEInvasiveHooksAllowed() && ([command isEqual:@"A"] || [command isEqual:@"B"])) FBTMobileConfigArmEmployeeExperiment([command isEqual:@"B"]);
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();

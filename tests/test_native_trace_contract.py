@@ -10,8 +10,8 @@ class NativeTraceContract(unittest.TestCase):
         self.assertIn('FBTKeyNativeTraceEnabled:               @(NO)', d)
     def test_live_trace_is_reachable(self):
         s=src("src/Settings/FBTSettingsViewController.m")
-        self.assertIn('@"dest": @"livetrace"',s)
-        self.assertIn('@"dest": @"boollive"',s)
+        self.assertIn('@"livetrace"',src("src/Settings/FBTSettingsCatalog.m"))
+        self.assertIn('@"boollive"',src("src/Settings/FBTSettingsCatalog.m"))
         self.assertIn('FBTRuntimeBoolObserve(e)',s)
     def test_passive_observation_is_persisted(self):
         s=src("src/Runtime/FBTRuntimeBoolBrowser.m")
