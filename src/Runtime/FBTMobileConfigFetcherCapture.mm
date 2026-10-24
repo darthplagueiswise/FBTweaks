@@ -35,8 +35,10 @@ static fbt_mc_evidence::ServiceRegistry sObservedServices;
 static fbt_mc_evidence::ServiceRegistry sObservedFetchers;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
 static fbt_mc_probe::OneShot sRequestExperiment;
+static fbt_mc_probe::OneShot sFullMetadataExperiment;
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+    sFullMetadataExperiment.cancel();
     NSString *identifier = NSUUID.UUID.UUIDString;
     sRequestExperiment.arm(addEmployeeField, identifier.UTF8String, CACurrentMediaTime());
     FBTMobileConfigFetchDiagnosticsRecord(@"qe_experiment_armed", @{
@@ -44,6 +46,27 @@ void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
         @"experiment_state": @"armed_next_QE_only", @"capture_window_seconds": @120});
 }
 void FBTMobileConfigCancelEmployeeExperiment(void) { sRequestExperiment.cancel(); }
+BOOL FBTMobileConfigArmFullMetadataExperiment(void) {
+    if (!FBTQEInvasiveHooksAllowed() ||
+        ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return NO;
+    // Do not claim success if no ABI-verified native fetcher slot was installed.
+    FBTMobileConfigFetcherCaptureInstall();
+    if (!sFetcherInstalled) return NO;
+    sRequestExperiment.cancel();
+    NSString *identifier = NSUUID.UUID.UUIDString;
+    sFullMetadataExperiment.arm(false, identifier.UTF8String, CACurrentMediaTime());
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_full_metadata_armed", @{
+        @"experiment_id": identifier, @"experiment_profile": @"C_qe_full_metadata",
+        @"experiment_state": @"armed_next_QE_only", @"capture_window_seconds": @120,
+        @"scope": @"LAB_only_native_parameter_pairs_before_Tigon_request_builder"});
+    return YES;
+}
+void FBTMobileConfigCancelFullMetadataExperiment(void) { sFullMetadataExperiment.cancel(); }
+NSDictionary *FBTMobileConfigFullMetadataExperimentStatus(void) {
+    auto pending = sFullMetadataExperiment.pending(CACurrentMediaTime());
+    return @{@"armed": @(pending.mode >= 0), @"profile": @"C_qe_full_metadata",
+        @"scope": @"single_POST_mobileconfig_qe_info_120s_LAB_only"};
+}
 NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void) {
     auto pending = sRequestExperiment.pending(CACurrentMediaTime());
     return @{@"armed": @(pending.mode >= 0), @"profile": pending.mode < 0 ? @"native" : pending.mode ? @"B_is_employee_true" : @"A_native"};
@@ -219,6 +242,27 @@ static NSString *FBTMCText(const std::string &s) {
     return [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding] ?: @"<non_utf8>";
 }
 
+static NSDictionary *FBTMCProtocolOptions(const FBTMCRequestPairs &pairs) {
+    // Whitelist only; no account, queries, identity or raw request values.
+    static const char *const fields[] = {
+        "needs_name", "skip_qe", "with_experiments", "with_params",
+        "with_groups", "with_group_params", "with_gatekeepers",
+        "with_universe_params", "with_current_experiment_group"
+    };
+    NSMutableDictionary *options = [NSMutableDictionary dictionary];
+    for (const char *field : fields) {
+        for (const auto &pair : pairs) {
+            if (pair.first != field) continue;
+            NSString *key = [NSString stringWithUTF8String:field];
+            BOOL valid = pair.second == "true" || pair.second == "false" ||
+                         pair.second == "0" || pair.second == "1";
+            if (options[key]) options[key] = @"duplicate";
+            else options[key] = valid ? FBTMCText(pair.second) : @"invalid";
+        }
+    }
+    return options;
+}
+
 static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         const std::string &purpose, const FBTMCRequestPairs &params,
         FBTMCCompletion completion, const std::string &routingHint, uint64_t target) {
@@ -226,15 +270,26 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] ||
         (!FBTQEInvasiveHooksAllowed() && !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey))) {
         FBTMobileConfigCancelEmployeeExperiment();
+        FBTMobileConfigCancelFullMetadataExperiment();
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
     // Session-only diagnostics are strictly observational; the legacy LAB
     // request-field A/B experiment is never applied through this toggle.
-    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
-    auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
+    if (!FBTQEInvasiveHooksAllowed()) {
+        sRequestExperiment.cancel();
+        sFullMetadataExperiment.cancel();
+    }
+    const double now = CACurrentMediaTime();
+    auto selected = sRequestExperiment.consume(method, purpose, now);
+    auto fullSelected = sFullMetadataExperiment.consume(method, purpose, now);
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
+    NSDictionary *originalProtocolOptions = FBTMCProtocolOptions(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
+    fbt_mc_probe::MetadataResult metadataResult;
+    if (fullSelected.mode >= 0 && selected.mode < 0)
+        metadataResult = fbt_mc_probe::applyFullMetadata(*outgoing);
+    BOOL metadataAttempted = fullSelected.mode >= 0;
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
     // Binary TigonRequest constructor and device logs prove argument 1 is the
@@ -244,14 +299,25 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"request_method": requestMethod, @"capture_reason": requestLabel,
         @"request_metadata_source": @"native_fetcher_arguments",
         @"transport": @"FBMobileConfigTigonFetcher", @"request_param_count": @(outgoing->size()),
-        @"experiment_profile": selected.mode < 0 ? @"native" : selected.mode ? @"B_is_employee_true" : @"A_native",
-        @"experiment_state": selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
+        @"experiment_profile": metadataAttempted ? @"C_qe_full_metadata" :
+            selected.mode < 0 ? @"native" : selected.mode ? @"B_is_employee_true" : @"A_native",
+        @"experiment_state": metadataAttempted ? (metadataResult.applied ? @"nine_fields_validated" :
+            @"profile_rejected_original_fields_preserved") :
+            selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
         @"employee_field_added": @(added),
+        @"metadata_profile_attempted": @(metadataAttempted),
+        @"metadata_profile_applied": @(metadataAttempted && metadataResult.applied),
+        @"metadata_fields_changed": @(metadataResult.changed),
+        @"metadata_profile_reason": metadataAttempted ?
+            FBTMCText(metadataResult.reason) : @"not_armed",
+        @"request_protocol_options_before": originalProtocolOptions,
+        @"request_protocol_options_after": FBTMCProtocolOptions(*outgoing),
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
     if (selected.mode >= 0) details[@"experiment_id"] = FBTMCText(selected.id);
+    if (metadataAttempted) details[@"experiment_id"] = FBTMCText(fullSelected.id);
     for (const auto &pair : *outgoing) {
         // Only public protocol field names are allowed; account/token values and
         // regex/name contents are never serialized. Booleans are useful for 400s.
@@ -398,6 +464,7 @@ void FBTMobileConfigFetcherCaptureInstall(void) {
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
     return @{@"native_mc_fetcher_installed": @(sFetcherInstalled),
         @"employee_request_experiment": FBTMobileConfigEmployeeExperimentStatus(),
+        @"full_metadata_request_experiment": FBTMobileConfigFullMetadataExperimentStatus(),
         @"auth_validation_reads": FBTMCAuthReadSnapshot(),
         @"auth_validation_read_hook_failure": sAuthReadHookFailure ?: @"none_or_not_attempted",
         @"native_mc_fetcher_failure": sFetcherFailure ?: @"not_attempted",
