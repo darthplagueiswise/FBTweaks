@@ -78,12 +78,54 @@ def one(path):
             "server_outcome":classification,
             "credential_present_not_authorized":bool(data.get("authorization_credential_present"))}
 
-def summarize(paths):
+def proxy_wire(path):
+    """Join one complete QE-info request/response on a proxy-local exchange only."""
+    source=Path(path)
+    if not source.is_file() or source.stat().st_size > LIMIT:
+        raise ValueError("proxy_jsonl_missing_or_oversize")
+    active, complete = {}, []
+    with source.open(encoding="utf-8") as handle:
+        for position,line in enumerate(handle):
+            if position>=1024: raise ValueError("too_many_proxy_events")
+            event=json.loads(line)
+            if not isinstance(event,dict):continue
+            eid=event.get("local_exchange_id")
+            data=event.get("summary")
+            if not isinstance(eid,str) or not isinstance(data,dict):continue
+            if event.get("event")=="request" and data.get("endpoint")=="mobileconfig_qe_info":
+                active[eid]=data
+            elif event.get("event")=="response" and eid in active:
+                complete.append((active.pop(eid),data))
+    if len(complete)!=1:
+        return {"wire":"not_observed" if not complete else "ambiguous_multiple_exchanges",
+                "exact_native_join":False}
+    request,response=complete[0]
+    form=request.get("body_shape")
+    form=form if isinstance(form,dict) else {}
+    hash_fields=form.get("hash_fields")
+    hashes={}
+    for key in ("query_hash","one_query_hash"):
+        value=hash_fields.get(key) if isinstance(hash_fields,dict) else None
+        state=value.get("state") if isinstance(value,dict) else None
+        length=value.get("length") if isinstance(value,dict) else None
+        hashes[key]={"state":state if state in ("present","absent","duplicate","empty") else "not_observable",
+                     "length":min(length,1000000) if type(length) is int and length>=0 else 0}
+    detail=response.get("error")
+    classification=detail.get("classification") if isinstance(detail,dict) else None
+    status=response.get("http_status")
+    return {"wire":"observed_by_explicit_proxy","exact_native_join":False,
+            "native_join":"manual_capture_window_only",
+            "request_body_kind":form.get("kind") if form.get("kind") in ("form","json","oversize","invalid","encoded","unavailable") else "other",
+            "post_hashes":hashes,
+            "http_status":status if type(status) is int and 100<=status<=599 else None,
+            "server_error":classification if classification in ("eligibility","unclassified") else "not_classified"}
+
+def summarize(paths, proxy_jsonl=None):
     records=[one(path) for path in paths]
     if not records: raise ValueError("no_captures")
     outcomes = Counter(r["server_outcome"] for r in records)
     identities = Counter(r["device_id_format"] for r in records)
-    return {"schema":1,"capture_count":len(records),
+    report = {"schema":1,"capture_count":len(records),
             "query_counts":sorted(set(r["queries_count"] for r in records)),
             "query_schema": "valid_unique" if all(r["queries_parsed"] and r["queries_count"] and
                 r["queries_distinct"]==r["queries_count"] and not r["queries_invalid_format"] for r in records)
@@ -103,12 +145,20 @@ def summarize(paths):
             "not_proven":["QE_info_requires_query_hash","QE_info_requires_one_query_hash",
                 "device_id_literal_is_sole_cause","OAuth_presence_means_eligible","any_local_override_grants_server_access"],
             "privacy":"sanitized_single_line_no_raw_account_ids_tokens_queries_or_error_text"}
+    if proxy_jsonl is not None:
+        wire=proxy_wire(proxy_jsonl)
+        report["proxy_wire"]=wire
+        report["pipeline"]["final_post_body"]=wire["wire"]
+        if wire["wire"]=="observed_by_explicit_proxy":
+            report["pipeline"]["backend_wire"]=wire["server_error"]
+    return report
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("captures",nargs="+")
+    parser.add_argument("--proxy-jsonl",default=None,help="single isolated Whitehat QE request/response events.jsonl")
     arguments=parser.parse_args()
-    try: print(json.dumps(summarize(arguments.captures),sort_keys=True,separators=(",",":"),ensure_ascii=False))
+    try: print(json.dumps(summarize(arguments.captures,arguments.proxy_jsonl),sort_keys=True,separators=(",",":"),ensure_ascii=False))
     except (ValueError,OSError,TypeError,UnicodeError) as error:
         parser.error("Invalid capture: "+str(error))
 
