@@ -13,7 +13,7 @@ import threading
 from urllib.parse import parse_qsl
 import uuid
 
-MAX_BODY = 65536
+MAX_BODY = 256 * 1024
 MAX_QUERY = 8192
 MAX_FIELDS = 64
 MAX_CREDENTIAL = 16384
@@ -21,6 +21,7 @@ MAX_CREDENTIAL = 16384
 _credential_observation_key = secrets.token_bytes(32)
 _CREDENTIAL = re.compile(r'(?:Bearer|OAuth) +([-A-Za-z0-9._~+/]+=*)', re.IGNORECASE | re.ASCII)
 ENDPOINTS = frozenset(('mobileconfig_qe_info', 'mobileconfig', 'mobileconfigsessionless'))
+GRAPH_HOSTS = frozenset(('graph.facebook.com','graph.prod.facebook.com','graph.trunkstable.facebook.com'))
 SHAPE_FIELDS = frozenset(('queries', 'query', 'variables', 'params', 'data', 'configs', 'experiments', 'query_results', 'error'))
 BOOLEAN_FIELDS = frozenset(('needs_name', 'skip_qe', 'with_universe_params',
     'with_current_experiment_group', 'with_only_current_experiment_group',
@@ -130,6 +131,22 @@ def _request_fields(value, shape):
                               _api_version(fields[field]) if field == 'api_version' else _boolean(fields[field]))
     if options:
         shape['protocol_options'] = options
+    # Actual HTTP payload observation, not a guess based on URL-only getters.
+    # Never emit hash values; length and presence are sufficient for diagnosis.
+    shape['hash_fields'] = {}
+    for key in ('query_hash','one_query_hash'):
+        number = counts[key]
+        if number == 0:
+            state = 'absent'
+            length = 0
+        elif number > 1:
+            state = 'duplicate'
+            length = 0
+        else:
+            value = fields[key]
+            length = len(value) if isinstance(value,str) else 0
+            state = 'present' if length else 'empty'
+        shape['hash_fields'][key] = {'state':state,'length':min(length,1000000)}
     shape['app_id_present'] = counts['app_id'] > 0
     shape['app_id_count'] = min(counts['app_id'], 1000)
     if counts['queries']:
@@ -158,7 +175,7 @@ def _credential_observation_id(authorization):
 
 def summarize_request(host, path, method, headers, body):
     # Do not normalize arbitrary hosts/paths into matches; no substring matching.
-    if host.lower() != 'graph.facebook.com':
+    if host.lower() not in GRAPH_HOSTS:
         return None
     resource, _, query = path.partition('?')
     match = _PATH.fullmatch(resource)

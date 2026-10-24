@@ -255,8 +255,10 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"experiment_state": selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
         @"employee_field_added": @(added),
         @"routing_hint_present": @(!routingHint.empty()),
-        @"query_hash_source": @"native_request_parameter_pairs",
-        @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
+        @"query_hash_source": @"native_request_parameter_pairs_before_serialization",
+        @"query_hash_state": @"absent_in_native_pairs", @"one_query_hash_state": @"absent_in_native_pairs",
+        @"query_hash_contract": @"not_verified_for_qe_info",
+        @"query_hash_wire_observation": @"not_observed_here"} mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
     details[@"qe_request_options_state"] = @(fbt_qe_options::label(optionsResult));
     auto device = FBTDeviceIdentityRegistry().observe(params);
@@ -266,6 +268,11 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     details[@"device_id_observation_id"] = @(device.observation);
     details[@"device_id_state"] = device.count == 0 ? @"missing" : device.count > 1 ? @"duplicate" :
         device.bytes == 0 ? @"empty" : @"present_not_validated";
+    // Do not rewrite the native "device_id" marker to a synthetic UUID:
+    // the original refreshNames can emit this literal, and a real UUID
+    // also received policy HTTP 400 in captured experiments.
+    details[@"device_id_literal_state"] = strcmp(device.format, "field_name_literal") == 0
+        ? @"native_literal_observed_unvalidated" : @"not_native_literal";
     if (optionsResult == fbt_qe_options::Result::Applied) {
         details[@"experiment_profile"] = @"qe_custom_options";
         details[@"experiment_state"] = @"ten_options_applied";
@@ -287,7 +294,28 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             NSData *raw = [queries dataUsingEncoding:NSUTF8StringEncoding];
             id parsed = raw ? [NSJSONSerialization JSONObjectWithData:raw options:NSJSONReadingFragmentsAllowed error:nil] : nil;
             parameterShape[@"queries_is_array"] = @([parsed isKindOfClass:NSArray.class]);
-            if ([parsed isKindOfClass:NSArray.class]) parameterShape[@"queries_count"] = @([parsed count]);
+            if ([parsed isKindOfClass:NSArray.class]) {
+                NSArray *queryItems = parsed;
+                parameterShape[@"queries_count"] = @(queryItems.count);
+                // Bounded schema assessment, never export the query strings.
+                NSUInteger valid = 0, malformed = 0;
+                NSMutableSet *distinct = [NSMutableSet setWithCapacity:MIN(queryItems.count, (NSUInteger)8192)];
+                for (id item in queryItems) {
+                    if (![item isKindOfClass:NSString.class] || ![item length] ||
+                        [item length] > 16384) { ++malformed; continue; }
+                    NSString *query = item;
+                    NSCharacterSet *acceptable = [NSCharacterSet characterSetWithCharactersInString:@"0123456789:"];
+                    if ([[query stringByTrimmingCharactersInSet:acceptable] length]) {
+                        ++malformed; continue;
+                    }
+                    ++valid;
+                    if (distinct.count < 8192) [distinct addObject:query];
+                }
+                parameterShape[@"queries_format_valid_count"] = @(valid);
+                parameterShape[@"queries_format_unexpected_count"] = @(malformed);
+                parameterShape[@"queries_distinct_bounded_count"] = @(distinct.count);
+                parameterShape[@"queries_duplicates_bounded"] = @(valid > distinct.count);
+            }
         }
         if (std::find(allowed.begin(), allowed.end(), pair.first) != allowed.end()) {
             NSString *key = FBTMCText(pair.first);

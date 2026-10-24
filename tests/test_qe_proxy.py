@@ -49,14 +49,19 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual({key: summary['authorization'][key] for key in ('present', 'scheme', 'stage')},
                          {'present': True, 'scheme': 'bearer', 'stage': 'proxy_wire'})
         self.assertEqual(summary['body_shape']['queries'], {'kind': 'object', 'count': 1})
-        self.assertEqual(summary['query_shape'], {'kind': 'form', 'fields': [], 'app_id_present': False, 'app_id_count': 0})
+        self.assertEqual(summary['query_shape']['kind'], 'form')
+        self.assertEqual(summary['query_shape']['fields'], [])
+        self.assertEqual(summary['query_shape']['app_id_present'], False)
+        self.assertEqual(summary['query_shape']['app_id_count'], 0)
+        self.assertEqual(summary['query_shape']['hash_fields']['query_hash']['state'], 'absent')
+        self.assertEqual(summary['query_shape']['hash_fields']['one_query_hash']['state'], 'absent')
         self.assertTrue(summary['body_auth_field_present'])
         self.assertEqual(self.request(headers={})['authorization']['present'], False)
         self.assertEqual(self.request(headers={'authorization': ''})['authorization']['present'], True)
         self.assertEqual(self.request(headers={'AUTHORIZATION': 'SECRET'})['authorization']['scheme'], 'other')
 
     def test_parsing_is_bounded_and_malformed_input_has_fixed_labels(self):
-        self.assertEqual(self.request(body=b'x' * 65537)['body_shape'], {'kind': 'oversize'})
+        self.assertEqual(self.request(body=b'x' * (core.MAX_BODY + 1))['body_shape'], {'kind': 'oversize'})
         self.assertEqual(self.request(body=b'{bad SECRET')['body_shape'], {'kind': 'invalid'})
         self.assertEqual(self.request(path='/mobileconfig?' + 'x=' + 's' * 8193)['query_shape'], {'kind': 'oversize'})
         self.assertEqual(self.request(body=b'[' * 1100)['body_shape'], {'kind': 'invalid'})
@@ -211,7 +216,7 @@ class AddonTests(unittest.TestCase):
         self.assertLess(len(encoded), 65536)
         shape = core.summarize_response(400, {'content-encoding': 'gzip'}, encoded)['body_shape']
         self.assertEqual(shape, {'kind': 'oversize', 'stage': 'decoded'})
-        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, b'x' * 65537)['body_shape']
+        shape = core.summarize_response(400, {'content-encoding': 'gzip'}, b'x' * (core.MAX_BODY + 1))['body_shape']
         self.assertEqual(shape, {'kind': 'oversize'})
         exact = gzip.compress(b'"' + b'S' * 65534 + b'"', mtime=0)
         self.assertEqual(core.summarize_response(200, {'content-encoding': 'gzip'}, exact)['body_shape'], {'kind': 'scalar'})
@@ -315,7 +320,7 @@ class CATests(unittest.TestCase):
             cmd = proxy_command(session, 'mitmdump', '127.0.0.1', 8080)
             self.assertIn('confdir=' + str(confdir), cmd)
             self.assertIn('flow_detail=0', cmd)
-            self.assertIn('stream_large_bodies=64k', cmd)
+            self.assertIn('stream_large_bodies=256k', cmd)
             self.assertIn('qe_output=' + str(session['events']), cmd)
             self.assertNotIn('ssl_insecure=true', cmd)
             self.assertNotIn('-w', cmd)
@@ -436,6 +441,36 @@ class LiveMitmproxyTests(unittest.TestCase):
                 upstream.shutdown()
                 upstream.server_close()
                 thread.join(timeout=2)
+
+
+
+class WireHashTests(unittest.TestCase):
+    def test_large_form_hash_fields_are_captured_without_values(self):
+        query_blob='35:1:2,' * 18000
+        raw=('needs_name=true&skip_qe=false&queries='+query_blob+
+             '&query_hash=PRIVATEHASH&one_query_hash=PRIVATEONE').encode()
+        info=core.summarize_request('graph.prod.facebook.com',
+             '/mobileconfig_qe_info','POST',
+             {'Content-Type':'application/x-www-form-urlencoded',
+              'Authorization':'OAuth SECRET_DO_NOT_EXPORT'},raw)
+        self.assertIsNotNone(info)
+        self.assertEqual(info['body_shape']['kind'],'form')
+        self.assertEqual(info['body_shape']['hash_fields']['query_hash'],{'state':'present','length':11})
+        self.assertEqual(info['body_shape']['hash_fields']['one_query_hash'],{'state':'present','length':10})
+        serialized=json.dumps(info)
+        for secret in ('PRIVATEHASH','PRIVATEONE','SECRET_DO_NOT_EXPORT','35:1:2,'):
+            self.assertNotIn(secret,serialized)
+        self.assertIsNone(core.summarize_request('evil.graph.facebook.com',
+            '/mobileconfig_qe_info','POST',
+            {'Content-Type':'application/x-www-form-urlencoded'},raw))
+
+    def test_absence_on_wire_is_distinct_from_native_pre_builder_absence(self):
+        info=core.summarize_request('graph.trunkstable.facebook.com',
+             '/mobileconfig_qe_info','POST',
+             {'Content-Type':'application/x-www-form-urlencoded'},b'queries=%5B%5D')
+        self.assertEqual(info['body_shape']['hash_fields']['query_hash']['state'],'absent')
+        self.assertEqual(info['body_shape']['hash_fields']['one_query_hash']['state'],'absent')
+        self.assertEqual(info['authorization']['stage'],'proxy_wire')
 
 
 if __name__ == '__main__':

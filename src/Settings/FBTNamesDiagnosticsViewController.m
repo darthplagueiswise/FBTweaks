@@ -88,6 +88,28 @@ extern void FBTInitEmployeeGroup(void);
         [transport[@"simple_callback_hooks_installed"] boolValue] ? @"" : (transport[@"simple_callback_failure"] ?: @"Callbacks não instalados.")];
     NSString *requestText = request ? [NSString stringWithFormat:@"Pedido %@ · %@ · %@\n%@",
         request[@"request_id"], request[@"request_method"] ?: @"?", request[@"time_utc"] ?: @"", request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa pelo menu nativo.";
+    // Single causal view: builder -> identity -> hash stage -> Tigon -> backend.
+    // A missing hash in URL query is NOT proof it is missing in an HTTP POST body.
+    BOOL backendDenied = [diagnostic[@"http_status"] integerValue] == 400 &&
+        [diagnostic[@"server_error_code"] integerValue] == 100;
+    NSString *pipelineText = [NSString stringWithFormat:
+        @"Fluxo QE unificado\nConsulta: %@\nIdentidade: %@ (não validada)\n"
+         @"query_hash: %@ | one_query_hash: %@\nOrigem dos hashes: %@\n"
+         @"Corpo HTTP final: não comprovado só pelo hook pré-Tigon\n"
+         @"OAuth: %@ (presença não comprova elegibilidade)\n"
+         @"Backend: %@\n"
+         @"Importação: %@\n"
+         @"Não inserir hashes inventados: contrato QE-info ainda não verificado.",
+        request[@"request_parameter_summary"] ?: @"não observada",
+        request[@"device_id_literal_state"] ?: request[@"device_id_format"] ?: @"não observada",
+        request[@"query_hash_state"] ?: @"não observado",
+        request[@"one_query_hash_state"] ?: @"não observado",
+        request[@"query_hash_source"] ?: @"não observado",
+        completion[@"authorization_credential_present"] ?: @"não observado",
+        backendDenied ? @"HTTP 400 / OAuthException #100 / elegibilidade recusada" :
+            (diagnostic[@"http_status"] ?: @"sem HTTP validado"),
+        backendDenied ? @"não iniciada porque o backend recusou o QE-info" :
+            @"ainda exige prova de parse, escrita e recarga"];
     NSString *result = diagnostic.count ? [NSString stringWithFormat:@"HTTP %@ · %@\n%@ bytes recebidos\nCódigo %@ · subcódigo %@ · %@\n%@",
         [diagnostic[@"http_status"] integerValue] ? diagnostic[@"http_status"] : @"não observado", diagnostic[@"body_status"] ?: @"sem estado",
         diagnostic[@"response_bytes"] ?: @0, diagnostic[@"server_error_code"] ?: @"não fornecido",
@@ -151,7 +173,7 @@ extern void FBTInitEmployeeGroup(void);
     self.controlIDs = commands;
     self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
+        @[pipelineText, requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
         @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
