@@ -6,6 +6,12 @@ on:
       - 'flags'
       - 'main'
   workflow_dispatch:
+    inputs:
+      qe_lab:
+        description: "Experimental LAB package (invasive QE hooks; never default)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     branches: ['flags']
 
@@ -22,6 +28,7 @@ jobs:
     env:
       SDK_NAME: iPhoneOS26.2.sdk
       OUTPUT_BASENAME: FBTweak.1.0.${{ github.run_number }}
+      FBT_QE_LAB: ${{ github.event_name == 'workflow_dispatch' && inputs.qe_lab && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,6 +150,7 @@ jobs:
           clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
           /tmp/fbt-service-tests
           python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_compare.py" -v
 
       - name: Test native query correlation
         run: |
