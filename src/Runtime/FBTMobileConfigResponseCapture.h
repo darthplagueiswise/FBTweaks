@@ -17,6 +17,10 @@ void FBTMobileConfigFetcherObserveUIContext(id contextManager, NSString *context
 // One-shot experiment, memory only, expires in 120 seconds.
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField);
 void FBTMobileConfigCancelEmployeeExperiment(void);
+// Manual LAB-only, one-shot, 120 s. Does not modify credentials or grant server eligibility.
+BOOL FBTMobileConfigArmFullMetadataExperiment(void);
+void FBTMobileConfigCancelFullMetadataExperiment(void);
+NSDictionary *FBTMobileConfigFullMetadataExperimentStatus(void);
 NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void);
 // Selection-scoped correlation: begin/end on the same thread, in LIFO order.
 // Async callbacks own shared state, so a late response cannot touch a dead scope.
