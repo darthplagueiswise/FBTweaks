@@ -5,6 +5,7 @@ on:
     branches:
       - 'flags'
       - 'main'
+      - 'codex/qe-isolated-metadata-pr5'
   workflow_dispatch:
   pull_request:
     branches: ['flags']
@@ -102,6 +103,8 @@ jobs:
           cd main
           clang++ -std=c++11 -pthread tests/RequestExperimentTests.cpp -o /tmp/fbt-request-experiment-tests
           /tmp/fbt-request-experiment-tests
+          clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/QEIsolatedCoreTests.cpp -o /tmp/fbt-qe-isolated-core-tests
+          /tmp/fbt-qe-isolated-core-tests
           clang -fobjc-arc -Wno-incomplete-implementation -framework Foundation tests/EmployeeDiagnosticsTests.m -o /tmp/fbt-employee-tests
           /tmp/fbt-employee-tests
 
@@ -143,6 +146,8 @@ jobs:
           clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
           /tmp/fbt-service-tests
           python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_compare.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_isolated_contract.py" -v
 
       - name: Test native query correlation
         run: |
@@ -201,6 +206,30 @@ jobs:
           name: FBTweak.1.0.${{ github.run_number }}
           path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
           if-no-files-found: error
+      # Only this experimental branch emits an isolated slot-only build.
+      # The legacy global FBT_ENABLE_QE_INVASIVE_HOOKS stays zero.
+      - name: Build isolated QE slot-only variant
+        if: github.ref == 'refs/heads/codex/qe-isolated-metadata-pr5'
+        run: |
+          cd main
+          FBT_QE_ISOLATED=1 ./build.sh rootless
+          DEB="$(ls -t packages/*.deb 2>/dev/null | head -n1)"
+          test -n "$DEB"
+          cp "$DEB" "release/FBTweak.1.0.${{ github.run_number }}.QE-ISOLATED.deb"
+          bash scripts/verify_macho_installation.sh "$DEB"
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
+          THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: 9
+
+      - name: Upload QE isolated variant
+        if: github.ref == 'refs/heads/codex/qe-isolated-metadata-pr5'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FBTweak.1.0.${{ github.run_number }}.QE-ISOLATED
+          path: main/release/FBTweak.1.0.${{ github.run_number }}.QE-ISOLATED.deb
+          if-no-files-found: error
+
 
 
 
