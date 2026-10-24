@@ -69,7 +69,7 @@ class QEIntegratedTests(unittest.TestCase):
             response={"event":"response","local_exchange_id":"untrusted-proxy-only",
                       "summary":{"http_status":400,"error":{"classification":"eligibility",
                                                           "private_data":"SECRET_NEVER_EXPORT"}}}
-            events.write_text(json.dumps(request)+"\\n"+json.dumps(response)+"\\n")
+            events.write_text(json.dumps(request)+"\n"+json.dumps(response)+"\n")
             result=audit.summarize([record],events)
             wire=result["proxy_wire"]
             self.assertEqual(wire["wire"],"observed_by_explicit_proxy")
