@@ -94,12 +94,12 @@ extern void FBTInitEmployeeGroup(void);
         [diagnostic[@"server_error_code"] integerValue] == 100;
     NSString *pipelineText = [NSString stringWithFormat:
         @"Fluxo QE unificado\nConsulta: %@\nIdentidade: %@ (não validada)\n"
-         "query_hash: %@ | one_query_hash: %@\nOrigem dos hashes: %@\n"
-         "Corpo HTTP final: não comprovado só pelo hook pré-Tigon\n"
-         "OAuth: %@ (presença não comprova elegibilidade)\n"
-         "Backend: %@\n"
-         "Importação: %@\n"
-         "Não inserir hashes inventados: contrato QE-info ainda não verificado.",
+         @"query_hash: %@ | one_query_hash: %@\nOrigem dos hashes: %@\n"
+         @"Corpo HTTP final: não comprovado só pelo hook pré-Tigon\n"
+         @"OAuth: %@ (presença não comprova elegibilidade)\n"
+         @"Backend: %@\n"
+         @"Importação: %@\n"
+         @"Não inserir hashes inventados: contrato QE-info ainda não verificado.",
         request[@"request_parameter_summary"] ?: @"não observada",
         request[@"device_id_literal_state"] ?: request[@"device_id_format"] ?: @"não observada",
         request[@"query_hash_state"] ?: @"não observado",
