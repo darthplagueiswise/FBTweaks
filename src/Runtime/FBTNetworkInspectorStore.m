@@ -129,6 +129,27 @@ void FBTNetworkInspectorSetCapturing(BOOL enabled) {
     FBTNIInit();
     atomic_store_explicit(&sCapturing, enabled, memory_order_release);
 }
+// Keep protocol structure for the incident report, not reusable credentials.
+static BOOL FBTNISecretName(NSString *name) {
+    NSString *lower = [name lowercaseString] ?: @"";
+    return [lower isEqualToString:@"authorization"] ||
+        [lower isEqualToString:@"cookie"] ||
+        [lower isEqualToString:@"access_token"] ||
+        [lower isEqualToString:@"oauth_token"] ||
+        [lower isEqualToString:@"session_key"] ||
+        [lower isEqualToString:@"client_secret"] ||
+        [lower isEqualToString:@"password"] ||
+        [lower isEqualToString:@"fb_dtsg"];
+}
+static NSString *FBTNIHeaderSummary(NSString *name, NSString *value) {
+    if (!FBTNISecretName(name)) return value ?: @"";
+    if ([[name lowercaseString] isEqualToString:@"authorization"]) {
+        NSString *lower = [value lowercaseString] ?: @"";
+        if ([lower hasPrefix:@"oauth "]) return @"OAuth [redacted]";
+        if ([lower hasPrefix:@"bearer "]) return @"Bearer [redacted]";
+    }
+    return @"[redacted]";
+}
 void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionary *> *pairs) {
     if (!FBTNetworkInspectorIsCapturing()) return;
     NSNumber *rid = request[@"request_id"];
@@ -139,7 +160,11 @@ void FBTNetworkInspectorRecordRequest(NSDictionary *request, NSArray<NSDictionar
         NSString *value = [pair[@"value"] isKindOfClass:NSString.class] ? pair[@"value"] : @"";
         bytes += [name lengthOfBytesUsingEncoding:NSUTF8StringEncoding] + [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
         if (bytes > kMaxRequestBytes) break;
-        [bounded addObject:@{@"name": name, @"value": value}];
+        NSString *safeValue = FBTNISecretName(name) ? @"[redacted]" : value;
+        // A nonliteral identifier is not necessary for confirming its format.
+        if ([name isEqualToString:@"device_id"] && ![value isEqualToString:@"device_id"])
+            safeValue = @"[redacted_device_id]";
+        [bounded addObject:@{@"name": name, @"value": safeValue}];
     }
     NSArray *copyPairs = [bounded copy];
     NSDictionary *copy = [request copy];
@@ -177,8 +202,15 @@ void FBTNetworkInspectorRecordTigon(NSDictionary *context, NSData *body) {
         for (NSString *field in @[@"inspector_raw_host", @"inspector_raw_path", @"inspector_query"]) {
             if (copy[field]) record[field] = copy[field];
         }
-        if ([copy[@"inspector_headers"] isKindOfClass:NSDictionary.class])
-            record[@"known_request_headers"] = copy[@"inspector_headers"];
+        if ([copy[@"inspector_headers"] isKindOfClass:NSDictionary.class]) {
+            NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+            for (NSString *name in copy[@"inspector_headers"]) {
+                NSString *value = copy[@"inspector_headers"][name];
+                if (![name isKindOfClass:NSString.class] || ![value isKindOfClass:NSString.class]) continue;
+                headers[name] = FBTNIHeaderSummary(name, value);
+            }
+            record[@"known_request_headers"] = [headers copy];
+        }
         record[@"http_headers_source"] = @"TigonRequest.findHeader_known_names_only";
         record[@"native_tigon_correlation"] = copy[@"native_tigon_correlation"] ?: @"";
         record[@"http_response_body"] = encoded;
