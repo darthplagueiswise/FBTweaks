@@ -5,7 +5,7 @@
 #import "FBTDataSlotRebinding.h"
 #import "../FBTDefaults.h"
 #include "FBTMCQEFullMetadataCore.hpp"
-#include <QuartzCore/CACurrentMediaTime.h>
+#import <QuartzCore/QuartzCore.h>
 #include <functional>
 #include <memory>
 #include <mutex>
