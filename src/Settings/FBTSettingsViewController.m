@@ -1,5 +1,10 @@
 #import "FBTSettingsViewController.h"
 #import "FBTLocalConfigViewController.h"
+#import "FBTSettingsCatalog.h"
+#import "FBTSettingsPresentation.h"
+#import "FBTQERequestOptionsViewController.h"
+#import "../Runtime/FBTQERequestOptions.h"
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTNamesDiagnosticsViewController.h"
 #import "FBTNetworkInspectorViewController.h"
 #import "FBTNativeTraceViewController.h"
@@ -21,6 +26,9 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <math.h>
+#ifndef FBT_BUILD_NUMBER
+#define FBT_BUILD_NUMBER 0
+#endif
 
 extern void FBTInstallLiquidGlassHooks(void);
 extern void FBTOpenNativeWhitehatSettings(void);
@@ -50,14 +58,11 @@ static long long FBTParseLongLongString(NSString *string) {
 }
 
 static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
-    if (!vc.navigationController) return;
-    UINavigationBarAppearance *nav = [UINavigationBarAppearance new];
-    [nav configureWithDefaultBackground];
-    vc.navigationController.navigationBar.standardAppearance = nav;
-    vc.navigationController.navigationBar.scrollEdgeAppearance = nav;
-    vc.navigationController.navigationBar.compactAppearance = nav;
-    vc.navigationController.navigationBar.prefersLargeTitles = NO;
+    FBTUIKit26ConfigureViewController(vc);
+    if ([vc isKindOfClass:UITableViewController.class])
+        FBTUIKit26ConfigureTableView(((UITableViewController *)vc).tableView);
 }
+
 
 static UILabel *FBTSecondaryLabel(NSString *text) {
     UILabel *label = [UILabel new];
@@ -91,13 +96,23 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     return YES;
 }
 
-@interface FBTSettingsSwitch : UISwitch
-@property (nonatomic, copy) NSString *prefKey;
-@end
-@implementation FBTSettingsSwitch @end
-
-@interface FBTSettingsViewController : UITableViewController
+@interface FBTSettingsViewController : UITableViewController <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property (nonatomic, strong) NSArray<NSDictionary *> *sectionInfo;
+@property (nonatomic, copy) NSString *categoryID;
+@property (nonatomic, strong) UISearchController *settingsSearch;
+@property (nonatomic, strong) UILabel *statusLabel;
+@end
+
+@interface FBTSettingsNavigationController : UINavigationController <UINavigationControllerDelegate>
+@end
+@implementation FBTSettingsNavigationController
+- (void)viewDidLoad { [super viewDidLoad]; self.delegate = self; }
+- (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)controller animated:(BOOL)animated {
+    FBTConfigureDefaultLiquidGlass(controller);
+    controller.navigationItem.largeTitleDisplayMode = [controller isKindOfClass:FBTSettingsViewController.class]
+        ? UINavigationItemLargeTitleDisplayModeAlways : UINavigationItemLargeTitleDisplayModeNever;
+}
 @end
 
 @interface FBTMobileConfigViewController : UITableViewController <UISearchResultsUpdating>
@@ -128,13 +143,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 @implementation FBTSettingsBridge
 + (UIViewController *)makeSettingsController {
     FBTSettingsViewController *root = [[FBTSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
+    UINavigationController *nav = [[FBTSettingsNavigationController alloc] initWithRootViewController:root];
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
-    [appearance configureWithDefaultBackground];
-    nav.navigationBar.standardAppearance = appearance;
-    nav.navigationBar.scrollEdgeAppearance = appearance;
-    nav.navigationBar.compactAppearance = appearance;
+    nav.navigationBar.prefersLargeTitles = YES;
     return nav;
 }
 @end
@@ -144,85 +155,49 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"FBTweak";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeTapped)];
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTSwitchCellID];
+    for (NSDictionary *category in FBTSettingsCatalog.categories)
+        if ([category[@"id"] isEqual:self.categoryID]) self.title = category[@"title"];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    if (!self.categoryID.length)
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeTapped)];
+    self.settingsSearch = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.settingsSearch.searchResultsUpdater = self;
+    self.settingsSearch.obscuresBackgroundDuringPresentation = NO;
+    self.settingsSearch.searchBar.placeholder = self.categoryID.length ? @"Buscar nesta área" : @"Buscar ajustes e ferramentas";
+    self.navigationItem.searchController = self.settingsSearch;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.definesPresentationContext = YES;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 76;
+    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:FBTCellID];
+    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:FBTSwitchCellID];
     [self rebuildSections];
 }
-
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     FBTConfigureDefaultLiquidGlass(self);
+    [self rebuildSections];
+}
+- (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self rebuildSections]; }
+- (void)rebuildSections {
+    self.sectionInfo = [FBTSettingsCatalog sectionsForCategory:self.categoryID query:self.settingsSearch.searchBar.text];
+    self.sections = [self.sectionInfo valueForKey:@"rows"];
+    if (!self.sectionInfo.count) {
+        UILabel *empty = [UILabel new];
+        empty.text = @"Nenhum ajuste encontrado.\nTente outro nome ou parâmetro.";
+        empty.numberOfLines = 0; empty.textAlignment = NSTextAlignmentCenter;
+        empty.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        empty.adjustsFontForContentSizeCategory = YES; empty.textColor = UIColor.secondaryLabelColor;
+        self.tableView.backgroundView = empty;
+    } else self.tableView.backgroundView = nil;
     [self.tableView reloadData];
 }
-
-- (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
-
-- (void)rebuildSections {
-    self.sections = @[
-        @[
-            @{ @"kind": @"switch", @"title": @"Tweak ativada", @"subtitle": @"Kill switch global.", @"key": FBTKeyMasterEnabled },
-            @{ @"kind": @"switch", @"title": @"Toque duplo com três dedos", @"subtitle": @"Abre a FBTweak em qualquer tela. O ícone em Configurações continua disponível.", @"key": FBTKeyOpenThreeFingerDoubleTap },
-        ],
-        @[
-            @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
-            @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
-            @{ @"kind": @"switch", @"title": @"C import: Internal Settings", @"subtitle": @"fishhook em FBShouldEnableInternalSettings importado pelo executable; toggle runtime após instalar.", @"key": FBTKeyInternalCImportsEnabled },
-            @{ @"kind": @"switch", @"title": @"C import: EasyGating internal", @"subtitle": @"fishhook de teste em EasyGatingGetBoolean_Internal_DoNotUseOrMock; pode ser amplo, use isolado.", @"key": FBTKeyEasyGatingInternalEnabled },
-            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook import + Runtime BOOL; sem patch direto em __TEXT assinado.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
-            @{ @"kind": @"nav", @"title": @"Liquid Glass — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:LiquidGlass" },
-            @{ @"kind": @"nav", @"title": @"Floating Tab Bar — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:FloatingTab" },
-            @{ @"kind": @"nav", @"title": @"Dating / Gemstone — gates", @"subtitle": @"Gates employee/test-user/internal via mc_overrides.json nativo.", @"dest": @"feat:DatingGemstone" },
-        ],
-        @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
-            @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa, sem interceptação global. Ative antes dos probes nativos.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
-            @{ @"kind": @"switch", @"title": @"Probe Tigon nativo (sessão / experimental)", @"subtitle": @"Captura status e callback TigonSimpleCallbacks com slots+UUID verificados. Não intercepta NSURLSession ou __TEXT. Desativa ao reiniciar.", @"key": FBTMCNativeProbeTigonKey },
-            @{ @"kind": @"switch", @"title": @"Probe fetch MobileConfig (sessão / experimental)", @"subtitle": @"Observa asyncFetch e callback original do FBMobileConfigTigonFetcher; nenhum parâmetro enviado é alterado. Desativa ao reiniciar.", @"key": FBTMCNativeProbeFetcherKey },
-            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
-            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
-        ],
-        @[
-            @{ @"kind": @"nav", @"title": @"MobileConfig local — todos os mapas", @"subtitle": @"Busca por nome/ID e edição de overrides sem depender de QE-info.", @"dest": @"localconfig" },
-            @{ @"kind": @"nav", @"title": @"Network Inspector — 100% iPhone", @"subtitle": @"Request/response MobileConfig e QE-info, correlação Tigon, exportação de bytes e headers conhecidos. Sem proxy.", @"dest": @"networkinspector" },
-            @{ @"kind": @"nav", @"title": @"Diagnóstico do download de nomes", @"subtitle": @"Capturar, ver o erro remoto e compartilhar pelo iPhone.", @"dest": @"namesdiagnostic" },
-            @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
-            @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
-            @{ @"kind": @"nav", @"title": @"ObjC BOOL Live", @"subtitle": @"Observar sem alterar retorno ou manter Force ON/OFF persistido.", @"dest": @"boollive" },
-            @{ @"kind": @"nav", @"title": @"Native Live Trace", @"subtitle": @"Eventos BOOL + QE/Tigon, buffer em memória e exportação JSON; sem Frida.", @"dest": @"livetrace" },
-            @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
-            @{ @"kind": @"nav", @"title": @"Dump completo de flags", @"subtitle": @"FBTFlags.json empacotado.", @"dest": @"flags" },
-            @{ @"kind": @"nav", @"title": @"Query configs enviados", @"subtitle": @"GraphQL IDs/variáveis empacotados no bundle.", @"dest": @"queries" },
-        ],
-        @[
-            @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
-            @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
-            @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
-            @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
-            @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
-        ],
-    ];
-}
-
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    switch (section) {
-        case 0: return @"Geral";
-        case 1: return @"Hooks conhecidos";
-        case 2: return @"Runtime";
-        case 3: return @"Browsers";
-        case 4: return @"Ações";
-        default: return nil;
-    }
+    return self.sectionInfo[section][@"title"];
 }
-
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"Ativar a instrumentação ou o log não confirma que o fetch funcionou. Confira os hooks disponíveis, leituras observadas e respostas no diagnóstico.";
-    if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
-    return nil;
+    return FBTSettingsFooter(self.sectionInfo[section]);
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.sections.count; }
@@ -232,32 +207,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
     NSString *kind = item[@"kind"];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:[kind isEqualToString:@"switch"] ? FBTSwitchCellID : FBTCellID forIndexPath:indexPath];
-    cell.textLabel.text = item[@"title"];
-    cell.detailTextLabel.text = nil;
-    cell.accessoryView = nil;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    cell.textLabel.numberOfLines = 0;
-
-    UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
-    cfg.text = item[@"title"];
-    cfg.secondaryText = item[@"subtitle"];
-    cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
-    cfg.secondaryTextProperties.numberOfLines = 0;
-    cell.contentConfiguration = cfg;
-
-    if ([kind isEqualToString:@"switch"]) {
-        FBTSettingsSwitch *sw = [FBTSettingsSwitch new];
-        sw.prefKey = item[@"key"];
-        sw.on = FBTMCNativeProbeIsKey(sw.prefKey) ?
-            FBTMCNativeProbeIsEnabled(sw.prefKey) :
-            [[NSUserDefaults standardUserDefaults] boolForKey:sw.prefKey];
-        [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if ([kind isEqualToString:@"nav"]) {
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    }
+    NSString *key = item[@"key"];
+    BOOL value = FBTMCNativeProbeIsKey(key) ? FBTMCNativeProbeIsEnabled(key) :
+        (key ? [[NSUserDefaults standardUserDefaults] boolForKey:key] : NO);
+    FBTConfigureSettingsMenuCell(cell,item,value,self,@selector(switchChanged:));
     return cell;
 }
 
@@ -280,6 +233,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigFetchDiagnosticsEnabled] && !sender.isOn) {
         FBTMCNativeProbeDisableAll();
+        FBTQERequestOptionsSetEnabled(NO);
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
     }
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
@@ -297,7 +251,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             FBTInstallMobileConfigDebugUIBootstrap();
             FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{});
             [self showInfoTitle:@"QE-info diagnostics ativado"
-                        message:@"Reproduza agora o fetch na tela nativa de parâmetros. Depois abra FBTweak → Runtime → MobileConfig Live → Fetch log. O arquivo fica em AppGroup/mobileconfig/fbt_fetch_diagnostics.json."];
+                        message:@"Reproduza uma consulta ou Force Name Download. Abra FBTweak → Diagnóstico QE para conferir os pedidos, a identidade observada e as respostas."];
         } else {
             [self.tableView reloadData]; // Session-only native probes are OFF in the UI too.
             [self showInfoTitle:@"QE-info diagnostics pausado"
@@ -328,6 +282,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if ([sender.prefKey isEqualToString:FBTKeyLiquidGlassEnabled] && sender.isOn) {
         FBTInstallLiquidGlassHooks();
     }
+    [self.tableView reloadData];
 }
 
 - (void)applyQEFlagABTest:(NSString *)variant {
@@ -381,7 +336,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         @"Teste isolado gravado em mc_overrides.json.\n\n"
          @"mobileconfig_use_legacy_refresh: %@\n"
          @"use_builtin_query_hash: %@\n\n"
-         @"Reinicie o Facebook, ative o log QE-info e execute Force name download. Compare name_download_completed, qe_info_request_returned e query_hash_state.\n\n"
+         @"Reinicie o Facebook e, no Inspetor de Rede, capture a sincronização mobileconfig/mobileconfigsessionless. Compare query_hash e one_query_hash com a linha de base. O fluxo QE-info / Force name download não envia esses hashes e não valida esta comparação.\n\n"
          @"Importante: isso confirma apenas o estado gravado no arquivo, não que a versão atual do app reconheça esses parâmetros. No AppGroup analisado, os dois configs não apareceram nos sidecars ativos de nomes; se não houver mudança, o próximo passo é confirmar resolução/schema, não desligar outras flags em lote.\n\n"
          @"Flag isolada neste teste: %@%@",
         FBTMCStateLabel(currentLegacy), FBTMCStateLabel(currentHash), testedFlag,
@@ -389,7 +344,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @"\nATENÇÃO: legacy refresh já estava OFF na linha de base; a intervenção não muda esse valor." :
         (([variant isEqualToString:@"hash"] && hashState == FBTMCStateOff) ?
             @"\nATENÇÃO: builtin query hash já estava OFF na linha de base; a intervenção não muda esse valor." : @"")];
-    [self showInfoTitle:@"Teste A/B QE-info preparado" message:message];
+    [self showInfoTitle:@"Teste A/B preparado" message:message];
 }
 
 - (void)restoreQEFlagABTest {
@@ -436,7 +391,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if ([kind isEqualToString:@"nav"]) {
         NSString *dest = item[@"dest"];
         UIViewController *vc = nil;
-        if ([dest isEqualToString:@"localconfig"]) vc = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
+        if ([dest hasPrefix:@"category:"]) {
+            FBTSettingsViewController *area = [[FBTSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+            area.categoryID = [dest substringFromIndex:9]; vc = area;
+        } else if ([dest isEqualToString:@"qeoptions"]) vc = [[FBTQERequestOptionsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        else if ([dest isEqualToString:@"localconfig"]) vc = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
         else if ([dest isEqualToString:@"namesdiagnostic"]) vc = [[FBTNamesDiagnosticsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"networkinspector"]) vc = [[FBTNetworkInspectorViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
@@ -781,7 +740,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
         cell.accessoryType = UITableViewCellAccessoryNone;
-        return cell;
+        FBTUIKit26ConfigureTableCell(cell);
+    return cell;
     }
     NSDictionary *e = self.filtered[indexPath.row];
     NSString *name = [e[@"param"] length] ? e[@"param"] : e[@"hex"];
@@ -794,6 +754,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
     cell.accessoryType = [e[@"forced"] boolValue] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
+    FBTUIKit26ConfigureTableCell(cell);
     return cell;
 }
 
@@ -898,7 +859,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
         cell.accessoryType = UITableViewCellAccessoryNone;
-        return cell;
+        FBTUIKit26ConfigureTableCell(cell);
+    return cell;
     }
     NSDictionary *e = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
@@ -916,6 +878,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
     cell.accessoryType = [e[@"forced"] boolValue] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
+    FBTUIKit26ConfigureTableCell(cell);
     return cell;
 }
 
@@ -972,6 +935,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
     cell.accessoryType = UITableViewCellAccessoryNone;
+    FBTUIKit26ConfigureTableCell(cell);
     return cell;
 }
 @end
@@ -1009,7 +973,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         cfg.secondaryText = @"Os JSONs enviados devem estar em FBTweak.bundle/QueryConfigs/.";
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
-        return cell;
+        FBTUIKit26ConfigureTableCell(cell);
+    return cell;
     }
     NSDictionary *item = self.filtered[indexPath.row];
     NSArray *vars = [item[@"variables"] isKindOfClass:[NSArray class]] ? item[@"variables"] : @[];
@@ -1020,6 +985,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     cfg.secondaryTextProperties.numberOfLines = 4;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
+    FBTUIKit26ConfigureTableCell(cell);
     return cell;
 }
 @end

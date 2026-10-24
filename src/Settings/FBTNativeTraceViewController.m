@@ -1,3 +1,4 @@
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "FBTNativeTraceViewController.h"
 #import "../Runtime/FBTNativeTrace.h"
 #import "../FBTDefaults.h"
@@ -8,7 +9,9 @@
 @implementation FBTNativeTraceViewController
 - (void)viewDidLoad{
  [super viewDidLoad];
- self.title=@"Live Trace";
+    FBTUIKit26ConfigureViewController(self);
+    if ([self isKindOfClass:UITableViewController.class]) FBTUIKit26ConfigureTableView(((UITableViewController *)self).tableView);
+ self.title=@"Rastreamento nativo";
  [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"TraceRow"];
  self.captureSwitch=[UISwitch new];
  self.captureSwitch.on=[FBTDefaults boolForKey:FBTKeyNativeTraceEnabled];
@@ -64,6 +67,6 @@
  cfg.secondaryText=[record[@"kind"] isEqualToString:@"BOOL"]?
   [NSString stringWithFormat:@"original=%@ · efetivo=%@ · #%@",originalValue,effectiveValue,record[@"sequence"]]:
   [NSString stringWithFormat:@"%@ · #%@",record[@"detail"],record[@"sequence"]];
- cfg.secondaryTextProperties.numberOfLines=3;cell.contentConfiguration=cfg;return cell;
+ cfg.secondaryTextProperties.numberOfLines=0;cell.contentConfiguration=cfg;FBTUIKit26ConfigureTableCell(cell);return cell;
 }
 @end

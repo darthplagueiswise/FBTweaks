@@ -7,7 +7,7 @@ on:
       - 'main'
   workflow_dispatch:
   pull_request:
-    branches: ['flags', 'codex/qe-session-proxy-debug']
+    branches: ['flags', 'codex/qe-session-proxy-debug', 'codex/force-name-request-options']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +27,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: main
+
+      - name: Test settings catalog and direct debug routes
+        run: |
+          cd main
+          if test -f src/Settings/FBTSettingsCatalog.m; then
+            clang -fobjc-arc -framework Foundation tests/SettingsCatalogTests.m src/Settings/FBTSettingsCatalog.m src/FBTDefaults.m -o /tmp/fbt-settings-catalog-tests
+          else
+            clang -fobjc-arc -framework Foundation tests/SettingsCatalogTests.m -o /tmp/fbt-settings-catalog-tests
+          fi
+          /tmp/fbt-settings-catalog-tests
 
       - name: Install Dependencies
         run: brew install ldid dpkg make
@@ -212,5 +222,16 @@ jobs:
           path: main/release/FBTweak.1.0.${{ github.run_number }}.deb
           if-no-files-found: error
 
+      - name: Render settings UIKit previews
+        timeout-minutes: 12
+        run: |
+          cd main
+          bash scripts/preview_settings_ui.sh "$RUNNER_TEMP/settings-preview"
 
-
+      - name: Upload settings UIKit previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FBTweak-Settings-Preview-${{ github.run_number }}
+          path: ${{ runner.temp }}/settings-preview
+          if-no-files-found: warn

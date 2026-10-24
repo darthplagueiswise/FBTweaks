@@ -42,7 +42,7 @@ class QEContainmentTests(unittest.TestCase):
             self.assertIn(event,src)
         ui=read("src/Settings/FBTSettingsViewController.m")
         self.assertIn("FBTKeyMobileConfigFetchDiagnosticsEnabled",ui)
-        self.assertIn("Log QE-info (seguro)",ui)
+        self.assertIn("FBTKeyMobileConfigFetchDiagnosticsEnabled",read("src/Settings/FBTSettingsCatalog.m"))
     def test_no_unverified_hooks_in_regular_ci(self):
         ci=read(".github/workflows/buildtweak.yml")
         self.assertIn('test_qe_safe_diagnostics.py',ci)
