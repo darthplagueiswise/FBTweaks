@@ -16,6 +16,10 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include "FBTQERequestOptionsCore.hpp"
+#import "FBTQERequestOptions.h"
+#include <dlfcn.h>
+#include <mach-o/loader.h>
 #include "../../modules/fishhook/fishhook.h"
 
 // The advanced native MobileConfig UI lives in FBRarelyUsedFramework. The
@@ -76,6 +80,8 @@ static FBTNSErrorInitOrig orig_NSError_initWithDomain = NULL;
 static char kFBTMCSelectionKey;
 static NSDictionary *sLatestNativeUIContexts;
 static void (*orig_FBMobileConfigDebug_selectItem)(id, SEL, id);
+static void (*sOriginalForceNameAction)(id, SEL);
+static NSString *sForceNameActionFailure;
 
 @interface FBTMobileConfigViewController : UITableViewController
 @end
@@ -288,6 +294,52 @@ static BOOL FBTMCUIEncodingEquals(Class cls, SEL sel, const char *expected) {
     Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
     const char *actual = method ? method_getTypeEncoding(method) : NULL;
     return actual && expected && strcmp(actual, expected) == 0;
+}
+
+static void FBTForceNameAction(id object, SEL selector) {
+    // REA: performNameDownload -> refreshNames -> asyncFetch is synchronous
+    // up to dispatch. An unrelated/later QE request cannot consume this scope.
+    fbt_qe_options::Scope scope(fbt_qe_options::sessionProfile());
+    if (sOriginalForceNameAction) sOriginalForceNameAction(object, selector);
+}
+
+static void FBTInstallForceNameActionHook(void) {
+    if (sOriginalForceNameAction) return;
+    Class cls = objc_getClass("FBMobileConfigAdvancedSettingsViewController");
+    if (!cls) { sForceNameActionFailure = @"Abra Advanced Settings para carregar o controller."; return; }
+    @synchronized(cls) {
+        if (sOriginalForceNameAction) return;
+        SEL selector = sel_registerName("performNameDownload");
+        Method method = class_getInstanceMethod(cls, selector);
+        IMP implementation = method ? method_getImplementation(method) : NULL;
+        Dl_info info = {};
+        if (!FBTMCUIEncodingEquals(cls, selector, "v16@0:8") || !implementation ||
+            !dladdr((void *)implementation, &info) || !info.dli_fbase || !info.dli_fname ||
+            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/') + 1 : info.dli_fname,
+                "FBRarelyUsedFramework") != 0 ||
+            (uintptr_t)implementation - (uintptr_t)info.dli_fbase != 0x211e78) {
+            sForceNameActionFailure = @"Controller/assinatura/IMP incompatível com a imagem analisada."; return;
+        }
+        const auto header = (const mach_header_64 *)info.dli_fbase;
+        const unsigned char expected[16] = {0x4c,0x4c,0x44,0x83,0x55,0x55,0x31,0x44,
+            0xa1,0xfa,0xce,0x46,0x1b,0xbe,0x10,0xaa};
+        BOOL uuidMatches = NO;
+        if (header->magic == MH_MAGIC_64 && header->ncmds < 4096 && header->sizeofcmds < 16 * 1024 * 1024) {
+            const char *cursor = (const char *)(header + 1), *end = cursor + header->sizeofcmds;
+            for (uint32_t i = 0; i < header->ncmds && end - cursor >= (ptrdiff_t)sizeof(load_command); ++i) {
+                const auto cmd = (const load_command *)cursor;
+                if (cmd->cmdsize < sizeof(load_command) || cmd->cmdsize > (size_t)(end - cursor)) break;
+                if (cmd->cmd == LC_UUID && cmd->cmdsize >= sizeof(uuid_command)) {
+                    uuidMatches = memcmp(((const uuid_command *)cmd)->uuid, expected, 16) == 0; break;
+                }
+                cursor += cmd->cmdsize;
+            }
+        }
+        if (!uuidMatches) { sForceNameActionFailure = @"UUID RarelyUsed diferente da imagem analisada."; return; }
+        sOriginalForceNameAction = (void (*)(id, SEL))implementation;
+        method_setImplementation(method, (IMP)FBTForceNameAction);
+        sForceNameActionFailure = nil;
+    }
 }
 
 static void FBTMobileConfigDebugWarmup(void) {
@@ -597,6 +649,7 @@ void FBTInstallMobileConfigDebugUIHooks(void) {
     BOOL warmupEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigNativeUIWarmupEnabled];
     BOOL diagnosticsEnabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
     if (!warmupEnabled && !diagnosticsEnabled) return;
+    FBTInstallForceNameActionHook();
     FBTMobileConfigResponseCaptureInstall();
     FBTInstallQEInfoFetchImportHook();
     FBTInstallQEInfoRefreshNamesImportHook();
@@ -673,6 +726,8 @@ NSDictionary *FBTMobileConfigDebugUIHookStatus(void) {
     NSDictionary *contexts;
     @synchronized([FBTMCSelection class]) { contexts = [sLatestNativeUIContexts copy] ?: @{}; }
     return @{@"native_names_alert_reporting_available": @(sOriginalNamesAlertFactory != NULL), @"qe_info_hook_available": @(orig_FBMobileConfigQEInfoFetch != NULL),
+        @"force_name_action_hook_available": @(sOriginalForceNameAction != NULL),
+        @"force_name_action_hook_failure": sForceNameActionFailure ?: @"not_attempted",
         @"name_download_hook_available": @(orig_FBMobileConfigQEInfoRefreshNames != NULL),
         @"selection_hook_available": @(orig_FBMobileConfigDebug_selectParam != NULL),
         @"item_selection_hook_available": @(orig_FBMobileConfigDebug_selectItem != NULL),

@@ -11,7 +11,10 @@
 
 NSString * const FBTMCNativeProbeTigonKey = @"test.probe.tigon";
 NSString * const FBTMCNativeProbeFetcherKey = @"test.probe.fetcher";
-BOOL FBTMCNativeProbeIsEnabled(NSString *key) { (void)key; return NO; }
+static BOOL sFetcherProbeEnabled;
+BOOL FBTMCNativeProbeIsEnabled(NSString *key) {
+    return sFetcherProbeEnabled && [key isEqualToString:FBTMCNativeProbeFetcherKey];
+}
 NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.capture";
 NSString * const FBTKeyEmployeeEnabled = @"test.employee";
 static BOOL sEnabled = YES;
