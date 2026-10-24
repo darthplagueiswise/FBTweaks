@@ -443,7 +443,13 @@ static void FBTTigonFinishCapture(void *self) {
             context, context[@"capture_reason"], [context[@"http_status"] integerValue], @"",
             context[@"transport"] ?: @"TigonForwardingRequestCallbacks");
     } else {
-        // Opt-in session probe writes only metadata; no response body on disk.
+        // Decode only the already-correlated bounded in-memory body. Export
+        // fixed metadata/error classifications, never a body file or unknown text.
+        NSMutableDictionary *metadata = [FBTNamesResponseMetadata(body) mutableCopy];
+        metadata[@"response_bytes"] = @(body.length);
+        metadata[@"http_status"] = context[@"http_status"] ?: @0;
+        metadata[@"payload_provenance"] = @"native_correlated_http_body_metadata_only";
+        FBTTigonRecordContextEvent(@"names_transport_diagnostic", context, metadata);
         FBTTigonRecordContextEvent(@"tigon_native_response_metadata", context, @{
             @"response_bytes": @(body.length), @"http_status": context[@"http_status"] ?: @0
         });

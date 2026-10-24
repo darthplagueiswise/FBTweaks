@@ -6,6 +6,8 @@ on:
       - 'flags'
       - 'main'
   workflow_dispatch:
+  pull_request:
+    branches: ['flags']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -132,6 +134,15 @@ jobs:
           clang -std=c11 -fobjc-arc -framework Foundation -c src/Runtime/FBTNetworkInspectorStore.m -o /tmp/fbt-inspector-store.o
           clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
+          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/MCSessionMetadataTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-session-metadata-tests
+          /tmp/fbt-session-metadata-tests
+
+      - name: Test service observations and proxy diagnostics
+        run: |
+          cd main
+          clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
+          /tmp/fbt-service-tests
+          python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
 
       - name: Test native query correlation
         run: |

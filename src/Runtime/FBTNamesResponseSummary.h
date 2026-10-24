@@ -6,6 +6,8 @@ extern "C" {
 // Bounded in-process decoding; never accepts a formatted native error as HTTP JSON.
 NSData *FBTNamesDecodeResponse(NSData *data, NSString **status);
 NSDictionary *FBTNamesResponseSummary(NSData *data);
+// Session-only probe: fixed shape/codes, no arbitrary remote text or body file.
+NSDictionary *FBTNamesResponseMetadata(NSData *data);
 NSString *FBTNamesRedactMessage(NSString *message);
 // Evidence-based UI classification. Code 100 alone is not an employee error.
 NSDictionary *FBTNamesDiagnosticAdvice(NSDictionary *event);

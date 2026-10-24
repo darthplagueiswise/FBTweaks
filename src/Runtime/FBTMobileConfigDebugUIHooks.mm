@@ -441,6 +441,7 @@ static void FBTCaptureNativeUIManagers(id controller) {
                     BOOL ready = valid && strcmp(method_getTypeEncoding(valid), "B16@0:8") == 0 &&
                         ((BOOL (*)(id, SEL))objc_msgSend)(manager, sel_registerName("hasValidManager"));
                     status[labels[j]] = @{@"context_present": @(manager != nil), @"manager_ready": @(ready)};
+                    if (ready) FBTMobileConfigFetcherObserveUIContext(manager, labels[j]);
                 }
                 @synchronized([FBTMCSelection class]) { sLatestNativeUIContexts = [status copy]; }
             } else if (type[0] == '@' && strstr(type, "MobileConfig") && strstr(type, "Manager")) {
@@ -469,6 +470,7 @@ static void fbt_FBMobileConfigDebug_viewDidLoad(id self, SEL _cmd) {
 }
 
 static void fbt_FBMobileConfigDebug_selectItem(id self, SEL selector, id item) {
+    FBTCaptureNativeUIManagers(self);
     FBTMobileConfigQueryContext *context = [FBTMobileConfigQueryContext beginForOwner:self encodedSearchItem:item];
     // Item selections can fail on a background QE lookup before selectParam is
     // reached. Clear any older typed selection, but keep the original item flow.
