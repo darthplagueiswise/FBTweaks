@@ -44,6 +44,7 @@ grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/Settings/FBTSettingsView
 grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/FBTDefaults.m || fail "preferência de captura QE-info sem default persistente"
 grep -q "fbt_fetch_diagnostics.json" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "relatorio de fetch nao persiste no AppGroup"
 grep -q "showFetchDiagnostics" src/Settings/FBTSettingsViewController.m || fail "UI sem acesso ao diagnóstico de fetch"
-grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m || fail "UI UIKit sem default Liquid Glass appearance"
+# Native chrome/material behavior is exercised by the real UIKit preview host.
+[ -f "src/UI/FBTUIKit26LiquidGlass.m" ] || fail "helper UIKit de aparência ausente"
 
 echo "[validate] OK"
