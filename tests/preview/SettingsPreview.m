@@ -89,7 +89,7 @@ NSString * const FBTMCNativeProbeFetcherKey = @"fbt_mc_native_fetcher_probe_sess
         BOOL requestedReduceTransparency = [variant isEqual:@"reduce-transparency"];
         BOOL requestedIncreasedContrast = [variant isEqual:@"high-contrast"];
         BOOL reduceTransparency = UIAccessibilityIsReduceTransparencyEnabled();
-        BOOL increasedContrast = UIAccessibilityIsDarkerSystemColorsEnabled();
+        BOOL increasedContrast = UIAccessibilityDarkerSystemColorsEnabled();
         // Verify the requested system state before evaluating its fallback.
         // An ignored Simulator preference must fail, never silently skip coverage.
         if (reduceTransparency != requestedReduceTransparency) [failures addObject:@"Simulator Reduce Transparency state differs from requested variant"];

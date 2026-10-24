@@ -9,7 +9,7 @@ static NSInteger const kFBTUIKit26GlassBackgroundTag = 0x51C126;
 static NSInteger const kFBTUIKit26TitleBubbleTag = 0x51C260;
 
 static BOOL FBTUIKit26NeedsOpaqueMaterial(void) {
-    return UIAccessibilityIsReduceTransparencyEnabled() || UIAccessibilityIsDarkerSystemColorsEnabled();
+    return UIAccessibilityIsReduceTransparencyEnabled() || UIAccessibilityDarkerSystemColorsEnabled();
 }
 
 static BOOL FBTUIKit26NeedsOpaqueMaterialForTraits(UITraitCollection *traits) {
