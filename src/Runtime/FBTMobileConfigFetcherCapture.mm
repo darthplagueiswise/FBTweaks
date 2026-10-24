@@ -7,6 +7,12 @@
 #import "FBTEmployeeDiagnostics.h"
 #include "FBTMCRequestExperiment.hpp"
 #include "FBTMCServiceEvidence.hpp"
+#include "FBTQERequestOptionsCore.hpp"
+#include "FBTQEDeviceIdentity.hpp"
+static fbt_qe_identity::Registry &FBTDeviceIdentityRegistry(void) {
+    static fbt_qe_identity::Registry registry;
+    return registry;
+}
 #include <functional>
 #include <memory>
 #include <string>
@@ -229,12 +235,13 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
-    // Session-only diagnostics are strictly observational; the legacy LAB
-    // request-field A/B experiment is never applied through this toggle.
+    // Legacy employee mutation remains LAB-only. The separate user-enabled
+    // Options editor uses its explicit all-QE or verified Force Name scope.
     if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
     auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
+    auto optionsResult = fbt_qe_options::applyCurrent(method, purpose, *outgoing, fbt_qe_options::sessionProfile());
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
     // Binary TigonRequest constructor and device logs prove argument 1 is the
@@ -251,6 +258,18 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
+    details[@"qe_request_options_state"] = @(fbt_qe_options::label(optionsResult));
+    auto device = FBTDeviceIdentityRegistry().observe(params);
+    details[@"device_id_field_count"] = @(device.count);
+    details[@"device_id_bytes"] = @(device.bytes);
+    details[@"device_id_format"] = @(device.format);
+    details[@"device_id_observation_id"] = @(device.observation);
+    details[@"device_id_state"] = device.count == 0 ? @"missing" : device.count > 1 ? @"duplicate" :
+        device.bytes == 0 ? @"empty" : @"present_not_validated";
+    if (optionsResult == fbt_qe_options::Result::Applied) {
+        details[@"experiment_profile"] = @"qe_custom_options";
+        details[@"experiment_state"] = @"ten_options_applied";
+    }
     if (selected.mode >= 0) details[@"experiment_id"] = FBTMCText(selected.id);
     for (const auto &pair : *outgoing) {
         // Only public protocol field names are allowed; account/token values and

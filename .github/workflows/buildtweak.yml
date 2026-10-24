@@ -7,7 +7,7 @@ on:
       - 'main'
   workflow_dispatch:
   pull_request:
-    branches: ['flags']
+    branches: ['flags', 'codex/qe-session-proxy-debug']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -132,10 +132,20 @@ jobs:
         run: |
           cd main
           clang -std=c11 -fobjc-arc -framework Foundation -c src/Runtime/FBTNetworkInspectorStore.m -o /tmp/fbt-inspector-store.o
-          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-tigon-tests
+          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm src/Runtime/FBTQERequestOptions.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
-          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/MCSessionMetadataTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-session-metadata-tests
+          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/MCSessionMetadataTests.mm src/Runtime/FBTQERequestOptions.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-session-metadata-tests
           /tmp/fbt-session-metadata-tests
+          clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/QERequestOptionsCaptureTests.mm src/Runtime/FBTQERequestOptions.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-qe-options-capture-tests
+          /tmp/fbt-qe-options-capture-tests
+
+      - name: Test QE option scopes and device identity observations
+        run: |
+          cd main
+          clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/QERequestOptionsTests.cpp -o /tmp/fbt-qe-options-tests
+          /tmp/fbt-qe-options-tests
+          clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/QEDeviceIdentityTests.cpp -o /tmp/fbt-qe-identity-tests
+          /tmp/fbt-qe-identity-tests
 
       - name: Test service observations and proxy diagnostics
         run: |

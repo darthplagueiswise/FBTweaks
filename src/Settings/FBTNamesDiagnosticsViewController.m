@@ -9,6 +9,8 @@
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTEmployeeDiagnostics.h"
 #import "../Runtime/FBTMCNativeSessionProbes.h"
+#import "FBTQERequestOptionsViewController.h"
+#import "../Runtime/FBTQERequestOptions.h"
 extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
@@ -133,8 +135,14 @@ extern void FBTInitEmployeeGroup(void);
         if (uiContexts.count == 6) break;
     }
     NSString *contextText = uiContexts.count ? [uiContexts componentsJoinedByString:@"\n\n"] : @"Contextos da UI ainda não observados. Com o probe do fetcher armado, reabra MobileConfig e selecione um item. A captura exige o getter e o layout da imagem verificada.";
+    NSString *deviceText = [NSString stringWithFormat:@"device_id no argumento nativo:\nEstado: %@ · ocorrências: %@ · bytes: %@\nFormato: %@ · observação efêmera: %@\nOpções QE: %@\n\nO formato não valida identidade. Um ID diferente pode ser legítimo por contexto; igualdade só compara os bytes observados neste processo. O relatório não exporta o identificador. UUID Mach-O, UUID da captura, identidade de dispositivo e ator autenticado são domínios distintos.",
+        request[@"device_id_state"] ?: @"não observado", request[@"device_id_field_count"] ?: @"?",
+        request[@"device_id_bytes"] ?: @"?", request[@"device_id_format"] ?: @"não observado",
+        [request[@"device_id_observation_id"] unsignedLongLongValue] ? request[@"device_id_observation_id"] : @"não disponível", request[@"qe_request_options_state"] ?: @"não observado"];
     NSMutableArray *controls = [@[@"Iniciar nova captura", @"Armar probes desta sessão", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local", @"Cancelar testes temporários"] mutableCopy];
     NSMutableArray *commands = [@[@"start", @"probes", @"pause", @"copy", @"local", @"cancel"] mutableCopy];
+    [controls addObject:@"Opções dos pedidos QE / Force Name Download"];
+    [commands addObject:@"options"];
     if (FBTQEInvasiveHooksAllowed()) {
         [controls addObjectsFromArray:@[@"LAB: próximo pedido QE original", @"LAB: próximo pedido QE + is_employee=true", @"LAB: tw_is_employee=true por 120 s",
             [NSString stringWithFormat:@"LAB: Employee local %@", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]]];
@@ -143,7 +151,7 @@ extern void FBTInitEmployeeGroup(void);
     self.controlIDs = commands;
     self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, identityText], historyText,
+        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, deviceText, identityText], historyText,
         @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
@@ -190,6 +198,7 @@ extern void FBTInitEmployeeGroup(void);
         FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &reason);
         FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &reason);
     } else if ([command isEqual:@"pause"]) {
+        FBTQERequestOptionsSetEnabled(NO);
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMCNativeProbeDisableAll();
@@ -198,9 +207,10 @@ extern void FBTInitEmployeeGroup(void);
         FBTEmployeeCancelTWProbe();
     } else if ([command isEqual:@"copy"]) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
     else if ([command isEqual:@"local"]) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if ([command isEqual:@"options"]) [self.navigationController pushViewController:[[FBTQERequestOptionsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
     else if (FBTQEInvasiveHooksAllowed() && ([command isEqual:@"A"] || [command isEqual:@"B"])) FBTMobileConfigArmEmployeeExperiment([command isEqual:@"B"]);
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();
-    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
+    else if ([command isEqual:@"cancel"]) { FBTQERequestOptionsSetEnabled(NO); FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"employee"]) {
         [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
         FBTInitEmployeeGroup();
