@@ -55,6 +55,33 @@ class QEIntegratedTests(unittest.TestCase):
             p=Path(tmp)/"bad.json"; p.write_text('{"request_parameter_pairs":"unsafe"}')
             with self.assertRaises(ValueError):audit.one(p)
 
+    def test_one_real_proxy_exchange_joins_by_manual_window_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record=self.make(tmp,"native.json","device_id")
+            events=Path(tmp)/"events.jsonl"
+            request={"event":"request","local_exchange_id":"untrusted-proxy-only",
+                     "summary":{"endpoint":"mobileconfig_qe_info",
+                                "body_shape":{"kind":"form","hash_fields":{
+                                    "query_hash":{"state":"present","length":32},
+                                    "one_query_hash":{"state":"absent","length":0}}},
+                                "authorization":{"stage":"proxy_wire",
+                                                 "credential_observation_id":"PRIVATE_NEVER_EXPORT"}}}
+            response={"event":"response","local_exchange_id":"untrusted-proxy-only",
+                      "summary":{"http_status":400,"error":{"classification":"eligibility",
+                                                          "private_data":"SECRET_NEVER_EXPORT"}}}
+            events.write_text(json.dumps(request)+"\\n"+json.dumps(response)+"\\n")
+            result=audit.summarize([record],events)
+            wire=result["proxy_wire"]
+            self.assertEqual(wire["wire"],"observed_by_explicit_proxy")
+            self.assertFalse(wire["exact_native_join"])
+            self.assertEqual(wire["native_join"],"manual_capture_window_only")
+            self.assertEqual(wire["post_hashes"]["query_hash"],{"state":"present","length":32})
+            self.assertEqual(wire["post_hashes"]["one_query_hash"]["state"],"absent")
+            self.assertEqual(result["pipeline"]["backend_wire"],"eligibility")
+            data=json.dumps(result)
+            for raw in ("PRIVATE_NEVER_EXPORT","SECRET_NEVER_EXPORT","untrusted-proxy-only"):
+                self.assertNotIn(raw,data)
+
     def test_observation_labels_are_scope_correct(self):
         fetch=(ROOT/"src/Runtime/FBTMobileConfigFetcherCapture.mm").read_text()
         tigon=(ROOT/"src/Runtime/FBTMobileConfigTigonCapture.mm").read_text()
