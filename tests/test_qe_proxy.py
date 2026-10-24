@@ -49,7 +49,12 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual({key: summary['authorization'][key] for key in ('present', 'scheme', 'stage')},
                          {'present': True, 'scheme': 'bearer', 'stage': 'proxy_wire'})
         self.assertEqual(summary['body_shape']['queries'], {'kind': 'object', 'count': 1})
-        self.assertEqual(summary['query_shape'], {'kind': 'form', 'fields': [], 'app_id_present': False, 'app_id_count': 0})
+        self.assertEqual(summary['query_shape']['kind'], 'form')
+        self.assertEqual(summary['query_shape']['fields'], [])
+        self.assertEqual(summary['query_shape']['app_id_present'], False)
+        self.assertEqual(summary['query_shape']['app_id_count'], 0)
+        self.assertEqual(summary['query_shape']['hash_fields']['query_hash']['state'], 'absent')
+        self.assertEqual(summary['query_shape']['hash_fields']['one_query_hash']['state'], 'absent')
         self.assertTrue(summary['body_auth_field_present'])
         self.assertEqual(self.request(headers={})['authorization']['present'], False)
         self.assertEqual(self.request(headers={'authorization': ''})['authorization']['present'], True)
