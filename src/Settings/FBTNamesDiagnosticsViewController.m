@@ -136,15 +136,15 @@ extern void FBTInitEmployeeGroup(void);
     NSMutableArray *controls = [@[@"Iniciar nova captura", @"Armar probes desta sessão", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local", @"Cancelar testes temporários"] mutableCopy];
     NSMutableArray *commands = [@[@"start", @"probes", @"pause", @"copy", @"local", @"cancel"] mutableCopy];
     if (FBTQEInvasiveHooksAllowed()) {
-        [controls addObjectsFromArray:@[@"LAB: próximo pedido QE original", @"LAB: próximo pedido QE + is_employee=true", @"LAB: tw_is_employee=true por 120 s",
+        [controls addObjectsFromArray:@[@"LAB: próximo pedido QE original", @"LAB: próximo pedido QE + is_employee=true", @"LAB: QE Full Metadata (1 pedido / 120 s)", @"LAB: tw_is_employee=true por 120 s",
             [NSString stringWithFormat:@"LAB: Employee local %@", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]]];
-        [commands addObjectsFromArray:@[@"A", @"B", @"tw", @"employee"]];
+        [commands addObjectsFromArray:@[@"A", @"B", @"full_qe", @"tw", @"employee"]];
     }
     self.controlIDs = commands;
     self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
         @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, identityText], historyText,
-        @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
+        @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Perfil LAB QE Full Metadata: arme por até 120 s, execute uma única ação nativa, compare request_protocol_options_before/after com protocol_options do proxy. Nunca interpreta HTTP 400 como sucesso. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
@@ -182,6 +182,7 @@ extern void FBTInitEmployeeGroup(void);
         FBTInitEmployeeGroup();
         FBTInstallMobileConfigRuntime();
         FBTMobileConfigCancelEmployeeExperiment();
+        FBTMobileConfigCancelFullMetadataExperiment();
         FBTEmployeeDiagnosticsReset();
         FBTMobileConfigFetchDiagnosticsReset();
         FBTMobileConfigResponseCaptureArm(@"force_name_download");
@@ -195,12 +196,22 @@ extern void FBTInitEmployeeGroup(void);
         FBTMCNativeProbeDisableAll();
         FBTMobileConfigResponseCaptureDisarm();
         FBTMobileConfigCancelEmployeeExperiment();
+        FBTMobileConfigCancelFullMetadataExperiment();
         FBTEmployeeCancelTWProbe();
     } else if ([command isEqual:@"copy"]) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
     else if ([command isEqual:@"local"]) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
     else if (FBTQEInvasiveHooksAllowed() && ([command isEqual:@"A"] || [command isEqual:@"B"])) FBTMobileConfigArmEmployeeExperiment([command isEqual:@"B"]);
+    else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"full_qe"]) {
+        if (!FBTMobileConfigArmFullMetadataExperiment()) {
+            UIAlertController *warning = [UIAlertController alertControllerWithTitle:@"Perfil LAB indisponível"
+                message:@"É necessário build LAB, diagnóstico ativo e hook fetcher com ABI verificada. Nenhum pedido foi alterado."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [warning addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:warning animated:YES completion:nil];
+        }
+    }
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();
-    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
+    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTMobileConfigCancelFullMetadataExperiment(); FBTEmployeeCancelTWProbe(); }
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"employee"]) {
         [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
         FBTInitEmployeeGroup();
