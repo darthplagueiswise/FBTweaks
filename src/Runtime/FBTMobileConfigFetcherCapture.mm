@@ -225,6 +225,29 @@ static NSString *FBTMCText(const std::string &s) {
     return [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding] ?: @"<non_utf8>";
 }
 
+// Bundle metadata for the MobileConfig *sync* schema, not a QE-info HTTP
+// argument. Export existence and format only; never export digest value.
+// The one-query digest is not inferred from the QE-info queries JSON.
+static NSString *FBTMCOneQueryBundleHashState(void) {
+    static NSString *state = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *path = [[NSBundle mainBundle] pathForResource:@"one_query_hash"
+            ofType:@"txt" inDirectory:@"mobileconfig_res"];
+        if (!path.length) { state = @"bundle_resource_missing"; return; }
+        NSString *raw = [NSString stringWithContentsOfFile:path
+            encoding:NSUTF8StringEncoding error:nil];
+        NSString *text = [raw stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (text.length != 64) { state = @"bundle_resource_invalid_length"; return; }
+        NSCharacterSet *nonHex = [[NSCharacterSet
+            characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet];
+        state = [text rangeOfCharacterFromSet:nonHex].location == NSNotFound
+            ? @"bundle_resource_present_64hex" : @"bundle_resource_invalid_hex";
+    });
+    return state ?: @"bundle_resource_unavailable";
+}
+
 static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         const std::string &purpose, const FBTMCRequestPairs &params,
         FBTMCCompletion completion, const std::string &routingHint, uint64_t target) {
@@ -256,7 +279,15 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"employee_field_added": @(added),
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
-        @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
+        // These two keys are absent from this QE-info request unless the
+        // native caller explicitly provided them. This says NOTHING about
+        // request_data_query_hash inside FBMobileConfigRequester sync requests.
+        @"query_hash_state": @"absent_in_native_arguments",
+        @"one_query_hash_state": @"absent_in_native_arguments",
+        @"hash_observation_scope": @"asyncFetch_native_pairs_not_wire",
+        @"sync_request_data_query_hash_state": @"not_observed_in_qe_info",
+        @"one_query_hash_bundle_resource_state": FBTMCOneQueryBundleHashState()
+        } mutableCopy];
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
     details[@"qe_request_options_state"] = @(fbt_qe_options::label(optionsResult));
     auto device = FBTDeviceIdentityRegistry().observe(params);
