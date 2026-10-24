@@ -42,8 +42,11 @@ int main(void) { @autoreleasepool {
     NSDictionary *entry = FBTNetworkInspectorRecordWithID(identifier);
     Assert([entry[@"purpose"] isEqual:@"mobileconfig_qe_info"], @"purpose preserved");
     Assert([entry[@"tigon_http_status"] integerValue] == 400, @"HTTP status from Tigon");
-    Assert([entry[@"known_request_headers"][@"Authorization"] isEqual:@"Bearer secret-example"], @"header stored only locally");
-    Assert([entry[@"request_parameter_pairs"][1][@"value"] isEqual:@"secret-example"], @"request exact values retained");
+    Assert([entry[@"known_request_headers"][@"Authorization"] isEqual:@"Bearer [redacted]"], @"authorization is redacted in all exports");
+    Assert([entry[@"request_parameter_pairs"][1][@"value"] isEqual:@"[redacted]"], @"token parameter redacted before disk persistence");
+    NSData *safeRecord = [NSJSONSerialization dataWithJSONObject:entry options:0 error:nil];
+    NSString *safeText = [[NSString alloc] initWithData:safeRecord encoding:NSUTF8StringEncoding];
+    Assert([safeText rangeOfString:@"secret-example"].location == NSNotFound, @"no OAuth bytes in exported JSON");
     NSData *exact = [[NSData alloc] initWithBase64EncodedString:entry[@"http_response_body"][@"base64"] options:0];
     Assert([exact isEqualToData:response], @"raw server response byte exact");
     Assert([entry[@"native_completion_body"][@"base64"] isKindOfClass:NSString.class], @"transport error separate from HTTP response");
