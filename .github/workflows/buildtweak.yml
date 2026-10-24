@@ -143,6 +143,7 @@ jobs:
         run: |
           cd main
           python3 -m unittest discover -s tests -p "test_network_inspector_contract.py" -v
+          python3 -m unittest discover -s tests -p "test_network_inspector_adaptive_hooks.py" -v
           clang -std=c11 -fobjc-arc -framework Foundation tests/NetworkInspectorStoreTests.m src/Runtime/FBTNetworkInspectorStore.m -o /tmp/fbt-network-inspector-tests
           /tmp/fbt-network-inspector-tests
 

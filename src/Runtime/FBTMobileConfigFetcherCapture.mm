@@ -346,13 +346,32 @@ void FBTMobileConfigFetcherCaptureInstall(void) {
     }
     static const unsigned char uuid[16] = {76,76,68,254,85,85,49,68,161,194,108,202,228,237,37,151};
     NSString *failure = nil;
-    sFetcherInstalled = FBTRebindVerifiedImageConstSlot("FBSharedFramework", 0x8161f88ULL,
-        uuid, 0xa17f70ULL, (void *)FBTMCAsyncFetch, (void **)&sOriginalFetch, &failure);
-    sFetcherFailure = [failure copy];
+    // Preferred discovery: unique RTTI name -> exact live typeinfo -> class
+    // vtable -> first virtual method. This survives address/UUID churn across
+    // builds while still verifying the loaded Mach-O and executable target.
+    // The first-virtual asyncFetch ABI is expected to remain the same: unlike
+    // a UUID check, RTTI alone cannot establish arbitrary ABI compatibility.
+    NSString *rttiFailure = nil;
+    BOOL dynamic = FBTRebindImageFirstVirtualByRTTI("FBSharedFramework",
+        "N12mobileconfig26FBMobileConfigTigonFetcherE",
+        (void *)FBTMCAsyncFetch, (void **)&sOriginalFetch, &rttiFailure);
+    if (dynamic) {
+        sFetcherInstalled = YES;
+        sFetcherFailure = @"dynamic_RTTI_class_vtable_verified";
+    } else {
+        sFetcherInstalled = FBTRebindVerifiedImageConstSlot("FBSharedFramework", 0x8161f88ULL,
+            uuid, 0xa17f70ULL, (void *)FBTMCAsyncFetch, (void **)&sOriginalFetch, &failure);
+        sFetcherFailure = sFetcherInstalled ?
+            @"legacy_UUID_verified" :
+            [NSString stringWithFormat:@"dynamic=%@; legacy=%@",
+               rttiFailure ?: @"unknown", failure ?: @"unknown"];
+    }
     if (FBTQEInvasiveHooksAllowed()) FBTMCInstallAuthReadHook();
     FBTMobileConfigFetchDiagnosticsRecord(@"native_mc_fetcher_hook", @{
         @"hook_installed": @(sFetcherInstalled), @"message": sFetcherFailure ?: @"",
-        @"capture_surface": @"UUID-verified FBMobileConfigTigonFetcher asyncFetch data slot; native decoded completion"});
+        @"hook_resolution": dynamic ? @"dynamic_RTTI_vtable" :
+            sFetcherInstalled ? @"legacy_exact_UUID" : @"not_installed",
+        @"capture_surface": @"Live C++ RTTI-verified FBMobileConfigTigonFetcher virtual slot, with exact-UUID fallback; original native completion preserved"});
 }
 
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {

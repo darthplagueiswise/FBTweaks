@@ -200,17 +200,22 @@ static NSString *FBTNIJSON(NSDictionary *record) {
     NSString *tigonError = nil, *fetchError = nil;
     BOOL tigon = FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &tigonError);
     BOOL fetcher = FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &fetchError);
-    if (!fetcher || !tigon) {
+    // Versions can expose compatible Tigon callbacks even when the optional
+    // MobileConfig fetcher vtable is unavailable, and vice versa.
+    if (!fetcher && !tigon) {
         FBTNetworkInspectorSetCapturing(NO);
         [self alert:@"Captura indisponível" message:[NSString stringWithFormat:
-            @"Fetcher: %@\nTigon: %@\n\nNão afirmamos capturar tráfego enquanto os hooks não estiverem operacionais.",
+            @"Fetcher: %@\\nTigon: %@\\n\\nNenhum hook validado nesta build.",
             fetchError ?: @"?", tigonError ?: @"?"]];
         [self reloadCaptures];
         return;
     }
     FBTNetworkInspectorSetCapturing(YES);
-    [self alert:@"Network Inspector ativo" message:
-        @"Abra Internal Settings → MobileConfig → Advanced Settings → Force Name Download e também o refresh de valores. As requisições e respostas observadas serão gravadas no iPhone. Nenhum retorno é alterado."];
+    NSString *mode = fetcher && tigon ? @"Completo (fetcher + Tigon)" :
+        tigon ? @"Tigon somente (respostas HTTP; correlação nativa parcial)" :
+                @"Fetcher somente (parâmetros e callback; sem corpo HTTP Tigon)";
+    [self alert:[NSString stringWithFormat:@"Network Inspector: %@", mode]
+        message:@"A captura utiliza os símbolos/RTTI da imagem carregada, com fallback por UUID quando aplicável. Requisições e respostas disponíveis serão armazenadas no iPhone sem alterar o comportamento da rede."];
     [self reloadCaptures];
 }
 - (void)toggleCapture {

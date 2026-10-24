@@ -37,6 +37,10 @@ void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *, NSStri
 }
 BOOL FBTRebindVerifiedMainConstSlot(uint64_t, const unsigned char *, const char *, void *, void **, NSString **) { return NO; }
 BOOL FBTRebindVerifiedImageConstSlot(const char *, uint64_t, const unsigned char *, uint64_t, void *, void **, NSString **) { return NO; }
+BOOL FBTRebindImageVtableSlotBySymbols(const char *, const char *, const char *,
+        const char *, int, void *, void **, NSString **) { return NO; }
+BOOL FBTRebindImageFirstVirtualByRTTI(const char *, const char *, void *,
+        void **, NSString **) { return NO; }
 int rebind_symbols(struct rebinding[], size_t) { return 0; }
 
 struct TestRequest { std::string host, path, method, query; };

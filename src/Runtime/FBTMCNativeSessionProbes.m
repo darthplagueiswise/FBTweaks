@@ -35,6 +35,8 @@ NSDictionary *FBTMCNativeProbeStatus(void) {
         @"fetcher_session_enabled": @(FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)),
         @"tigon_simple_callbacks": FBTMobileConfigTigonCaptureStatus()[@"simple_callback_hooks_installed"] ?: @NO,
         @"fetcher_async_callback": FBTMobileConfigFetcherCaptureStatus()[@"native_mc_fetcher_installed"] ?: @NO,
+        @"tigon_dynamic_symbol_count": FBTMobileConfigTigonCaptureStatus()[@"simple_symbol_resolved_callbacks"] ?: @0,
+        @"fetcher_resolution": FBTMobileConfigFetcherCaptureStatus()[@"native_mc_fetcher_failure"] ?: @"unknown",
         @"nonpersistent": @YES
     };
 }
@@ -55,8 +57,8 @@ BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason) 
         if (reason) *reason = @"Ative primeiro Log QE-info (seguro).";
         return NO;
     }
-    // Installers are independently protected by exact UUID + pointer + data
-    // section checks; no global NSURLSession hook, no Frida, no __TEXT writes.
+    // Installers resolve live C++ symbols/RTTI and verify vtable pointers,
+    // with exact-UUID fallback. No global NSURLSession hook or __TEXT writes.
     atomic_store_explicit(enabledFlag, true, memory_order_release);
     BOOL installed = NO;
     NSString *failure = nil;
@@ -73,7 +75,7 @@ BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason) 
     }
     if (!installed) atomic_store_explicit(enabledFlag, false, memory_order_release);
     if (reason) *reason = installed ?
-        @"Probe armado apenas nesta sessão. Hook nativo verificado no UUID e no slot; veja o diagnóstico após reproduzir o fetch." :
+        @"Probe de sessão instalado após validação da imagem, slot e símbolos/RTTI ou UUID conhecido." :
         [NSString stringWithFormat:@"Hook não instalado: %@", failure ?: @"UUID, slot ou ABI incompatível."];
     FBTMobileConfigFetchDiagnosticsRecord(@"mc_native_probe_toggle", @{
         @"hook_installed": @(installed),

@@ -2,16 +2,37 @@
 
 ## Escopo e implementação
 
-O novo painel **FBTweak → Network Inspector — 100% iPhone** opera dentro
-do processo Facebook 583, sem CA, VPN, proxy, Frida ou computador. Ao autorizar
-a captura, habilita `Log QE-info` e os **probes de sessão** verificados
-por UUID/slot de `FBMobileConfigTigonFetcher::asyncFetch` e
-`TigonSimpleCallbacks` no `FBSharedFramework`.
+O painel **FBTweak → Network Inspector — 100% iPhone** funciona
+dentro do processo Facebook, sem CA, VPN, proxy, Frida ou computador.
+A implementação agora **não exige o UUID da IPA 583 como único requisito**.
 
-O app só grava informações de **pedidos MobileConfig observados nesses hooks**.
-Isso inclui `mobileconfig_qe_info`, `mobileconfig` e sessionless quando
-passam pelo fetcher instrumentado. Não é interceptação de *todas* as
-requisições HTTP do Facebook.
+Os hooks são descobertos em runtime na imagem `FBSharedFramework`:
+
+- `TigonSimpleCallbacks`: resolve a vtable exportada `_ZTV...`, encontra
+  o método âncora `onResponse` e valida os símbolos exatos de
+  `onStarted`, `onBody`, `onEOM` e `onError`. Cada slot precisa
+  conter o ponteiro esperado e estar numa seção válida da imagem.
+- `FBMobileConfigTigonFetcher`: localiza o RTTI exato pelo nome de classe,
+  seu typeinfo e vtable, verifica o primeiro método virtual e a seção
+  executável. A ABI de `asyncFetch` **não pode ser comprovada apenas pelo RTTI**:
+  o probe continua experimental em builds novos e exige opt-in.
+- Builds antigas que coincidam com o UUID/endereços da análise anterior
+  ainda usam esse caminho como fallback.
+
+A ferramenta permite **modo completo**, **somente Tigon** e **somente
+Fetcher**, conforme os hooks realmente instalados. Se só Tigon funcionar,
+captura respostas HTTP com IDs independentes e o marcador
+`tigon_unclassified`; NÃO atribui um pedido genérico ao MobileConfig
+sem correlação nativa. Se só o fetcher funcionar, registra os parâmetros
+e callback nativos, mas não afirma ter visto o corpo HTTP original.
+
+A correspondência é **por recursos e ABI observáveis**, não por versão
+numérica do aplicativo. Isso não garante compatibilidade automática com
+qualquer release que altere a ABI, remova símbolos ou use ponteiros
+autenticados: nesses casos, os hooks recusam a instalação com diagnóstico
+explícito, sem ignorar a validação.
+
+Não é interceptação universal de todo o tráfego do Facebook.
 
 ### Dados disponíveis em cada registro JSON
 
@@ -56,7 +77,8 @@ por hardware ou sanitização irreversível.
 1. Abra FBTweak → **Network Inspector — 100% iPhone**.
 2. Toque **Iniciar captura completa (local)** e confirme.
 3. O painel valida/arma os probes do Tigon e do fetcher; se qualquer um falhar,
-   mostra os motivos e não indica uma captura ativa.
+   informa quais foram instalados; quando um não existe, oferece modo parcial
+   sem prometer correlação ou conteúdo que não foi observado.
 4. Entre em **Internal Settings → MobileConfig → Advanced Settings →
    Force Name Download** ou atualize os valores.
 5. Retorne ao painel: cada operação aparece com request ID, propósito e status.
@@ -74,8 +96,8 @@ por hardware ou sanitização irreversível.
   hoje é a lista completa de parâmetros do `asyncFetch` (até o limite) e
   os headers conhecidos.
 - Correlação entre Tigon e request ID usa a conclusão nativa executada dentro
-  de `TigonSimpleCallbacks`; sem esse callback a captura deve reportar
-  campos ausentes, nunca simular um link.
+  de `TigonSimpleCallbacks`. Sem o fetcher, o registro utiliza ID local
+  independente e o rótulo `tigon_unclassified` em vez de simular um link.
 - Nenhum hook modifica bytes de `__TEXT`, solicitações, respostas ou flags.
 - O endpoint QE-info pode continuar retornando 400 por elegibilidade remota;
   instrumentação do cliente não concede permissões do servidor.
@@ -91,3 +113,8 @@ clang -fobjc-arc -framework Foundation tests/NetworkInspectorStoreTests.m \
 
 A compilação e a execução UIKit no dispositivo devem ser verificadas pelo
 workflow Theos e num aparelho compatível com o UUID esperado.
+
+Para verificar a descoberta dinâmica e os modos parciais:
+```bash
+python3 -m unittest discover -s tests -p 'test_network_inspector_adaptive_hooks.py' -v
+```

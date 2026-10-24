@@ -168,6 +168,8 @@ void FBTNetworkInspectorRecordTigon(NSDictionary *context, NSData *body) {
         ? FBTNIEncodedBody(body, kMaxResponseBytes)
         : @{@"capture_status": bodyState, @"length": @(body.length)};
     FBTNIUpdate(rid, ^(NSMutableDictionary *record) {
+        if (!record[@"purpose"]) record[@"purpose"] = copy[@"capture_reason"] ?: @"tigon_unclassified";
+        if (!record[@"stage"]) record[@"stage"] = @"tigon_response_received";
         record[@"tigon_http_status"] = copy[@"http_status"] ?: @0;
         record[@"tigon_status_source"] = copy[@"http_status_source"] ?: @"not_observed";
         for (NSString *field in @[@"request_host", @"request_path", @"request_method", @"authorization_state",

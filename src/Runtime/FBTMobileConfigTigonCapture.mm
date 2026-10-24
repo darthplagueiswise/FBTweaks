@@ -45,6 +45,8 @@ static thread_local BOOL sCurrentSimpleWasCaptured;
 static thread_local BOOL sCurrentSimpleIsError;
 static std::atomic<unsigned long long> sSimpleStartedCalls(0), sSimpleResponseCalls(0),
     sSimpleBodyCalls(0), sSimpleEOMCalls(0), sSimpleErrorCalls(0), sNativeCorrelations(0);
+static std::atomic<unsigned long long> sStandaloneTigonIDs(1000000000000ULL);
+static NSUInteger sSymbolDiscoveredSimpleHooks = 0;
 struct FBTSimpleEndScope {
     void *previous;
     BOOL previousCaptured, previousError;
@@ -216,7 +218,7 @@ static NSMutableDictionary *FBTTigonProvisionalContext(void *self) {
     FBTTigonPruneLocked();
     NSValue *key = [NSValue valueWithPointer:self];
     NSMutableDictionary *context = sTigonCapturedRequests[key];
-    if (!context && sPendingNativeRequests.count) {
+    if (!context && (sPendingNativeRequests.count || FBTNetworkInspectorIsCapturing())) {
         if (sTigonCapturedRequests.count >= 32) {
             NSValue *oldest = nil; double earliest = DBL_MAX;
             for (NSValue *candidate in sTigonCapturedRequests) {
@@ -227,6 +229,11 @@ static NSMutableDictionary *FBTTigonProvisionalContext(void *self) {
         }
         context = [@{@"body": [NSMutableData data], @"created": @(CACurrentMediaTime()),
                      @"transport": @"TigonSimpleCallbacks", @"mc_correlated": @NO} mutableCopy];
+        if (FBTNetworkInspectorIsCapturing()) {
+            context[@"request_id"] = @(++sStandaloneTigonIDs);
+            context[@"capture_reason"] = @"tigon_unclassified";
+            context[@"inspector_standalone"] = @YES;
+        }
         sTigonCapturedRequests[key] = context;
     }
     [sTigonCaptureLock unlock];
@@ -323,6 +330,7 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         } else {
             hashState = FBTTigonQueryHashState(std::string());
         }
+        NSDictionary *earlier = simple ? FBTTigonContextForObject(self) : nil;
         NSMutableDictionary *context = [@{
             @"transport": simple ? @"TigonSimpleCallbacks" : @"TigonForwardingRequestCallbacks",
             @"request_host": FBTNamesRedactMessage(host ?: @""),
@@ -333,6 +341,15 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
             @"query_hash_source": hashState[@"query_hash_source"] ?: @"url_query_only"
         } mutableCopy];
         [context addEntriesFromDictionary:hashState];
+        if ([earlier[@"request_id"] isKindOfClass:NSNumber.class]) {
+            context[@"request_id"] = earlier[@"request_id"];
+            context[@"inspector_standalone"] = earlier[@"inspector_standalone"] ?: @NO;
+        } else if (simple && FBTNetworkInspectorIsCapturing()) {
+            context[@"request_id"] = @(++sStandaloneTigonIDs);
+            context[@"inspector_standalone"] = @YES;
+        }
+        if (simple && !confirmedEndpoint && FBTNetworkInspectorIsCapturing())
+            context[@"capture_reason"] = @"tigon_unclassified";
         [context addEntriesFromDictionary:FBTObserveRequestAuthorization(request)];
         if (FBTNetworkInspectorIsCapturing()) {
             context[@"inspector_raw_host"] = host ?: @"";
@@ -417,11 +434,20 @@ static void FBTTigonFinishCapture(void *self) {
         [sTigonCapturedRequests removeObjectForKey:[NSValue valueWithPointer:self]];
         [sTigonCaptureLock unlock];
     }
-    if (!context || ![context[@"mc_correlated"] boolValue]) return;
+    if (!context) return;
+    BOOL correlated = [context[@"mc_correlated"] boolValue];
+    BOOL inspected = FBTNetworkInspectorIsCapturing() && context[@"request_id"] != nil;
+    if (!correlated && !inspected) return;
 
     NSMutableData *body = [context[@"body"] isKindOfClass:[NSMutableData class]] ? context[@"body"] : nil;
     if (FBTNetworkInspectorIsCapturing() && context[@"request_id"]) {
         FBTNetworkInspectorRecordTigon(context, body);
+    }
+    if (!correlated) {
+        [sTigonCaptureLock lock];
+        sTigonBodyCount++;
+        [sTigonCaptureLock unlock];
+        return; // Unclassified traffic remains inside the opt-in inspector.
     }
     NSString *captureStatus = [context[@"body_capture_status"] isKindOfClass:[NSString class]]
         ? context[@"body_capture_status"] : @"ready";
@@ -564,17 +590,53 @@ static void FBTInstallSimpleHooks(void) {
         {0x81005a0ULL, 0xfde27cULL, (void *)FBTSimpleOnEOM, (void **)&sSimpleEOM},
         {0x81005b0ULL, 0x3fdda18ULL, (void *)FBTSimpleOnError, (void **)&sSimpleError}
     };
+    // Vtable symbol and exact virtual method symbols are more stable across
+    // Facebook releases than one IPA's UUID/RVA. The rebinder verifies the
+    // matching symbol image, C++ vtable anchor, relative slot layout and
+    // original function target before writing any pointer.
+    static const char *vtableSymbol = "_ZTVN8facebook5tigon20TigonSimpleCallbacksE";
+    static const char *responseSymbol = "_ZN8facebook5tigon20TigonSimpleCallbacks10onResponseEONS0_13TigonResponseE";
+    static const char *methodSymbols[] = {
+        "_ZN8facebook5tigon20TigonSimpleCallbacks9onStartedERKNS0_12TigonRequestE",
+        "_ZN8facebook5tigon20TigonSimpleCallbacks10onResponseEONS0_13TigonResponseE",
+        "_ZN8facebook5tigon20TigonSimpleCallbacks6onBodyENSt3__110unique_ptrIN5folly5IOBufENS2_14default_deleteIS5_EEEE",
+        "_ZN8facebook5tigon20TigonSimpleCallbacks5onEOMEONS0_12TigonSummaryE",
+        "_ZN8facebook5tigon20TigonSimpleCallbacks7onErrorERKNS0_10TigonErrorEONS0_12TigonSummaryE"
+    };
+    static const int relativeToResponse[] = {-6, 0, 1, 3, 5};
     BOOL complete = YES;
+    NSUInteger dynamicCount = 0, legacyCount = 0;
     NSMutableArray *failures = [NSMutableArray array];
-    for (const Slot &slot : slots) {
-        NSString *failure = nil;
-        BOOL ok = FBTRebindVerifiedImageConstSlot("FBSharedFramework", slot.address,
-            uuid, slot.target, slot.replacement, slot.original, &failure);
+    for (NSUInteger n = 0; n < sizeof(slots) / sizeof(slots[0]); ++n) {
+        const Slot &slot = slots[n];
+        NSString *dynamicFailure = nil;
+        BOOL ok = FBTRebindImageVtableSlotBySymbols("FBSharedFramework",
+            vtableSymbol, responseSymbol, methodSymbols[n],
+            relativeToResponse[n], slot.replacement, slot.original, &dynamicFailure);
+        if (ok) ++dynamicCount;
+        if (!ok) {
+            // Legacy exact UUID/RVA path remains for builds that stripped
+            // C++ symbols but match the previously verified image exactly.
+            NSString *legacyFailure = nil;
+            ok = FBTRebindVerifiedImageConstSlot("FBSharedFramework", slot.address,
+                uuid, slot.target, slot.replacement, slot.original, &legacyFailure);
+            if (ok) ++legacyCount;
+            else [failures addObject:[NSString stringWithFormat:@"method%lu:dynamic=%@ legacy=%@",
+                (unsigned long)n, dynamicFailure ?: @"unknown", legacyFailure ?: @"unknown"]];
+        }
         complete = complete && ok;
-        if (!ok) [failures addObject:[NSString stringWithFormat:@"0x%llx:%@", (unsigned long long)slot.address, failure ?: @"unknown"]];
     }
     sSimpleHooksInstalled = complete;
+    sSymbolDiscoveredSimpleHooks = dynamicCount;
     sSimpleFailure = [failures componentsJoinedByString:@"; "];
+    FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_vtable_discovery", @{
+        @"dynamic_symbols_installed": @(dynamicCount),
+        @"legacy_uuid_installed": @(legacyCount),
+        @"all_callbacks_installed": @(complete),
+        @"failure": sSimpleFailure ?: @"",
+        @"match_type": dynamicCount ? @"loaded_CXX_symbol_and_vtable_pointer" :
+            legacyCount ? @"exact_preverified_UUID" : @"not_installed"
+    });
     FBTMobileConfigResponseCaptureRecordTransportEvent(@"tigon_simple_callback_hooks", @{
         @"hook_installed": @(complete), @"message": sSimpleFailure ?: @"",
         @"capture_surface": @"UUID-verified shared TigonSimpleCallbacks data slots; HTTP status/body before native error conversion"
@@ -618,6 +680,7 @@ NSDictionary *FBTMobileConfigTigonCaptureStatus(void) {
         @"simple_error_calls": @(sSimpleErrorCalls.load()),
         @"native_tigon_correlations": @(sNativeCorrelations.load()),
         @"simple_callback_hooks_installed": @(sSimpleHooksInstalled),
+        @"simple_symbol_resolved_callbacks": @(sSymbolDiscoveredSimpleHooks),
         @"simple_callback_failure": sSimpleFailure ?: @"not_attempted",
         @"tigon_hooks_installed": @(sTigonHooksInstalled),
         @"tigon_request_hook_installed": @(sOrigTigonStarted != nullptr),
@@ -658,18 +721,16 @@ void FBTMobileConfigResponseCaptureInstallTigon(void) {
     if (!sFindHeader && sSimpleHooksInstalled) {
         void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
         Dl_info info = {};
-        if (candidate && dladdr(candidate, &info) && info.dli_fname && info.dli_fbase &&
-            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0 &&
-            (uintptr_t)candidate - (uintptr_t)info.dli_fbase == 0x561d4c)
+        if (candidate && dladdr(candidate, &info) && info.dli_fname &&
+            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0)
             sFindHeader = (FBTFindHeaderFn)candidate;
     }
     if (!FBTQEInvasiveHooksAllowed()) return; // Session probe ends here; no fishhook or global callbacks.
     if (!sFindHeader && sSimpleHooksInstalled) {
         void *candidate = dlsym(RTLD_DEFAULT, "_ZNK8facebook5tigon12TigonRequest10findHeaderERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
         Dl_info info = {};
-        if (candidate && dladdr(candidate, &info) && info.dli_fname && info.dli_fbase &&
-            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0 &&
-            (uintptr_t)candidate - (uintptr_t)info.dli_fbase == 0x561d4c)
+        if (candidate && dladdr(candidate, &info) && info.dli_fname &&
+            strcmp(strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/')+1 : info.dli_fname, "FBSharedFramework") == 0)
             sFindHeader = (FBTFindHeaderFn)candidate;
     }
     if (sTigonHooksInstalled) return;
