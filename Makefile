@@ -23,8 +23,10 @@ FBT_TARGET_FLAGS = -DTARGET_OS_MAC=1 -DTARGET_OS_OSX=0 -DTARGET_OS_IPHONE=1 -DTA
 
 # Logger master switch. Build com FBT_FILELOG=0 para producao.
 FBT_FILELOG ?= 1
+# Experimental QE request mutation is opt-in only. Release/PR builds stay read-only.
+FBT_QE_LAB ?= 0
 
-$(TWEAK_NAME)_CFLAGS = -I$(CURDIR)/src -fobjc-arc -fobjc-exceptions -fcxx-exceptions -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks $(FBT_TARGET_FLAGS) -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DFBT_FILELOG=$(FBT_FILELOG) -include src/FBTPrefix.h
+$(TWEAK_NAME)_CFLAGS = -I$(CURDIR)/src -fobjc-arc -fobjc-exceptions -fcxx-exceptions -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks $(FBT_TARGET_FLAGS) -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DFBT_FILELOG=$(FBT_FILELOG) -DFBT_ENABLE_QE_INVASIVE_HOOKS=$(FBT_QE_LAB) -include src/FBTPrefix.h
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 
 # UI é UIKit puro; sem Swift/bridging header/modulemap.
