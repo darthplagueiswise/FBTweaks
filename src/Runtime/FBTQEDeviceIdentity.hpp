@@ -33,7 +33,7 @@ public:
         bool uuid = value->size() == 36;
         for (size_t i = 0; uuid && i < value->size(); ++i)
             uuid = i == 8 || i == 13 || i == 18 || i == 23 ? (*value)[i] == '-' : hex((*value)[i]);
-        result.format = uuid ? "uuid_text" :
+        result.format = *value == "device_id" ? "field_name_literal" : uuid ? "uuid_text" :
             std::all_of(value->begin(), value->end(), [](char c) { return c >= '0' && c <= '9'; }) ? "decimal_text" : "other_text";
         std::lock_guard<std::mutex> guard(mutex_);
         auto found = observed_.find(*value);

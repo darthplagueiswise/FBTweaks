@@ -16,6 +16,7 @@ int main() {
     assert(std::string(registry.observe({{"device_id","123456789"}}).format) == "decimal_text");
     assert(std::string(registry.observe({{"device_id","11111111-2222-3333-4444-555555555555"}}).format) == "uuid_text");
     assert(std::string(registry.observe({{"device_id","not-a-uuid"}}).format) == "other_text");
+    assert(std::string(registry.observe({{"device_id","device_id"}}).format) == "field_name_literal");
     assert(registry.observe({{"device_id",std::string(4097,'x')}}).observation == 0);
     for (int i = 0; i < 200; ++i) registry.observe({{"device_id","fixture"+std::to_string(i)}});
     assert(registry.observe({{"device_id","new-after-capacity"}}).observation == 0);
