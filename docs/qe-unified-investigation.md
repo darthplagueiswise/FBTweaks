@@ -8,7 +8,7 @@ O end-to-end é **uma investigação**, mesmo quando há diferentes endpoints: p
 
 ## Evidências consolidadas dos dados do usuário
 
-16 exports de `NetworkInspector` fornecidos no contexto foram examinados. Todos são `POST /mobileconfig_qe_info` e registram status HTTP 400; o corpo inclui `OAuthException` código 100 e `Employee Account or Specific App Conditions`. Todas as capturas contêm listas JSON de queries com membros únicos e contagens entre 3.314 e 4.287. Nenhuma das 16 contém `query_hash` nem `one_query_hash` em `request_parameter_pairs`, que são os **argumentos nativos anteriores à construção do TigonRequest**.
+16 exports de `NetworkInspector` fornecidos no contexto foram examinados. Todos são `POST /mobileconfig_qe_info` e registram HTTP 400. Em 15 capturas, o corpo disponível comprova `OAuthException` código 100 / `Employee Account or Specific App Conditions`; uma registra HTTP 400 sem corpo de erro suficiente para classificar seu subtipo. Todas as capturas contêm listas JSON de queries com membros únicos e contagens entre 3.314 e 4.287. Nenhuma das 16 contém `query_hash` nem `one_query_hash` em `request_parameter_pairs`, que são os **argumentos nativos anteriores à construção do TigonRequest**.
 
 14 registros trazem `device_id` com o literal `device_id` (o REA original também identificou esse marcador no caminho `refreshNames`). Outros dois levam um identificador textual diferente, sem alteração do resultado HTTP 400. Isto enfraquece fortemente a hipótese de que simplesmente substituir o literal por UUID resolverá a recusa. Não registrar nem substituir credenciais ou device IDs completos nos logs sanitizados.
 
