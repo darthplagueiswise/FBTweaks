@@ -84,8 +84,14 @@ extern void FBTInitEmployeeGroup(void);
         transport[@"native_tigon_correlations"] ?: @0,
         [transport[@"native_mc_fetcher_installed"] boolValue] ? @"" : (transport[@"native_mc_fetcher_failure"] ?: @"Fetcher não instalado. "),
         [transport[@"simple_callback_hooks_installed"] boolValue] ? @"" : (transport[@"simple_callback_failure"] ?: @"Callbacks não instalados.")];
-    NSString *requestText = request ? [NSString stringWithFormat:@"Pedido %@ · %@ · %@\n%@",
-        request[@"request_id"], request[@"request_method"] ?: @"?", request[@"time_utc"] ?: @"", request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa pelo menu nativo.";
+    NSString *requestText = request ? [NSString stringWithFormat:
+        @"Pedido %@ · %@ · %@\nPerfil: %@ · aplicado: %@ · motivo: %@\nAntes (somente booleanos): %@\nDepois (somente booleanos): %@\nResumo: %@",
+        request[@"request_id"], request[@"request_method"] ?: @"?", request[@"time_utc"] ?: @"",
+        request[@"experiment_profile"] ?: @"native",
+        request[@"metadata_profile_applied"] ?: @NO, request[@"metadata_profile_reason"] ?: @"not_armed",
+        request[@"request_protocol_options_before"] ?: @{},
+        request[@"request_protocol_options_after"] ?: @{},
+        request[@"request_parameter_summary"] ?: @""] : @"Aguardando tentativa pelo menu nativo.";
     NSString *result = diagnostic.count ? [NSString stringWithFormat:@"HTTP %@ · %@\n%@ bytes recebidos\nCódigo %@ · subcódigo %@ · %@\n%@",
         [diagnostic[@"http_status"] integerValue] ? diagnostic[@"http_status"] : @"não observado", diagnostic[@"body_status"] ?: @"sem estado",
         diagnostic[@"response_bytes"] ?: @0, diagnostic[@"server_error_code"] ?: @"não fornecido",
@@ -208,6 +214,12 @@ extern void FBTInitEmployeeGroup(void);
                 preferredStyle:UIAlertControllerStyleAlert];
             [warning addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:warning animated:YES completion:nil];
+        } else {
+            UIAlertController *ready = [UIAlertController alertControllerWithTitle:@"QE Full Metadata armado"
+                message:@"O próximo POST mobileconfig_qe_info dentro de 120 s usará o perfil experimental se os nove campos forem válidos. Execute Force Name Download e confira o resultado real."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [ready addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:ready animated:YES completion:nil];
         }
     }
     else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();
