@@ -1,5 +1,6 @@
 #import "FBTNamesResponseSummary.h"
 #include <zlib.h>
+#include <stdint.h>
 
 NSString *FBTNamesRedactMessage(NSString *message) {
     if (![message isKindOfClass:NSString.class]) return @"";
@@ -81,6 +82,27 @@ NSDictionary *FBTNamesResponseSummary(NSData *data) {
         if ([value isKindOfClass:NSNumber.class]) out[keys[key]] = value;
         else if ([value isKindOfClass:NSString.class]) out[keys[key]] = FBTNamesRedactMessage(value);
     }
+    return out;
+}
+
+NSDictionary *FBTNamesResponseMetadata(NSData *data) {
+    NSDictionary *summary = FBTNamesResponseSummary(data);
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"body_status", @"decoded_response_bytes", @"id_to_names_valid", @"id_to_names_count"])
+        if (summary[key]) out[key] = summary[key];
+    for (NSString *key in @[@"server_error_code", @"server_error_subcode"]) {
+        id value = summary[key];
+        if ([value isKindOfClass:NSNumber.class] && [value doubleValue] >= 0 &&
+            [value doubleValue] <= INT32_MAX && [value doubleValue] == [value longLongValue]) out[key] = value;
+    }
+    NSString *type = [summary[@"server_error_type"] isKindOfClass:NSString.class] ? summary[@"server_error_type"] : nil;
+    if (type) out[@"server_error_type"] = [@[@"OAuthException", @"GraphMethodException", @"OAuthAccessTokenException"] containsObject:type] ? type : @"unrecognized";
+    NSString *message = [summary[@"server_error_message"] isKindOfClass:NSString.class] ? summary[@"server_error_message"] : @"";
+    message = [[message stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    if ([message hasPrefix:@"(#100)"]) message = [[message substringFromIndex:6] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if ([out[@"server_error_code"] isEqual:@100] && [type isEqual:@"OAuthException"] &&
+        [message isEqual:@"employee account or specific app conditions"])
+        out[@"server_error_message"] = @"Employee Account or Specific App Conditions";
     return out;
 }
 

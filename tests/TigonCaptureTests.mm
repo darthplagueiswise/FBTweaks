@@ -1,7 +1,9 @@
 #import <Foundation/Foundation.h>
 // This fixture explicitly tests the legacy LAB A/B behavior. Production
 // sideload builds retain FBT_ENABLE_QE_INVASIVE_HOOKS=0.
+#ifndef FBT_ENABLE_QE_INVASIVE_HOOKS
 #define FBT_ENABLE_QE_INVASIVE_HOOKS 1
+#endif
 #include <cstring>
 #import "../src/Runtime/FBTNamesResponseSummary.m"
 #import "../src/Runtime/FBTMobileConfigTigonCapture.mm"
@@ -23,11 +25,12 @@ NSDictionary *FBTEmployeeDiagnosticsSnapshot(void) { return @{@"sequence": @0, @
 static NSMutableArray *sSaved, *sEvents;
 static NSDictionary *sLastNativeEvent;
 static NSDictionary *sLastTransportEvent;
+static NSDictionary *sLastNamesDiagnostic;
 static NSUInteger sBodyCalls, sResponseCalls, sEndCalls;
 static void *sExpectedBodyArgument, *sExpectedResponse, *sExpectedSummary;
 static void Check(BOOL result, NSString *message) { if (!result) { NSLog(@"FAIL: %@", message); exit(1); } }
 void FBTMobileConfigFetchDiagnosticsRecord(NSString *event, NSDictionary *details) { [sEvents addObject:event]; if ([event isEqual:@"native_mc_fetch_completed"]) sLastNativeEvent = [details copy]; }
-void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details) { [sEvents addObject:event]; sLastTransportEvent = [details copy]; }
+void FBTMobileConfigResponseCaptureRecordTransportEvent(NSString *event, NSDictionary *details) { [sEvents addObject:event]; sLastTransportEvent = [details copy]; if ([event isEqual:@"names_transport_diagnostic"]) sLastNamesDiagnostic = [details copy]; }
 NSDictionary *FBTMobileConfigResponseCaptureArmInfo(void) { return @{}; }
 BOOL FBTMobileConfigResponseCaptureShouldCaptureRequest(NSString *, NSString *, NSString *) { return YES; }
 void FBTMobileConfigResponseCaptureWriteRawBody(NSData *data, NSString *, NSString *, NSString *, NSDictionary *state,

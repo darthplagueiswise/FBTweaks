@@ -8,11 +8,13 @@
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTEmployeeDiagnostics.h"
+#import "../Runtime/FBTMCNativeSessionProbes.h"
 extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
 @property (nonatomic, strong) NSTimer *timer;
 @property (nonatomic, copy) NSDictionary *report;
+@property (nonatomic, copy) NSArray<NSString *> *controlIDs;
 @property (nonatomic, copy) NSArray<NSDictionary *> *history;
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows;
 @end
@@ -20,7 +22,7 @@ extern void FBTInitEmployeeGroup(void);
 @implementation FBTNamesDiagnosticsViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Fetch, FBUser e tw_*";
+    self.title = @"Fetch e contexto QE";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 64;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -73,7 +75,9 @@ extern void FBTInitEmployeeGroup(void);
     NSDictionary *assessment = FBTNamesAssessRequest(request ?: @{}, diagnostic ?: @{}, completion ?: @{});
     NSString *interpretation = [NSString stringWithFormat:@"Perfil: %@\n%@\n\nTransporte: %@ · nomes: %@\n%@\n\n%@\n\n%@\n\n%@", assessment[@"request_profile"], assessment[@"request_options_explanation"], assessment[@"transport_state"], assessment[@"names_payload_state"], assessment[@"native_callback_explanation"], assessment[@"authentication_explanation"], assessment[@"whitehat_explanation"], assessment[@"next_step"]];
     BOOL enabled = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
-    BOOL installed = [transport[@"native_mc_fetcher_installed"] boolValue] && [transport[@"simple_callback_hooks_installed"] boolValue];
+    BOOL installed = [transport[@"native_mc_fetcher_installed"] boolValue] && [transport[@"simple_callback_hooks_installed"] boolValue] &&
+        [self.report[@"native_session_probes"][@"fetcher_session_enabled"] boolValue] &&
+        [self.report[@"native_session_probes"][@"tigon_session_enabled"] boolValue];
     NSString *readiness = !enabled ? @"Captura pausada" : installed ? @"Captura nativa pronta" : @"Captura incompleta — verifique os hooks";
     NSString *status = [NSString stringWithFormat:@"%@\nPedidos nativos: %@ · conclusões: %@\nCorrelações de transporte: %@\n%@%@",
         readiness, transport[@"native_mc_requests"] ?: @0, transport[@"native_mc_responses"] ?: @0,
@@ -108,13 +112,39 @@ extern void FBTInitEmployeeGroup(void);
         completion[@"authorization_state"] ?: @"não observado", completion[@"authorization_scheme"] ?: @"não observado",
         completion[@"authorization_credential_present"] ?: @"não observada", completion[@"authorization_observation_stage"] ?: @"não observada",
         request[@"experiment_profile"] ?: @"native", request[@"experiment_state"] ?: @"original"];
-    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local",
-        @"Armar A: próximo pedido QE original", @"Armar B: próximo pedido QE + is_employee=true",
-        @"Testar tw_is_employee=true por 120 s", @"Cancelar testes temporários",
-        [NSString stringWithFormat:@"Employee local (FBUser/gates): %@ — tocar alterna", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]],
+    NSString *serviceText = [NSString stringWithFormat:@"Serviço/fetcher do pedido QE:\n%@\n\nLeituras do seletor de autenticação:\n%@\n\nOs identificadores são efêmeros deste processo. Igualdade compara observações de ponteiros; não demonstra sessão, ator autorizado ou vida útil do objeto. Leituras do construtor são globais ao processo, sem vínculo comprovado com este pedido.",
+        request[@"tigon_service_snapshot"] ?: @"não observado — arme o probe nativo do fetcher",
+        request[@"auth_validation_read_snapshot"] ?: @"não observadas"];
+    NSMutableArray *valueServices = [NSMutableArray array];
+    for (NSDictionary *event in events.reverseObjectEnumerator) {
+        if (![event[@"process_session_id"] isEqual:process] ||
+            ![event[@"event"] isEqual:@"native_mc_fetch_started"] ||
+            ![@[@"mobileconfig", @"mobileconfigsessionless"] containsObject:event[@"capture_reason"] ?: @""]) continue;
+        [valueServices addObject:[NSString stringWithFormat:@"%@ · pedido %@ · %@\n%@", event[@"capture_reason"],
+            event[@"request_id"], event[@"time_utc"] ?: @"", event[@"tigon_service_snapshot"] ?: @"serviço não observado"]];
+        if (valueServices.count == 4) break;
+    }
+    NSString *comparisonText = valueServices.count ? [valueServices componentsJoinedByString:@"\n\n"] : @"Nenhum fetch de valores/sessionless observado nesta captura. Reproduza cada ação separadamente com os probes armados.";
+    NSMutableArray *uiContexts = [NSMutableArray array];
+    for (NSDictionary *event in events.reverseObjectEnumerator) {
+        if (![event[@"process_session_id"] isEqual:process] || ![event[@"event"] isEqual:@"mc_ui_service_snapshot"]) continue;
+        [uiContexts addObject:[NSString stringWithFormat:@"%@ · %@\n%@", event[@"ui_context_kind"] ?: @"?",
+            event[@"time_utc"] ?: @"", event[@"tigon_service_snapshot"] ?: @"não observado"]];
+        if (uiContexts.count == 6) break;
+    }
+    NSString *contextText = uiContexts.count ? [uiContexts componentsJoinedByString:@"\n\n"] : @"Contextos da UI ainda não observados. Com o probe do fetcher armado, reabra MobileConfig e selecione um item. A captura exige o getter e o layout da imagem verificada.";
+    NSMutableArray *controls = [@[@"Iniciar nova captura", @"Armar probes desta sessão", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local", @"Cancelar testes temporários"] mutableCopy];
+    NSMutableArray *commands = [@[@"start", @"probes", @"pause", @"copy", @"local", @"cancel"] mutableCopy];
+    if (FBTQEInvasiveHooksAllowed()) {
+        [controls addObjectsFromArray:@[@"LAB: próximo pedido QE original", @"LAB: próximo pedido QE + is_employee=true", @"LAB: tw_is_employee=true por 120 s",
+            [NSString stringWithFormat:@"LAB: Employee local %@", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]]];
+        [commands addObjectsFromArray:@[@"A", @"B", @"tw", @"employee"]];
+    }
+    self.controlIDs = commands;
+    self.rows = @[controls,
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, identityText], historyText,
-        @[@"Inicie a captura uma vez. Arme A e execute Force name download; arme B e repita a mesma ação. Faça depois A/B na consulta de params. Cada armamento vale só para o próximo POST QE-info em até 120 s. Confira no histórico qual ação o consumiu.\n\nTeste FBUser/gates e tw_is_employee separadamente, mantendo o restante fixo. O teste tw_* afeta somente tw_is_employee.enabled nos leitores observados e expira em 120 s. Não grava mc_overrides.\n\nVolte e compartilhe o JSON. O relatório não contém seu token. Leituras locais de identidade são observações do processo, não prova de autorização remota nem de associação a um pedido específico."]];
+        @[requestText, result, localState, interpretation, authText, serviceText, contextText, comparisonText, identityText], historyText,
+        @[@"Inicie uma captura e mantenha as opções locais constantes. Em Configurações da tweak, arme os dois probes nativos de sessão (fetcher e callbacks Tigon). Reproduza uma ação de cada vez: consulta QE, Force name download e refresh de valores. Cada pedido tem ID, horário, serviço observado e resultado próprios. Os probes são experimentais e exigem UUID/slot compatível; reiniciar desarma.\n\nPara confirmar o contexto enviado na rede, use o proxy Whitehat com sua CA correspondente; veja docs/qe-proxy-whitehat.md. A captura externa se alinha por ação/horário, não ganha associação exata à sessão automaticamente. Exporte o JSON do painel e o JSONL sanitizado do proxy.\n\nNão altere employee/overrides para estabelecer a linha de base. OAuth presente, HTTP 200 em valores e mesmo serviço não comprovam elegibilidade QE. O predicado privado do servidor pode continuar desconhecido."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
@@ -143,7 +173,9 @@ extern void FBTInitEmployeeGroup(void);
         [self presentViewController:detail animated:YES completion:nil]; return;
     }
     if (path.section != 0) return;
-    if (path.row == 0) {
+    if (path.row >= self.controlIDs.count) return;
+    NSString *command = self.controlIDs[path.row];
+    if ([command isEqual:@"start"]) {
         [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTMobileConfigResponseCaptureInstall();
         FBTInstallMobileConfigDebugUIBootstrap();
@@ -153,18 +185,23 @@ extern void FBTInitEmployeeGroup(void);
         FBTEmployeeDiagnosticsReset();
         FBTMobileConfigFetchDiagnosticsReset();
         FBTMobileConfigResponseCaptureArm(@"force_name_download");
-    } else if (path.row == 1) {
+    } else if ([command isEqual:@"probes"]) {
+        NSString *reason = nil;
+        FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &reason);
+        FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &reason);
+    } else if ([command isEqual:@"pause"]) {
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+        FBTMCNativeProbeDisableAll();
         FBTMobileConfigResponseCaptureDisarm();
         FBTMobileConfigCancelEmployeeExperiment();
         FBTEmployeeCancelTWProbe();
-    } else if (path.row == 2) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
-    else if (path.row == 3) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
-    else if (path.row == 4 || path.row == 5) FBTMobileConfigArmEmployeeExperiment(path.row == 5);
-    else if (path.row == 6) FBTEmployeeArmTWProbe();
-    else if (path.row == 7) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
-    else if (path.row == 8) {
+    } else if ([command isEqual:@"copy"]) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
+    else if ([command isEqual:@"local"]) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if (FBTQEInvasiveHooksAllowed() && ([command isEqual:@"A"] || [command isEqual:@"B"])) FBTMobileConfigArmEmployeeExperiment([command isEqual:@"B"]);
+    else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"tw"]) FBTEmployeeArmTWProbe();
+    else if ([command isEqual:@"cancel"]) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
+    else if (FBTQEInvasiveHooksAllowed() && [command isEqual:@"employee"]) {
         [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
         FBTInitEmployeeGroup();
     }

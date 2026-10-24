@@ -19,6 +19,9 @@ rea_ipa_analysis/
 analysis-output/
 scripts/rea/__pycache__/
 tests/__pycache__/
+__pycache__/
+# Proxy sessions contain local CA private keys and never belong in Git.
+qe-proxy-session*/
 *.gpr
 *.rep/
 *.gzf

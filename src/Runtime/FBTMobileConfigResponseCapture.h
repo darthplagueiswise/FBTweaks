@@ -12,6 +12,8 @@ void FBTMobileConfigResponseCaptureInstall(void);
 void FBTMobileConfigResponseCaptureInstallTigon(void);
 void FBTMobileConfigFetcherCaptureInstall(void);
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void);
+// Read-only, UUID/IMP/layout checked UI snapshot; not proof of remote identity.
+void FBTMobileConfigFetcherObserveUIContext(id contextManager, NSString *contextKind);
 // One-shot experiment, memory only, expires in 120 seconds.
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField);
 void FBTMobileConfigCancelEmployeeExperiment(void);

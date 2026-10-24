@@ -6,6 +6,7 @@
 #import "../FBTDefaults.h"
 #import "FBTEmployeeDiagnostics.h"
 #include "FBTMCRequestExperiment.hpp"
+#include "FBTMCServiceEvidence.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -30,6 +31,8 @@ using FBTMCAsyncFetchFn = void (*)(const void *, const std::string &, const std:
 static FBTMCAsyncFetchFn sOriginalFetch;
 static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
+static fbt_mc_evidence::ServiceRegistry sObservedServices;
+static fbt_mc_evidence::ServiceRegistry sObservedFetchers;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
 static fbt_mc_probe::OneShot sRequestExperiment;
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
@@ -141,7 +144,18 @@ static NSDictionary *FBTMCServiceSnapshot(const void *fetcher, BOOL verifiedLayo
     NSMutableDictionary *state = [@{@"state": @"observed",
         @"dispatch": rva == 0x45be80 ? @"TigonStack::sendRequest" : @"other_or_unresolved",
         @"source": @"verified_fetcher_plus_0x50_vtable_plus_0x10",
-        @"auth_header_state": @"not_observed"} mutableCopy];
+        @"auth_header_state": @"not_observed",
+        @"session_binding_state": @"not_observed",
+        @"actor_binding_state": @"not_observed",
+        @"remote_eligibility_state": @"not_observed",
+        @"identity_scope": @"process_pointer_observation_not_lifetime_or_account_proof"} mutableCopy];
+    // Equality is useful to compare QE and value fetches. It does not identify
+    // the session captured by interceptors, nor authenticate a remote actor.
+    auto serviceID = sObservedServices.observe(service);
+    auto fetcherID = sObservedFetchers.observe(object);
+    if (serviceID) state[@"service_observation_id"] = @(serviceID);
+    if (fetcherID) state[@"fetcher_observation_id"] = @(fetcherID);
+    if (!serviceID || !fetcherID) state[@"identity_capacity_reached"] = @YES;
     if (rva) state[@"shared_send_rva"] = [NSString stringWithFormat:@"0x%llx", (unsigned long long)rva];
     // Raw pointers and account/token data are deliberately never emitted.
     return state;
@@ -150,6 +164,32 @@ static NSDictionary *FBTMCServiceSnapshot(const void *fetcher, BOOL verifiedLayo
 static NSString *FBTMCDiagnosticJSON(NSDictionary *value) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:nil];
     return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
+}
+
+void FBTMobileConfigFetcherObserveUIContext(id contextManager, NSString *contextKind) {
+    if (!sFetcherInstalled || !contextManager ||
+        ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] ||
+        !FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)) return;
+    if (![@[@"sessionless", @"session", @"admin_id", @"ad_account_id", @"page_id", @"wearable_owner_id"] containsObject:contextKind ?: @""]) return;
+    Method getter = class_getInstanceMethod([contextManager class], sel_registerName("getManager"));
+    if (!getter || strcmp(method_getTypeEncoding(getter), "^v16@0:8") != 0 ||
+        FBTMCSharedRVA((const void *)method_getImplementation(getter)) != 0xe3a41c ||
+        class_getInstanceSize([contextManager class]) < 0x250) return;
+    // REA/Ghidra: getManager loads context+0x248; native getter/setFetcher
+    // use manager+0x148. VM copies do not invoke private C++ methods/ownership.
+    uintptr_t object = (uintptr_t)(__bridge const void *)contextManager;
+    uintptr_t manager = 0, fetcher = 0, vtable = 0, checkManager = 0, checkFetcher = 0;
+    if (object > UINTPTR_MAX - 0x248 || !FBTMCReadWord(object + 0x248, &manager) ||
+        !manager || manager > UINTPTR_MAX - 0x148 || !FBTMCReadWord(manager + 0x148, &fetcher) ||
+        !fetcher || !FBTMCReadWord(fetcher, &vtable) || FBTMCSharedRVA((const void *)vtable) != 0x8161f88) return;
+    NSMutableDictionary *snapshot = [FBTMCServiceSnapshot((const void *)fetcher, YES) mutableCopy];
+    if (!FBTMCReadWord(object + 0x248, &checkManager) || checkManager != manager ||
+        !FBTMCReadWord(manager + 0x148, &checkFetcher) || checkFetcher != fetcher) return;
+    snapshot[@"session_binding_state"] = @"native_ui_context_snapshot_only";
+    snapshot[@"ui_context_kind"] = contextKind;
+    snapshot[@"source"] = @"native_ui_context_getManager_0xe3a41c_manager_plus_0x148_fetcher_plus_0x50";
+    FBTMobileConfigFetchDiagnosticsRecord(@"mc_ui_service_snapshot", @{
+        @"ui_context_kind": contextKind, @"tigon_service_snapshot": FBTMCDiagnosticJSON(snapshot)});
 }
 
 struct FBTMCFetchObservation { std::atomic<int> httpStatus{0}; };

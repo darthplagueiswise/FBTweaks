@@ -15,6 +15,15 @@ static NSData *Gzip(NSData *data) {
     [out setLength:z.total_out]; deflateEnd(&z); return out;
 }
 int main(void) { @autoreleasepool {
+    NSDictionary *metadata = FBTNamesResponseMetadata(UTF8(@"{\"error\":{\"code\":100,\"type\":\"OAuthException\",\"message\":\"(#100) Employee Account or Specific App Conditions\"}}"));
+    Check([metadata[@"server_error_code"] isEqual:@100] && [metadata[@"server_error_type"] isEqual:@"OAuthException"], @"session probe preserves remote error fields");
+    Check([metadata[@"server_error_message"] isEqual:@"Employee Account or Specific App Conditions"], @"recognized eligibility normalized");
+    metadata = FBTNamesResponseMetadata(UTF8(@"{\"error\":{\"code\":100,\"type\":\"secret_type\",\"message\":\"private opaque credential goes here\"}}"));
+    NSString *metadataText = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:metadata options:0 error:nil] encoding:NSUTF8StringEncoding];
+    Check(![metadataText containsString:@"private opaque"] && ![metadataText containsString:@"secret_type"], @"unrecognized remote text not exported");
+    Check(metadata[@"server_error_message"] == nil, @"code100 alone not eligibility");
+    metadata = FBTNamesResponseMetadata(UTF8(@"{\"error\":{\"code\":100,\"type\":\"OAuthException\",\"message\":\"not Employee Account or Specific App Conditions; opaque private detail\"}}"));
+    Check(metadata[@"server_error_message"] == nil, @"substring or negated condition not normalized as eligibility");
     NSDictionary *out = FBTNamesResponseSummary(UTF8(@"None domain: FBHTTPErrorDomain code: 400 detail: "));
     Check([out[@"body_status"] isEqual:@"native_error_summary_NOT_server_JSON"], @"native description is not a server body");
     out = FBTNamesResponseSummary(UTF8(@"{\"error\":{\"code\":100,\"error_subcode\":33,\"type\":\"ValidationError\",\"message\":\"bad queries 123456789\",\"access_token\":\"secret\"}}"));
