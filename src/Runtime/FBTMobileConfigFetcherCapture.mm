@@ -276,10 +276,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     }
     // Session-only diagnostics are strictly observational; the legacy LAB
     // request-field A/B experiment is never applied through this toggle.
-    if (!FBTQEInvasiveHooksAllowed()) {
-        sRequestExperiment.cancel();
-        sFullMetadataExperiment.cancel();
-    }
+    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
+    if (!FBTQEInvasiveHooksAllowed()) sFullMetadataExperiment.cancel();
     const double now = CACurrentMediaTime();
     auto selected = sRequestExperiment.consume(method, purpose, now);
     auto fullSelected = sFullMetadataExperiment.consume(method, purpose, now);
