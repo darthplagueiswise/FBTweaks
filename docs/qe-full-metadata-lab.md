@@ -28,7 +28,7 @@ A single `POST` with purpose `mobileconfig_qe_info` consumes the profile; unrela
 
 ## Build and activate
 
-The default release and PR CI keep `FBT_QE_LAB=0`: no protocol-mutation button, even though observability probes remain available. To build the LAB version locally with Theos SDK 26.2:
+The default release and PR CI keep `FBT_QE_LAB=0`: no protocol-mutation button, even though observability probes remain available. For this experimental PR branch only, CI additionally packages a **separate** `QE-LAB` artifact with `FBT_QE_LAB=1`; the normal `.deb` remains read-only. Do not confuse or interchange these packages. To build the LAB version locally with Theos SDK 26.2:
 
 ```bash
 FBT_QE_LAB=1 ./build.sh rootless
