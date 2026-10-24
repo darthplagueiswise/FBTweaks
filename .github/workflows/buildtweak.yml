@@ -143,6 +143,7 @@ jobs:
           clang++ -std=c++11 -pthread -Wall -Wextra -Werror tests/MCServiceEvidenceTests.cpp -o /tmp/fbt-service-tests
           /tmp/fbt-service-tests
           python3 -m unittest discover -s tests -p "test_qe_proxy.py" -v
+          python3 -m unittest discover -s tests -p "test_qe_compare.py" -v
 
       - name: Test native query correlation
         run: |
