@@ -166,6 +166,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Mobile Lab (LAB_IS_ACTIVE)", @"subtitle": @"Ativado por padrao. Define a variavel no inicio do processo; exige encerrar totalmente e reiniciar o Facebook. Nao concede permissao Employee no servidor.", @"key": FBTKeyMobileLabEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
             @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
             @{ @"kind": @"switch", @"title": @"C import: Internal Settings", @"subtitle": @"fishhook em FBShouldEnableInternalSettings importado pelo executable; toggle runtime após instalar.", @"key": FBTKeyInternalCImportsEnabled },

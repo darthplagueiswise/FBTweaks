@@ -6,6 +6,7 @@
 // Preferências registradas. Qualquer key nova entra aqui para backup/export.
 extern NSString * const FBTKeyMasterEnabled;
 extern NSString * const FBTKeyEmployeeEnabled;
+extern NSString * const FBTKeyMobileLabEnabled;
 extern NSString * const FBTKeyTestUserEnabled;
 extern NSString * const FBTKeyKnownDogfoodEnabled;
 extern NSString * const FBTKeyReactNativeInternalEnabled;

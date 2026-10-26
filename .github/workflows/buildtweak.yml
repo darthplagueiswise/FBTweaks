@@ -82,6 +82,7 @@ jobs:
         run: |
           cd main
           python3 -m unittest discover -s tests -p "test_safe_hook_bootstrap.py" -v
+          python3 -m unittest discover -s tests -p "test_mobile_lab_bootstrap.py" -v
           python3 -m unittest discover -s tests -p "test_hook_ownership.py" -v
 
       - name: Test runtime BOOL persistence and employee sweep cleanup

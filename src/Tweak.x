@@ -11,6 +11,7 @@
 #import "Features/Employee/FBTInternalImports.h"
 #import "Features/ReactNative/FBTReactNativeInternal.h"
 #import "Settings/FBTEntryPoints.h"
+#include <stdlib.h>
 
 // =====================================================================
 // FBTweak — entrypoint
@@ -26,6 +27,14 @@ extern void FBTInitEmployeeGroup(void);
 extern void FBTInstallKnownGateRuntimeHooks(void);
 extern void FBTInitFloatingTabBarGroup(void);
 extern void FBTInitDatingGroup(void);
+
+// Process-local Mobile Lab gate. Does not hook native functions or patch __TEXT.
+// The host can cache NSProcessInfo.environment / FBMobileLabIsActive; this
+// preference is evaluated only during process startup.
+static void FBTConfigureMobileLabEnvironment(void) {
+    if (![FBTDefaults boolForKey:FBTKeyMobileLabEnabled]) return;
+    (void)setenv("LAB_IS_ACTIVE", "1", 0); // never overwrite inherited state
+}
 
 // Do not restore user-selected runtime hooks in dyld initializers.
 // Hook recovery is deferred until the host view is displayed.
@@ -109,6 +118,7 @@ static void FBTInstallEnabledKnownFamilies(void) {
 %ctor {
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
+        FBTConfigureMobileLabEnvironment(); // before FBTweak hooks
         // Ring buffer initialized on demand after the host UI appears.
         // Migrate away from the duplicate employee sweep before loading hooks.
         // Only sweep:employee entries are removed; manual overrides remain.

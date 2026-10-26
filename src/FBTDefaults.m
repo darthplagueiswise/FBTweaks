@@ -2,6 +2,7 @@
 
 NSString * const FBTKeyMasterEnabled         = @"fbt_master_enabled";
 NSString * const FBTKeyEmployeeEnabled       = @"fbt_employee_enabled";
+NSString * const FBTKeyMobileLabEnabled      = @"fbt_mobile_lab_enabled";
 NSString * const FBTKeyTestUserEnabled       = @"fbt_test_user_enabled";
 NSString * const FBTKeyKnownDogfoodEnabled   = @"fbt_known_dogfood_enabled";
 NSString * const FBTKeyReactNativeInternalEnabled = @"fbt_react_native_internal_enabled";
@@ -37,6 +38,7 @@ static NSDictionary *gRegistered = nil;
     return @{
         FBTKeyMasterEnabled:                    @(YES),
         FBTKeyEmployeeEnabled:                  @(NO),
+        FBTKeyMobileLabEnabled:                 @(YES),
         FBTKeyTestUserEnabled:                  @(NO),
         FBTKeyKnownDogfoodEnabled:              @(NO),
         FBTKeyReactNativeInternalEnabled:       @(NO),
