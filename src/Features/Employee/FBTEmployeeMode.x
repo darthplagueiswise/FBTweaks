@@ -195,15 +195,24 @@ static BOOL fbt_FBUser_isEmployee(id self, SEL command) {
 }
 
 static BOOL fbt_isInternalTestUser(id self, SEL _cmd, id arg1) {
-    return FBTTestUserOn() ? YES : (orig_isInternalTestUser ? orig_isInternalTestUser(self, _cmd, arg1) : NO);
+    BOOL original = orig_isInternalTestUser ? orig_isInternalTestUser(self, _cmd, arg1) : NO;
+    BOOL effective = FBTTestUserOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBIdentitySwitcherGatingHelper.isInternalTestUser", original, effective, __builtin_return_address(0));
+    return effective;
 }
 
 static BOOL fbt_isTaggingInternalTestUserEnabled(id self, SEL _cmd, id arg1) {
-    return FBTTestUserOn() ? YES : (orig_isTaggingInternalTestUserEnabled ? orig_isTaggingInternalTestUserEnabled(self, _cmd, arg1) : NO);
+    BOOL original = orig_isTaggingInternalTestUserEnabled ? orig_isTaggingInternalTestUserEnabled(self, _cmd, arg1) : NO;
+    BOOL effective = FBTTestUserOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBIdentitySwitcherGatingHelper.isTaggingInternalTestUserEnabled", original, effective, __builtin_return_address(0));
+    return effective;
 }
 
 static BOOL fbt_isInGroupingByACDogfooding(id self, SEL _cmd, id arg1) {
-    return FBTKnownDogfoodOn() ? YES : (orig_isInGroupingByACDogfooding ? orig_isInGroupingByACDogfooding(self, _cmd, arg1) : NO);
+    BOOL original = orig_isInGroupingByACDogfooding ? orig_isInGroupingByACDogfooding(self, _cmd, arg1) : NO;
+    BOOL effective = FBTKnownDogfoodOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBIdentitySwitcherGatingHelper.isInGroupingByACDogfooding", original, effective, __builtin_return_address(0));
+    return effective;
 }
 
 static BOOL fbt_MBUISimpleParticipantModel_isEmployee(id self, SEL _cmd) {
