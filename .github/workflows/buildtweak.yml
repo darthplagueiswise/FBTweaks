@@ -26,6 +26,11 @@ jobs:
         with:
           path: main
 
+      - name: Test employee getter persistence
+        run: |
+          cd main
+          python3 -m unittest discover -s tests -p "test_employee_preference_persistence.py" -v
+
       - name: Install Dependencies
         run: brew install ldid dpkg make
 
