@@ -32,6 +32,7 @@ static void Check(BOOL condition, NSString *message) {
 @property(nonatomic) NSUInteger writes;
 @property(nonatomic) BOOL reenter;
 @property(nonatomic) BOOL failNextWrite;
+@property(nonatomic) BOOL originalGetterTrue;
 @property(nonatomic, strong) FBTEmployeeFixture *nestedPreferences;
 - (instancetype)initWithDomain:(NSString *)domain;
 - (BOOL)storedEmployee;
@@ -50,7 +51,7 @@ static void Check(BOOL condition, NSString *message) {
     return [[[[NSUserDefaults standardUserDefaults] persistentDomainForName:_domain]
              objectForKey:@"employee"] boolValue];
 }
-- (BOOL)originalIsEmployee { return [self storedEmployee]; }
+- (BOOL)originalIsEmployee { return self.originalGetterTrue || [self storedEmployee]; }
 - (void)originalSetEmployee:(BOOL)value {
     self.writes++;
     if (self.failNextWrite) {
@@ -91,6 +92,19 @@ int main(int argc, const char **argv) { @autoreleasepool {
         FBTEmployeeFixture *reopened = [[FBTEmployeeFixture alloc] initWithDomain:root];
         Check([reopened storedEmployee], @"forced getter must persist employee in native store");
         Check(prefs.writes == 1, @"one native setter write");
+    } else if (!strcmp(argv[1], "already_true")) {
+        prefs.originalGetterTrue = YES;
+        Check(![prefs storedEmployee], @"cached getter can be true without a stored preference");
+        Check([prefs isEmployee] && [prefs storedEmployee], @"true getter must still invoke native persistence");
+        Check([prefs isEmployee] && prefs.writes == 1, @"completed native write is not repeated");
+    } else if (!strcmp(argv[1], "true_exception")) {
+        prefs.originalGetterTrue = YES;
+        prefs.failNextWrite = YES;
+        BOOL raised = NO;
+        @try { (void)[prefs isEmployee]; }
+        @catch (NSException *error) { raised = [error.name isEqualToString:@"FixtureWriteFailure"]; }
+        Check(raised && ![prefs storedEmployee], @"a true getter must not conceal native write failure");
+        Check([prefs isEmployee] && [prefs storedEmployee] && prefs.writes == 2, @"true getter retries native write after failure");
     } else if (!strcmp(argv[1], "repeat")) {
         pthread_t threads[4];
         for (NSUInteger i=0;i<4;i++) Check(!pthread_create(&threads[i], NULL, ReadMany, (__bridge void *)prefs), @"thread starts");

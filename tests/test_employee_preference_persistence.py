@@ -43,6 +43,12 @@ class EmployeePreferencePersistence(unittest.TestCase):
     def test_forced_getter_persists_without_server_setter(self):
         self.run_case("persist")
 
+    def test_true_getter_does_not_substitute_for_native_persistence(self):
+        self.run_case("already_true")
+
+    def test_true_getter_retries_after_native_setter_failure(self):
+        self.run_case("true_exception")
+
     def test_repeated_and_concurrent_reads_do_not_repeat_write(self):
         self.run_case("repeat")
 
