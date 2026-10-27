@@ -1,7 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "../src/Runtime/FBTEmployeeDiagnostics.m"
 NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.enabled";
-static BOOL enabled = YES, inspecting = NO;
+static BOOL enabled = YES, inspecting = NO, nativeProbe = NO;
+BOOL FBTMCNativeProbeAnyEnabled(void) { return nativeProbe; }
 @implementation FBTDefaults
 + (BOOL)boolForKey:(NSString *)key { return enabled; }
 @end
@@ -9,6 +10,8 @@ static BOOL enabled = YES, inspecting = NO;
 + (NSDictionary *)bestMatchForMobileConfigKey:(uint64_t)key {
     if (key == 1) return @{@"c": @"tw_is_employee", @"p": @"enabled"};
     if (key == 2) return @{@"c": @"tw_video_feed", @"p": @"enabled"};
+    if (key == 4) return @{@"c": @"fb_ford", @"p": @"is_employee"};
+    if (key == 5) return @{@"c": @"misc", @"p": @"is_test_account"};
     return @{@"c": @"unrelated", @"p": @"enabled"};
 }
 @end
@@ -33,6 +36,11 @@ int main(void) { @autoreleasepool {
     Check(!FBTEmployeeApplyTWProbe(1, NO), @"paused logging disables probe");
     FBTEmployeeObserveBool(@"should_not_exist", NO, YES, NULL);
     Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 1, @"paused capture stores nothing");
+    nativeProbe = YES;
+    FBTEmployeeObserveBool(@"probe_only", NO, NO, NULL);
+    Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 2,
+        @"passive identity capture works when native session probe is armed");
+    nativeProbe = NO;
     enabled = YES;
     FBTEmployeeCancelTWProbe();
     Check(!FBTEmployeeApplyTWProbe(1, NO), @"cancellation restores original");
@@ -41,7 +49,9 @@ int main(void) { @autoreleasepool {
     FBTEmployeeDiagnosticsReset();
     FBTEmployeeObserveMCBool(2, NO, NO, NULL);
     FBTEmployeeObserveMCBool(3, NO, YES, NULL);
-    Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 1, @"tw family observed; unrelated excluded");
+    FBTEmployeeObserveMCBool(4, NO, NO, NULL);
+    FBTEmployeeObserveMCBool(5, NO, NO, NULL);
+    Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 3, @"tw and employee/test gates observed; unrelated excluded");
     for (int i=0;i<100;i++) FBTEmployeeObserveBool([NSString stringWithFormat:@"fixture%d", i], NO, NO, NULL);
     Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 64, @"bounded storage");
     NSLog(@"PASS employee observation and temporary tw experiment");
