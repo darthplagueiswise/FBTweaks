@@ -19,6 +19,39 @@ BOOL FBTEmployeeDiagnosticsShouldObserve(void) {
 }
 
 
+static NSArray<NSDictionary *> *FBTEmployeeGetterAvailability(void) {
+    // Non-invasive inventory. Do not send messages or infer account status.
+    static const char *classes[] = {
+        "FBUser", "FBUserPreferences", "FBBugReportConfiguration",
+        "FBProductTagCreationLogger", "FBSnacksThreadOwnerMessengerContact",
+        "FBLoggedOutImageNetworkerConfiguration", "FBSessionImageNetworkerConfiguration",
+        "RCDMobileConfigParams", "MBUISimpleParticipantModel",
+        "RCTCurrentViewer", "FFDBInternalSettingsWebViewController"
+    };
+    NSMutableArray *items = [NSMutableArray array];
+    for (NSUInteger i = 0; i < sizeof(classes) / sizeof(classes[0]); ++i) {
+        const char *selector = (strcmp(classes[i], "FBLoggedOutImageNetworkerConfiguration") == 0 ||
+                                strcmp(classes[i], "FBSessionImageNetworkerConfiguration") == 0) ?
+                                "isViewerEmployee" :
+                               (strcmp(classes[i], "FFDBInternalSettingsWebViewController") == 0) ?
+                                "isInternLoggedIn" : "isEmployee";
+        Class cls = objc_getClass(classes[i]);
+        Method method = cls ? class_getInstanceMethod(cls, sel_registerName(selector)) : NULL;
+        const char *encoding = method ? method_getTypeEncoding(method) : NULL;
+        Dl_info origin = {};
+        BOOL located = method && dladdr((const void *)method_getImplementation(method), &origin);
+        NSString *name = [NSString stringWithUTF8String:classes[i]] ?: @"";
+        NSString *signature = encoding ? [NSString stringWithUTF8String:encoding] : @"unavailable";
+        [items addObject:@{@"class": name,
+            @"selector": [NSString stringWithUTF8String:selector] ?: @"",
+            @"class_loaded": @(cls != Nil), @"selector_found": @(method != NULL),
+            @"type_encoding": signature ?: @"unavailable",
+            @"implementation_image": located && origin.dli_fname ?
+                [[NSString stringWithUTF8String:origin.dli_fname] lastPathComponent] : @"unresolved"}];
+    }
+    return items;
+}
+
 void FBTEmployeeArmTWProbe(void) {
     pthread_mutex_lock(&sIdentityLock);
     sTWDeadline = [NSProcessInfo processInfo].systemUptime + 120;
@@ -101,6 +134,7 @@ NSDictionary *FBTEmployeeDiagnosticsSnapshot(void) {
         @"observation_enabled": @(FBTEmployeeDiagnosticsShouldObserve()),
         @"native_session_probe_enabled": @(FBTMCNativeProbeAnyEnabled()),
         @"FBUser_class_loaded": @(userClass != Nil), @"FBUser_isEmployee_selector_found": @(userMethod != NULL),
+        @"known_getter_availability": FBTEmployeeGetterAvailability(),
         @"original_return_meaning": @"Return before this tweak's change; other hooks or native MC overrides may already affect it. This is not a verified SERVER value.",
         @"coverage": @"FBUserPreferences getters/setters and tw_* boolean reads through startup/import hooks; no assertion that all native in-image reads are covered."};
 }
