@@ -26,10 +26,30 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBUserPreferences
 - (BOOL)isEmployee {
-    if (!FBTEmployeeDiagnosticsShouldObserve())
-        return FBTEmployeeIdentityOn() ? YES : %orig;
-    BOOL original = %orig;
-    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    BOOL forceEmployee = FBTEmployeeIdentityOn();
+    if (!forceEmployee && !FBTEmployeeDiagnosticsShouldObserve()) return %orig;
+
+    BOOL original;
+    if (forceEmployee) {
+        // Use this account's native setter, rather than guessing a defaults suite.
+        // Serialize the read/write decision so concurrent readers do not all write.
+        @synchronized (self) {
+            original = %orig;
+            static __thread BOOL persistingEmployee = NO;
+            if (!original && !persistingEmployee) {
+                persistingEmployee = YES;
+                @try {
+                    [self setEmployee:YES];
+                } @finally {
+                    // A native setter/observer may reenter the getter or throw.
+                    persistingEmployee = NO;
+                }
+            }
+        }
+    } else {
+        original = %orig;
+    }
+    BOOL effective = forceEmployee ? YES : original;
     FBTEmployeeObserveBool(@"FBUserPreferences.isEmployee", original, effective, __builtin_return_address(0));
     return effective;
 }
