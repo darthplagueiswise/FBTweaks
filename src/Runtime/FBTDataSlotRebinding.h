@@ -24,6 +24,11 @@ BOOL FBTRebindImageFirstVirtualByRTTI(const char *imageName, const char *typeNam
 // and slot belong to that exact image before rebinding. relativeIndex is the
 // signed number of pointer-width slots from the unique anchor method.
 // No hard-coded LC_UUID or unslid virtual slot addresses are used.
+// Validate the full target vtable/slot layout without making any memory
+// writes. The installer must validate all required slots before patching any.
+BOOL FBTValidateImageVtableSlotBySymbols(const char *imageName,
+        const char *vtableSymbol, const char *anchorMethodSymbol,
+        const char *expectedMethodSymbol, int relativeIndex, NSString **failure);
 BOOL FBTRebindImageVtableSlotBySymbols(const char *imageName,
         const char *vtableSymbol, const char *anchorMethodSymbol,
         const char *expectedMethodSymbol, int relativeIndex,
