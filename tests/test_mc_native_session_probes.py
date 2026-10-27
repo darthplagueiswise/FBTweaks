@@ -31,12 +31,15 @@ class MCNativeSessionProbes(unittest.TestCase):
         self.assertIn("atomic_store_explicit(&sFetcherEnabled, false", state)
         self.assertIn("FBTMCNativeProbeDisableAll();", ui)
         self.assertIn("[self.tableView reloadData]; // Session-only native probes", ui)
-    def test_uuid_slot_binding_not_text_patching(self):
+    def test_live_vtable_discovery_without_version_pinned_uuid_fallback(self):
         tig = src("src/Runtime/FBTMobileConfigTigonCapture.mm")
         fetch = src("src/Runtime/FBTMobileConfigFetcherCapture.mm")
         for text in (tig,fetch):
-            self.assertIn("FBTRebindVerifiedImageConstSlot",text)
+            self.assertNotIn("FBTRebindVerifiedImageConstSlot(",text)
             self.assertNotIn("Interceptor.attach",text)
+        self.assertIn("FBTValidateImageVtableSlotBySymbols(",tig)
+        self.assertIn("installationOrder[] = {0, 2, 3, 4, 1}",tig)
+        self.assertIn("FBTRebindImageFirstVirtualByRTTI(",fetch)
         self.assertIn("if (!FBTQEInvasiveHooksAllowed()) return;",tig)
         self.assertIn("FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)",tig)
         self.assertIn("FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)",fetch)
