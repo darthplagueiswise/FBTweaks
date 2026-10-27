@@ -40,6 +40,8 @@ static inline BOOL FBTKnownDogfoodOn(void) {
                 const struct FBTEmployeeWriteFrame *previous;
             };
             static __thread const struct FBTEmployeeWriteFrame *activeWrites = NULL;
+            static char nativeWriteCompletedKey;
+            BOOL nativeWriteCompleted = [objc_getAssociatedObject(self, &nativeWriteCompletedKey) boolValue];
             BOOL persistingThisPreference = NO;
             for (const struct FBTEmployeeWriteFrame *frame = activeWrites; frame; frame = frame->previous) {
                 if (frame->preferences == (__bridge const void *)self) {
@@ -47,11 +49,15 @@ static inline BOOL FBTKnownDogfoodOn(void) {
                     break;
                 }
             }
-            if (!original && !persistingThisPreference) {
+            // A cached/previously hooked YES is not evidence of a native write.
+            // Always persist the first forced read of this object, even if YES.
+            if (!persistingThisPreference && (!nativeWriteCompleted || !original)) {
                 const struct FBTEmployeeWriteFrame frame = {(__bridge const void *)self, activeWrites};
                 activeWrites = &frame;
                 @try {
                     [self setEmployee:YES];
+                    objc_setAssociatedObject(self, &nativeWriteCompletedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    FBTEmployeeObserveBool(@"FBUserPreferences.persistEmployee.setter_returned", original, YES, __builtin_return_address(0));
                 } @finally {
                     // A native setter/observer may reenter the getter or throw.
                     activeWrites = frame.previous;
