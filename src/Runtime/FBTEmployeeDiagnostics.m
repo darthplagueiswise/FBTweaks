@@ -1,4 +1,5 @@
 #import "FBTEmployeeDiagnostics.h"
+#import "FBTMCNativeSessionProbes.h"
 #import "FBTFlagCatalog.h"
 #import "FBTMobileConfigValueReader.h"
 #import "../FBTDefaults.h"
@@ -11,6 +12,12 @@ static NSMutableDictionary *sIdentityReads;
 static unsigned long long sIdentitySequence;
 static __thread BOOL sIdentityInspecting;
 static NSTimeInterval sTWDeadline;
+
+BOOL FBTEmployeeDiagnosticsShouldObserve(void) {
+    return [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] ||
+        FBTMCNativeProbeAnyEnabled();
+}
+
 
 void FBTEmployeeArmTWProbe(void) {
     pthread_mutex_lock(&sIdentityLock);
@@ -37,7 +44,7 @@ BOOL FBTEmployeeApplyTWProbe(uint64_t key, BOOL value) {
 }
 
 void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, const void *caller) {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] || !source.length) return;
+    if (!FBTEmployeeDiagnosticsShouldObserve() || !source.length) return;
     // Only developer-supplied labels reach this function; no object descriptions.
     Dl_info info = {0};
     NSString *image = @"unresolved", *rva = @"unresolved";
@@ -60,13 +67,17 @@ void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, con
 
 void FBTEmployeeObserveMCBool(uint64_t key, BOOL original, BOOL effective, const void *caller) {
     if (sIdentityInspecting || FBTMobileConfigIsInspectingSystemValue() ||
-        ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
+        !FBTEmployeeDiagnosticsShouldObserve()) return;
     sIdentityInspecting = YES;
     @try {
         NSDictionary *label = [FBTFlagCatalog bestMatchForMobileConfigKey:key];
         NSString *config = [label[@"c"] isKindOfClass:NSString.class] ? label[@"c"] : @"";
         NSString *param = [label[@"p"] isKindOfClass:NSString.class] ? label[@"p"] : @"";
-        if ([config hasPrefix:@"tw_"]) {
+        if ([config hasPrefix:@"tw_"] || [config isEqualToString:@"fb_ford"] ||
+            [param rangeOfString:@"employee" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [param rangeOfString:@"test_user" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [param rangeOfString:@"test_account" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [param rangeOfString:@"dogfood" options:NSCaseInsensitiveSearch].location != NSNotFound) {
             NSString *source = [NSString stringWithFormat:@"MC.%@.%@.0x%016llx", config, param, (unsigned long long)key];
             FBTEmployeeObserveBool(source, original, effective, caller);
         }
@@ -87,6 +98,8 @@ NSDictionary *FBTEmployeeDiagnosticsSnapshot(void) {
     return @{@"scope": @"process_reads_not_server_identity_or_request_correlation",
         @"state": sequence ? @"observed" : @"not_observed", @"sequence": @(sequence),
         @"reads": values, @"limit": @64, @"tw_probe_armed": @(twArmed),
+        @"observation_enabled": @(FBTEmployeeDiagnosticsShouldObserve()),
+        @"native_session_probe_enabled": @(FBTMCNativeProbeAnyEnabled()),
         @"FBUser_class_loaded": @(userClass != Nil), @"FBUser_isEmployee_selector_found": @(userMethod != NULL),
         @"original_return_meaning": @"Return before this tweak's change; other hooks or native MC overrides may already affect it. This is not a verified SERVER value.",
         @"coverage": @"FBUserPreferences getters/setters and tw_* boolean reads through startup/import hooks; no assertion that all native in-image reads are covered."};
