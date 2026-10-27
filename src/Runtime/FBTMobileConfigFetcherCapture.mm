@@ -210,6 +210,12 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
+    Dl_info nativeCallerInfo = {};
+    const void *nativeCaller = __builtin_return_address(0);
+    if (nativeCaller && dladdr(nativeCaller, &nativeCallerInfo) && nativeCallerInfo.dli_fbase && nativeCallerInfo.dli_fname) {
+        details[@"caller_image"] = [[NSString stringWithUTF8String:nativeCallerInfo.dli_fname] lastPathComponent];
+        details[@"caller_rva"] = [NSString stringWithFormat:@"0x%llx", (unsigned long long)((uintptr_t)nativeCaller - (uintptr_t)nativeCallerInfo.dli_fbase)];
+    }
     NSMutableDictionary *parameterShape = [NSMutableDictionary dictionary];
     if (selected.mode >= 0) details[@"experiment_id"] = FBTMCText(selected.id);
     for (const auto &pair : *outgoing) {
