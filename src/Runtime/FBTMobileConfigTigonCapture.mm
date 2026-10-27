@@ -637,24 +637,37 @@ static void FBTInstallSimpleHooks(void) {
         return;
     }
     sSimpleInstallAttempted = YES;
-    // The reference/anchor (method 1) must be patched LAST.
-    static const NSUInteger installationOrder[] = {0, 2, 3, 4, 1};
     NSMutableArray *failures = [NSMutableArray array];
-    NSUInteger installed = 0;
-    for (NSUInteger j = 0; j < sizeof(installationOrder) / sizeof(installationOrder[0]); ++j) {
-        NSUInteger n = installationOrder[j];
+    // PHASE 1: Validate every one of the five callback slots against the
+    // still-unmodified vtable. A changed ABI causes ZERO writes, not a
+    // half-installed set of hooks followed by unsafe Substrate trampolines.
+    for (NSUInteger n = 0; n < sizeof(slots) / sizeof(slots[0]); ++n) {
         NSString *failure = nil;
-        BOOL ok = FBTRebindImageVtableSlotBySymbols("FBSharedFramework",
-            vtableSymbol, responseSymbol, methodSymbols[n],
-            relativeToResponse[n], slots[n].replacement, slots[n].original, &failure);
-        if (ok) {
-            ++installed;
-        } else {
-            [failures addObject:[NSString stringWithFormat:@"method%lu:%@",
-                (unsigned long)n, failure ?: @"symbol_binding_failed"]];
-            // Never attempt method-entry trampolines after a vtable write, or
-            // try to reinstall already replaced callbacks in this process.
-            break;
+        if (!FBTValidateImageVtableSlotBySymbols("FBSharedFramework",
+                vtableSymbol, responseSymbol, methodSymbols[n],
+                relativeToResponse[n], &failure))
+            [failures addObject:[NSString stringWithFormat:@"method%lu:preflight=%@",
+                (unsigned long)n, failure ?: @"unsupported_live_vtable"]];
+    }
+    // PHASE 2: Install with the common discovery anchor (onResponse)
+    // replaced LAST. Otherwise methods 2/3/4 lose their anchor after method 1.
+    static const NSUInteger installationOrder[] = {0, 2, 3, 4, 1};
+    NSUInteger installed = 0;
+    if (failures.count == 0) {
+        for (NSUInteger j = 0; j < sizeof(installationOrder) / sizeof(installationOrder[0]); ++j) {
+            NSUInteger n = installationOrder[j];
+            NSString *failure = nil;
+            BOOL ok = FBTRebindImageVtableSlotBySymbols("FBSharedFramework",
+                vtableSymbol, responseSymbol, methodSymbols[n],
+                relativeToResponse[n], slots[n].replacement, slots[n].original, &failure);
+            if (ok) {
+                ++installed;
+            } else {
+                [failures addObject:[NSString stringWithFormat:@"method%lu:commit=%@",
+                    (unsigned long)n, failure ?: @"symbol_binding_failed"]];
+                // Never retry or mix function-entry hooks after a vtable write.
+                break;
+            }
         }
     }
     sSymbolDiscoveredSimpleHooks = installed;
