@@ -107,12 +107,12 @@ static BOOL FBTRebindSymbolInImage(void *symbol, const char *imageName) {
         strcmp(FBTRebindImageBasename(info.dli_fname), imageName) == 0;
 }
 
-BOOL FBTRebindImageVtableSlotBySymbols(const char *imageName,
+static BOOL FBTResolveImageVtableSlotBySymbols(const char *imageName,
         const char *vtableSymbol, const char *anchorMethodSymbol,
         const char *expectedMethodSymbol, int relativeIndex,
-        void *replacement, void **original, NSString **failure) {
+        void *replacement, void **original, BOOL preflightOnly, NSString **failure) {
     if (!imageName || !vtableSymbol || !anchorMethodSymbol || !expectedMethodSymbol ||
-        !replacement || !original || relativeIndex < -16 || relativeIndex > 16) {
+        (!preflightOnly && (!replacement || !original)) || relativeIndex < -16 || relativeIndex > 16) {
         if (failure) *failure = @"invalid_symbol_rebinding_arguments";
         return NO;
     }
@@ -181,6 +181,10 @@ BOOL FBTRebindImageVtableSlotBySymbols(const char *imageName,
                 @"vtable_method_signature_or_layout_changed";
             return NO;
         }
+        // A true preflight performs all Mach-O, image, unique-anchor and
+        // exact-method-slot checks without mutating any process memory. Run
+        // this for EVERY callback before the first live pointer replacement.
+        if (preflightOnly) return YES;
         unsigned char uuid[16] = {};
         BOOL foundUUID = NO;
         const struct load_command *command = (const struct load_command *)(header + 1);
@@ -203,6 +207,23 @@ BOOL FBTRebindImageVtableSlotBySymbols(const char *imageName,
     }
     if (failure) *failure = @"image_not_loaded";
     return NO;
+}
+
+
+BOOL FBTValidateImageVtableSlotBySymbols(const char *imageName,
+        const char *vtableSymbol, const char *anchorMethodSymbol,
+        const char *expectedMethodSymbol, int relativeIndex, NSString **failure) {
+    return FBTResolveImageVtableSlotBySymbols(imageName, vtableSymbol,
+        anchorMethodSymbol, expectedMethodSymbol, relativeIndex, NULL, NULL, YES, failure);
+}
+
+BOOL FBTRebindImageVtableSlotBySymbols(const char *imageName,
+        const char *vtableSymbol, const char *anchorMethodSymbol,
+        const char *expectedMethodSymbol, int relativeIndex,
+        void *replacement, void **original, NSString **failure) {
+    return FBTResolveImageVtableSlotBySymbols(imageName, vtableSymbol,
+        anchorMethodSymbol, expectedMethodSymbol, relativeIndex,
+        replacement, original, NO, failure);
 }
 
 static BOOL FBTImageTextContainsName(const struct section_64 *section, intptr_t slide,
