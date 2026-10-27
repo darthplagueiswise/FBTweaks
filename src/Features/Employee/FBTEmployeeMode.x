@@ -42,7 +42,10 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBBugReportConfiguration
 - (BOOL)isEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBBugReportConfiguration.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 - (void)setIsEmployee:(BOOL)value {
     %orig(FBTEmployeeIdentityOn() ? YES : value);
@@ -53,25 +56,37 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBProductTagCreationLogger
 - (BOOL)isEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBProductTagCreationLogger.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 %end
 
 %hook FBSnacksThreadOwnerMessengerContact
 - (BOOL)isEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBSnacksThreadOwnerMessengerContact.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 %end
 
 %hook FBLoggedOutImageNetworkerConfiguration
 - (BOOL)isViewerEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBLoggedOutImageNetworkerConfiguration.isViewerEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 %end
 
 %hook FBSessionImageNetworkerConfiguration
 - (BOOL)isViewerEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"FBSessionImageNetworkerConfiguration.isViewerEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 %end
 
@@ -95,7 +110,10 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook RCDMobileConfigParams
 - (BOOL)isEmployee {
-    return FBTEmployeeIdentityOn() ? YES : %orig;
+    BOOL original = %orig;
+    BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
+    FBTEmployeeObserveBool(@"RCDMobileConfigParams.isEmployee", original, effective, __builtin_return_address(0));
+    return effective;
 }
 - (id)initWithClassesString:(id)classesString
       trackNSObjectBaseClass:(BOOL)trackNSObjectBaseClass
