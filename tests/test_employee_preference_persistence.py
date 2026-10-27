@@ -55,6 +55,9 @@ class EmployeePreferencePersistence(unittest.TestCase):
     def test_each_account_uses_its_own_native_store(self):
         self.run_case("accounts")
 
+    def test_nested_accounts_both_persist_without_a_write_cycle(self):
+        self.run_case("nested")
+
     def test_disabled_getter_does_not_change_preference(self):
         self.run_case("disabled")
 
