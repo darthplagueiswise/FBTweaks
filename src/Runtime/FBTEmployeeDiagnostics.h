@@ -4,6 +4,8 @@
 extern "C" {
 #endif
 // Values observed at client getters. No account IDs, objects or tokens retained.
+// A separate native-session probe can enable read-only Employee observation.
+BOOL FBTEmployeeDiagnosticsShouldObserve(void);
 void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, const void *caller);
 void FBTEmployeeObserveMCBool(uint64_t key, BOOL original, BOOL effective, const void *caller);
 // Temporary local experiment for exactly tw_is_employee.enabled, not all tw_*.
