@@ -230,7 +230,7 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             parameterShape[@"device_id_bytes"] = @(pair.second.size());
             parameterShape[@"device_id_value_equals_field_name"] = @(pair.second == "device_id");
             parameterShape[@"device_id_value_is_whitespace"] = @(!pair.second.empty() &&
-                pair.second.find_first_not_of(" \\t\\r\\n") == std::string::npos);
+                pair.second.find_first_not_of(" \t\r\n") == std::string::npos);
         }
         if (pair.first == "queries") {
             NSString *queries = FBTMCText(pair.second);
