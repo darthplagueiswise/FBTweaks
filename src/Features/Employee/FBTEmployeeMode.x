@@ -26,7 +26,7 @@ static inline BOOL FBTKnownDogfoodOn(void) {
 
 %hook FBUserPreferences
 - (BOOL)isEmployee {
-    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled])
+    if (!FBTEmployeeDiagnosticsShouldObserve())
         return FBTEmployeeIdentityOn() ? YES : %orig;
     BOOL original = %orig;
     BOOL effective = FBTEmployeeIdentityOn() ? YES : original;
