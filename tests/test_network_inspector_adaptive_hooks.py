@@ -27,16 +27,21 @@ class AdaptiveHooksTests(unittest.TestCase):
         self.assertIn('_ZTVN8facebook5tigon20TigonSimpleCallbacksE', native)
         self.assertIn('FBTRebindImageVtableSlotBySymbols(', native)
         self.assertIn('relativeToResponse[] = {-6, 0, 1, 3, 5}', native)
-        self.assertIn('FBTRebindVerifiedImageConstSlot(', native)
+        self.assertIn('FBTValidateImageVtableSlotBySymbols(', native)
+        self.assertIn('installationOrder[] = {0, 2, 3, 4, 1}', native)
         self.assertIn('simple_symbol_resolved_callbacks', native)
+        self.assertNotIn('FBTRebindVerifiedImageConstSlot(', native)
+        self.assertNotIn('FBTSimpleInstallMethodEntry', native)
+        self.assertNotIn('substrate_trampoline_not_returned', native)
 
-    def test_fetcher_RTTI_then_exact_build_fallback(self):
+    def test_fetcher_RTTI_only_without_build_pinned_fallback(self):
         native = src("src/Runtime/FBTMobileConfigFetcherCapture.mm")
         self.assertIn('N12mobileconfig26FBMobileConfigTigonFetcherE', native)
         self.assertIn('FBTRebindImageFirstVirtualByRTTI(', native)
-        self.assertIn('FBTRebindVerifiedImageConstSlot(', native)
+        self.assertNotIn('FBTRebindVerifiedImageConstSlot(', native)
         self.assertIn('dynamic_RTTI_vtable', native)
-        self.assertIn('legacy_exact_UUID', native)
+        self.assertIn('RTTI_preflight_failed', native)
+        self.assertNotIn('legacy_exact_UUID', native)
 
     def test_unclassified_Tigon_uses_standalone_ID(self):
         native = src("src/Runtime/FBTMobileConfigTigonCapture.mm")
@@ -49,12 +54,20 @@ class AdaptiveHooksTests(unittest.TestCase):
         self.assertIn('Fetcher somente', inspector)
         self.assertNotIn('if (!fetcher || !tigon)', inspector)
 
-    def test_non_uuid_callback_fallback(self):
+    def test_preflight_and_hook_order_prevent_anchor_destruction(self):
         native = src('src/Runtime/FBTMobileConfigTigonCapture.mm')
-        self.assertIn('FBTSimpleInstallMethodEntry', native)
-        self.assertIn('methodEntryCount == 4', native)
-        self.assertIn('simple_hook_kind', native)
-        self.assertIn('sExportedFunctionHooks', native)
+        rebinder = src('src/Runtime/FBTDataSlotRebinding.m')
+        header = src('src/Runtime/FBTDataSlotRebinding.h')
+        self.assertIn('FBTValidateImageVtableSlotBySymbols(', native)
+        self.assertIn('if (failures.count == 0)', native)
+        self.assertIn('static const NSUInteger installationOrder[] = {0, 2, 3, 4, 1}', native)
+        self.assertIn('sSimpleInstallAttempted', native)
+        self.assertIn('partial_dynamic_vtable_no_retry', native)
+        self.assertIn('FBTValidateImageVtableSlotBySymbols(', header)
+        self.assertIn('FBTResolveImageVtableSlotBySymbols(', rebinder)
+        self.assertIn('if (preflightOnly) return YES;', rebinder)
+        self.assertNotIn('FBTSimpleInstallMethodEntry', native)
+        self.assertNotIn('legacy_UUID_vtable', native)
 
     def test_no_blind_patching_on_mismatch(self):
         implementation = src("src/Runtime/FBTDataSlotRebinding.m")
