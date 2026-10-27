@@ -222,7 +222,16 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             "with_experiment_universes", "with_gatekeepers", "with_experiments", "with_params",
             "with_groups", "with_group_params", "needs_name", "skip_qe",
             "query_hash", "one_query_hash", "is_employee"};
-        if (pair.first == "device_id") parameterShape[@"device_id_present"] = @(!pair.second.empty());
+        if (pair.first == "device_id") {
+            // Report structure only. A literal "device_id" in the native
+            // request-pair vector is suspicious but not proof of the final
+            // form-encoded HTTP body's value. Never persist the real ID.
+            parameterShape[@"device_id_present"] = @(!pair.second.empty());
+            parameterShape[@"device_id_bytes"] = @(pair.second.size());
+            parameterShape[@"device_id_value_equals_field_name"] = @(pair.second == "device_id");
+            parameterShape[@"device_id_value_is_whitespace"] = @(!pair.second.empty() &&
+                pair.second.find_first_not_of(" \\t\\r\\n") == std::string::npos);
+        }
         if (pair.first == "queries") {
             NSString *queries = FBTMCText(pair.second);
             NSData *raw = [queries dataUsingEncoding:NSUTF8StringEncoding];
