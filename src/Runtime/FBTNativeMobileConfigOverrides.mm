@@ -523,8 +523,17 @@ static BOOL FBTMarkHookInstalled(Class cls, SEL sel, NSString *suffix) {
     return !exists;
 }
 
+static BOOL FBTBooleanReaderABICompatible(Class cls, SEL sel, unsigned expectedArgs) {
+    Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
+    if (!method || method_getNumberOfArguments(method) != expectedArgs) return NO;
+    char returnType[32] = {};
+    method_getReturnType(method, returnType, sizeof(returnType));
+    // An unsupported return ABI must never be replaced with a BOOL block.
+    return strcmp(returnType, "B") == 0 || strcmp(returnType, "c") == 0;
+}
+
 static void FBTHookBool3(Class cls, SEL sel) {
-    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"b3")) return;
+    if (!FBTBooleanReaderABICompatible(cls, sel, 4) || !FBTMarkHookInstalled(cls, sel, @"b3")) return;
     FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
     desc->sel = sel;
     __block FBTObjCReaderHookDescriptor *captured = desc;
@@ -546,7 +555,7 @@ static void FBTHookBool3(Class cls, SEL sel) {
 }
 
 static void FBTHookBool4(Class cls, SEL sel) {
-    if (!cls || !class_getInstanceMethod(cls, sel) || !FBTMarkHookInstalled(cls, sel, @"b4")) return;
+    if (!FBTBooleanReaderABICompatible(cls, sel, 5) || !FBTMarkHookInstalled(cls, sel, @"b4")) return;
     FBTObjCReaderHookDescriptor *desc = (FBTObjCReaderHookDescriptor *)calloc(1, sizeof(FBTObjCReaderHookDescriptor));
     desc->sel = sel;
     __block FBTObjCReaderHookDescriptor *captured = desc;
