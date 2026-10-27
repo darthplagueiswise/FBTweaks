@@ -1,5 +1,6 @@
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
+#import "FBTEmployeeDiagnostics.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <pthread.h>
@@ -534,9 +535,11 @@ static void FBTHookBool3(Class cls, SEL sel) {
         BOOL forced = NO;
         if (FBTOvBool(key, &forced)) {
             FBTMobileConfigRecordAccess(key, @"bool", @(original), @(forced), YES);
+            FBTEmployeeObserveMCBool(key, original, forced, __builtin_return_address(0));
             return forced;
         }
         FBTMobileConfigRecordAccess(key, @"bool", @(original), @(original), NO);
+        FBTEmployeeObserveMCBool(key, original, original, __builtin_return_address(0));
         return original;
     });
     MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
@@ -554,9 +557,11 @@ static void FBTHookBool4(Class cls, SEL sel) {
         BOOL forced = NO;
         if (FBTOvBool(key, &forced)) {
             FBTMobileConfigRecordAccess(key, @"bool", @(defaultValue), @(forced), YES);
+            FBTEmployeeObserveMCBool(key, original, forced, __builtin_return_address(0));
             return forced;
         }
         FBTMobileConfigRecordAccess(key, @"bool", @(defaultValue), @(original), NO);
+        FBTEmployeeObserveMCBool(key, original, original, __builtin_return_address(0));
         return original;
     });
     MSHookMessageEx(cls, sel, replacement, (IMP *)&desc->orig);
