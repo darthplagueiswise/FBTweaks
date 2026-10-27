@@ -7,6 +7,22 @@
 #include <iostream>
 using fbt_trace::Ring;
 int main(){
+ // The same capture policy is used when native capture starts with the manual
+ // Live Trace preference OFF. Dropping the session term reproduces the bug.
+ struct CaptureCase { bool manual, diagnostics, session, want; };
+ const CaptureCase captureCases[] = {
+  {false,false,false,false}, {false,false,true,false},
+  {false,true,false,false}, {false,true,true,true},
+  {true,false,false,true}, {true,false,true,true},
+  {true,true,false,true}, {true,true,true,true}
+ };
+ for (const auto &c : captureCases)
+  assert(fbt_trace::shouldCollect(c.manual,c.diagnostics,c.session)==c.want);
+ assert(std::strcmp(fbt_trace::observationState(false,0,0),"capture_off")==0);
+ assert(std::strcmp(fbt_trace::observationState(true,0,0),"not_observed")==0);
+ assert(std::strcmp(fbt_trace::observationState(true,0,3),"dropped_on_contention")==0);
+ assert(std::strcmp(fbt_trace::observationState(false,2,0),"observed")==0);
+ assert(std::strcmp(fbt_trace::observationState(true,2,3),"observed")==0);
  Ring ring;
  assert(!ring.enabled());
  assert(!ring.add(1,"FBU#isEmployee","",-1,1));

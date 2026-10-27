@@ -8,6 +8,7 @@
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTEmployeeDiagnostics.h"
+#import "../Runtime/FBTNativeTrace.h"
 extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
@@ -145,6 +146,8 @@ extern void FBTInitEmployeeGroup(void);
     if (path.section != 0) return;
     if (path.row == 0) {
         [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+        FBTNativeTraceClear();
+        FBTNativeTraceSetSessionCaptureEnabled(YES);
         FBTMobileConfigResponseCaptureInstall();
         FBTInstallMobileConfigDebugUIBootstrap();
         FBTInitEmployeeGroup();
@@ -156,6 +159,7 @@ extern void FBTInitEmployeeGroup(void);
     } else if (path.row == 1) {
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+        FBTNativeTraceSetSessionCaptureEnabled(NO);
         FBTMobileConfigResponseCaptureDisarm();
         FBTMobileConfigCancelEmployeeExperiment();
         FBTEmployeeCancelTWProbe();

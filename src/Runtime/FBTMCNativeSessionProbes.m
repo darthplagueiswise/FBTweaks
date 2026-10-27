@@ -2,6 +2,7 @@
 #import "../FBTDefaults.h"
 #import "FBTMobileConfigResponseCapture.h"
 #import "FBTMobileConfigFetchDiagnostics.h"
+#import "FBTNativeTrace.h"
 #include <stdatomic.h>
 
 NSString * const FBTMCNativeProbeTigonKey = @"fbt_mc_native_tigon_probe_session";
@@ -38,6 +39,7 @@ NSDictionary *FBTMCNativeProbeStatus(void) {
         @"tigon_dynamic_symbol_count": FBTMobileConfigTigonCaptureStatus()[@"simple_symbol_resolved_callbacks"] ?: @0,
         @"tigon_method_entry_hook_count": FBTMobileConfigTigonCaptureStatus()[@"simple_exported_function_hooks"] ?: @0,
         @"tigon_hook_kind": FBTMobileConfigTigonCaptureStatus()[@"simple_hook_kind"] ?: @"not_attempted",
+        @"tigon_resolution": FBTMobileConfigTigonCaptureStatus()[@"simple_callback_failure"] ?: @"not_attempted",
         @"fetcher_resolution": FBTMobileConfigFetcherCaptureStatus()[@"native_mc_fetcher_failure"] ?: @"unknown",
         @"nonpersistent": @YES
     };
@@ -76,6 +78,9 @@ BOOL FBTMCNativeProbeSetEnabled(NSString *key, BOOL enabled, NSString **reason) 
         failure = state[@"native_mc_fetcher_failure"];
     }
     if (!installed) atomic_store_explicit(enabledFlag, false, memory_order_release);
+    // This explicit opt-in must arm the sanitized in-memory collector too.
+    // Failed hook validation never turns a previously OFF collector ON.
+    if (installed) FBTNativeTraceSetSessionCaptureEnabled(YES);
     if (reason) *reason = installed ?
         @"Probe de sessão instalado após validação da imagem, slot e símbolos/RTTI ou UUID conhecido." :
         [NSString stringWithFormat:@"Hook não instalado: %@", failure ?: @"UUID, slot ou ABI incompatível."];

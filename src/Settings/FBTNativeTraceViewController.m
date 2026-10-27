@@ -11,7 +11,7 @@
  self.title=@"Live Trace";
  [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"TraceRow"];
  self.captureSwitch=[UISwitch new];
- self.captureSwitch.on=[FBTDefaults boolForKey:FBTKeyNativeTraceEnabled];
+ self.captureSwitch.on=FBTNativeTraceIsEnabled();
  [self.captureSwitch addTarget:self action:@selector(toggleCapture:) forControlEvents:UIControlEventValueChanged];
  UILabel *label=[UILabel new];
  label.text=@"Capturar ";label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
@@ -27,18 +27,32 @@
 }
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];[self refreshTrace];}
 - (void)toggleCapture:(UISwitch*)sender{
+ // An explicit OFF also stops a buffer armed by a native capture action.
+ FBTNativeTraceSetSessionCaptureEnabled(NO);
  [FBTDefaults setBool:sender.isOn forKey:FBTKeyNativeTraceEnabled];
  FBTNativeTraceReloadPrefs();[self refreshTrace];
 }
 - (void)refreshTrace{
  NSDictionary *snap=FBTNativeTraceSnapshot();
+ self.captureSwitch.on=[snap[@"enabled"] boolValue];
  self.items=snap[@"events"]?:@[];
- self.tableView.backgroundView=self.items.count?nil:[self emptyMessage];
+ self.tableView.backgroundView=self.items.count?nil:[self emptyMessage:snap];
  [self.tableView reloadData];
 }
-- (UIView*)emptyMessage{
+- (UIView*)emptyMessage:(NSDictionary*)snapshot{
  UILabel*label=[UILabel new];
- label.text=@"Nenhum evento registrado. Ative a captura e reproduza o getter ou o fetch QE-info.";
+ if(![snapshot[@"enabled"] boolValue])
+  label.text=@"Live Trace desligado. Inicie uma captura ou ative Capturar antes de reproduzir a ação.";
+ else if([snapshot[@"observation_state"] isEqual:@"dropped_on_contention"])
+  label.text=@"Coletor ativo; eventos descartados por contenção. Reproduza a ação e atualize.";
+ else if([snapshot[@"network_source_state"] isEqual:@"hook_unavailable"])
+  label.text=@"Coletor ativo; hook nativo indisponível. Confira os probes. Nenhum evento foi observado.";
+ else if([snapshot[@"network_source_state"] isEqual:@"unknown"])
+  label.text=@"Coletor ativo; estado do hook nativo desconhecido. Confira os probes. Nenhum evento foi observado.";
+ else if([snapshot[@"network_source_state"] isEqual:@"armed"])
+  label.text=@"Coletor ativo e probe nativo armado. Nenhum evento observado; reproduza o fetch e atualize.";
+ else
+  label.text=@"Coletor ativo; probes de rede desarmados. Observe um getter BOOL ou arme um probe nativo e reproduza a ação.";
  label.numberOfLines=0;label.textAlignment=NSTextAlignmentCenter;
  label.textColor=[UIColor secondaryLabelColor];return label;
 }

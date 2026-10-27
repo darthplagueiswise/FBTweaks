@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 void FBTNativeTraceReloadPrefs(void);
+// Buffer only; never installs hooks or persists a preference. Called after an
+// explicit capture action (and only after validation for native probes).
+void FBTNativeTraceSetSessionCaptureEnabled(BOOL enabled);
 BOOL FBTNativeTraceIsEnabled(void);
 void FBTNativeTraceRecordBool(NSString *methodKey, int original, int effective);
 void FBTNativeTraceRecordNetwork(NSString *event, NSDictionary *safeDetails);

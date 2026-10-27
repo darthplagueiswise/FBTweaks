@@ -1,5 +1,6 @@
 #import "FBTNativeTrace.h"
 #import "FBTNativeTraceCore.hpp"
+#import "FBTMCNativeSessionProbes.h"
 #import "../FBTDefaults.h"
 // No dynamic global C++ object in dyld image initializers.
 static fbt_trace::Ring &FBTTraceRing(void) {
@@ -7,10 +8,17 @@ static fbt_trace::Ring &FBTTraceRing(void) {
     return instance;
 }
 static int sTraceEnabled = 0;
+static int sSessionCaptureEnabled = 0;
 void FBTNativeTraceReloadPrefs(void) {
- BOOL enabled=[FBTDefaults boolForKey:FBTKeyNativeTraceEnabled];
+ BOOL enabled=fbt_trace::shouldCollect([FBTDefaults boolForKey:FBTKeyNativeTraceEnabled],
+  [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled],
+  __atomic_load_n(&sSessionCaptureEnabled,__ATOMIC_ACQUIRE)!=0);
  FBTTraceRing().setEnabled(enabled);
  __atomic_store_n(&sTraceEnabled,enabled?1:0,__ATOMIC_RELEASE);
+}
+void FBTNativeTraceSetSessionCaptureEnabled(BOOL enabled){
+ __atomic_store_n(&sSessionCaptureEnabled,enabled?1:0,__ATOMIC_RELEASE);
+ FBTNativeTraceReloadPrefs();
 }
 BOOL FBTNativeTraceIsEnabled(void){return __atomic_load_n(&sTraceEnabled,__ATOMIC_ACQUIRE)!=0;}
 void FBTNativeTraceRecordBool(NSString *methodKey,int original,int effective){
@@ -36,6 +44,13 @@ void FBTNativeTraceRecordNetwork(NSString *event,NSDictionary *safeDetails){
  NSString *note=[meta componentsJoinedByString:@" "];
  FBTTraceRing().add(fbt_trace::NETWORK,event.UTF8String,note.UTF8String,-1,-1);
 }
+static NSString *FBTTraceHookResolutionState(id resolution){
+ if(![resolution isKindOfClass:NSString.class]||![resolution length]||[resolution isEqual:@"unknown"])
+  return @"unknown";
+ if([resolution isEqual:@"not_attempted"]||[resolution isEqual:@"none_or_not_attempted"])
+  return @"not_attempted";
+ return @"failed";
+}
 NSDictionary *FBTNativeTraceSnapshot(void){
  std::vector<fbt_trace::Record>records=FBTTraceRing().snapshot();
  NSMutableArray *events=[NSMutableArray arrayWithCapacity:records.size()];
@@ -50,7 +65,27 @@ NSDictionary *FBTNativeTraceSnapshot(void){
    @"effective":r.effective<0?(id)[NSNull null]:@(r.effective!=0)
   }];
  }
- return @{@"schema_version":@1,@"enabled":@(FBTNativeTraceIsEnabled()),@"capacity":@(fbt_trace::CAPACITY),
+ BOOL enabled=FBTNativeTraceIsEnabled();
+ BOOL diagnostics=[FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+ NSDictionary *probes=FBTMCNativeProbeStatus();
+ BOOL tigonArmed=[probes[@"tigon_session_enabled"] boolValue]&&[probes[@"tigon_simple_callbacks"] boolValue];
+ BOOL fetcherArmed=[probes[@"fetcher_session_enabled"] boolValue]&&[probes[@"fetcher_async_callback"] boolValue];
+ NSString *tigonResolution=FBTTraceHookResolutionState(probes[@"tigon_resolution"]);
+ NSString *fetcherResolution=FBTTraceHookResolutionState(probes[@"fetcher_resolution"]);
+ BOOL tigonFailed=![probes[@"tigon_simple_callbacks"] boolValue]&&
+  [tigonResolution isEqual:@"failed"];
+ BOOL fetcherFailed=![probes[@"fetcher_async_callback"] boolValue]&&
+  [fetcherResolution isEqual:@"failed"];
+ BOOL unknown=(![probes[@"tigon_simple_callbacks"] boolValue]&&[tigonResolution isEqual:@"unknown"])||
+  (![probes[@"fetcher_async_callback"] boolValue]&&[fetcherResolution isEqual:@"unknown"]);
+ NSString *networkState=!diagnostics?@"diagnostics_off":(tigonArmed||fetcherArmed)?@"armed":
+  (tigonFailed||fetcherFailed)?@"hook_unavailable":unknown?@"unknown":@"not_armed";
+ NSString *observation=[NSString stringWithUTF8String:fbt_trace::observationState(enabled,events.count,FBTTraceRing().dropped())];
+ return @{@"schema_version":@2,@"enabled":@(enabled),@"capacity":@(fbt_trace::CAPACITY),
+          @"collector_state":enabled?@"collecting":@"off",@"observation_state":observation,
+          @"manual_capture_enabled":@([FBTDefaults boolForKey:FBTKeyNativeTraceEnabled]),
+          @"session_capture_enabled":@(__atomic_load_n(&sSessionCaptureEnabled,__ATOMIC_ACQUIRE)!=0),
+          @"network_source_state":networkState,@"native_session_probes":probes,
           @"dropped_on_contention":@(FBTTraceRing().dropped()),@"events":events};
 }
 void FBTNativeTraceClear(void){FBTTraceRing().clear();}

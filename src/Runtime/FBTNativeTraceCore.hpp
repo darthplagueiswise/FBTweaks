@@ -9,6 +9,16 @@
 #include <vector>
 namespace fbt_trace {
 static const size_t CAPACITY=256, kNameBytes=112, kNoteBytes=176;
+// A native capture action is ephemeral and still follows its QE diagnostic
+// switch. The independent manual Live Trace switch also supports BOOL hooks.
+inline bool shouldCollect(bool manual,bool diagnostics,bool session){
+ return manual||(diagnostics&&session);
+}
+inline const char *observationState(bool enabled,size_t count,uint64_t dropped){
+ if(count)return "observed";
+ if(!enabled)return "capture_off";
+ return dropped?"dropped_on_contention":"not_observed";
+}
 enum Kind { BOOL_CALL=1, NETWORK=2, SYSTEM=3 };
 struct Record {
  uint64_t sequence,monotonic_ns;
