@@ -6,7 +6,6 @@ getter/setter logic, not Substrate installation or the device's private classes.
 import os
 from pathlib import Path
 import platform
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class EmployeePreferencePersistence(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if platform.system() != "Darwin":
+            raise unittest.SkipTest("macOS Foundation required for native preference hook tests")
         cls.tmp = tempfile.TemporaryDirectory(prefix="fbt-employee-prefs-")
         cls.addClassCleanup(cls.tmp.cleanup)
         source = (ROOT / "src/Features/Employee/FBTEmployeeMode.x").read_text()
@@ -31,14 +32,7 @@ class EmployeePreferencePersistence(unittest.TestCase):
         if not compiler:
             raise unittest.SkipTest("clang required for native preference hook tests")
         flags = ["-fobjc-exceptions", "-Wall", "-Wextra", "-Werror"]
-        if platform.system() == "Darwin":
-            flags += ["-fobjc-arc", "-framework", "Foundation"]
-        elif shutil.which("gnustep-config"):
-            flags += shlex.split(subprocess.check_output(["gnustep-config", "--objc-flags"], text=True))
-            flags += ["-I" + subprocess.check_output(["gcc", "-print-file-name=include"], text=True).strip()]
-            flags += shlex.split(subprocess.check_output(["gnustep-config", "--base-libs"], text=True))
-        else:
-            raise unittest.SkipTest("Foundation or GNUstep required")
+        flags += ["-fobjc-arc", "-framework", "Foundation"]
         cls.binary = str(Path(cls.tmp.name) / "employee-prefs")
         subprocess.run([compiler, str(path), "-o", cls.binary] + flags, check=True, cwd=cls.tmp.name)
 

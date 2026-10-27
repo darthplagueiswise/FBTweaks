@@ -35,14 +35,26 @@ static inline BOOL FBTKnownDogfoodOn(void) {
         // Serialize the read/write decision so concurrent readers do not all write.
         @synchronized (self) {
             original = %orig;
-            static __thread BOOL persistingEmployee = NO;
-            if (!original && !persistingEmployee) {
-                persistingEmployee = YES;
+            struct FBTEmployeeWriteFrame {
+                const void *preferences;
+                const struct FBTEmployeeWriteFrame *previous;
+            };
+            static __thread const struct FBTEmployeeWriteFrame *activeWrites = NULL;
+            BOOL persistingThisPreference = NO;
+            for (const struct FBTEmployeeWriteFrame *frame = activeWrites; frame; frame = frame->previous) {
+                if (frame->preferences == (__bridge const void *)self) {
+                    persistingThisPreference = YES;
+                    break;
+                }
+            }
+            if (!original && !persistingThisPreference) {
+                const struct FBTEmployeeWriteFrame frame = {(__bridge const void *)self, activeWrites};
+                activeWrites = &frame;
                 @try {
                     [self setEmployee:YES];
                 } @finally {
                     // A native setter/observer may reenter the getter or throw.
-                    persistingEmployee = NO;
+                    activeWrites = frame.previous;
                 }
             }
         }
