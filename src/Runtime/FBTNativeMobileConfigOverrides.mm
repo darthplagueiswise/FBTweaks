@@ -210,31 +210,21 @@ NSString *FBTNativeMobileConfigOverridesFilePath(void) {
     }
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *bundleID = [NSBundle mainBundle].bundleIdentifier ?: @"";
-    NSString *fallbackPath = nil;
     for (NSString *group in FBTNativeMobileConfigGroupCandidates()) {
         NSURL *url = [fm containerURLForSecurityApplicationGroupIdentifier:group];
         if (!url.path.length) continue;
-
-        NSMutableArray<NSString *> *candidates = [NSMutableArray array];
-        // Keep a pre-existing file in its actual location. Some builds use
-        // AppGroup/Documents/mobileconfig; others export mobileconfig directly
-        // at the shared-container root.
-        [candidates addObject:[[url.path stringByAppendingPathComponent:@"Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
-        [candidates addObject:[[url.path stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
-        [candidates addObject:[[url.path stringByAppendingPathComponent:@"AppData/Documents/mobileconfig"] stringByAppendingPathComponent:@"mc_overrides.json"]];
-        for (NSString *candidate in candidates) {
-            if ([fm fileExistsAtPath:candidate]) return candidate;
+        // Shared 584.1 0x154b80 selects the first EXISTING DIRECTORY path,
+        // mobileconfig before Documents/mobileconfig. Selecting by JSON-file
+        // existence edits the wrong copy when the preferred directory is empty.
+        for (NSString *relative in @[@"mobileconfig", @"Documents/mobileconfig"]) {
+            NSString *directory = [url.path stringByAppendingPathComponent:relative];
+            if ([fm fileExistsAtPath:directory])
+                return [directory stringByAppendingPathComponent:@"mc_overrides.json"];
         }
-
-        // With no existing file, create the path for the suite inferred from
-        // the active bundle, rather than taking the first unrelated group.
-        NSString *preferredRelative = [bundleID.lowercaseString isEqualToString:@"com.facebook.ota"]
-            ? @"Documents/mobileconfig/mc_overrides.json"
-            : @"mobileconfig/mc_overrides.json";
-        if (!fallbackPath) fallbackPath = [url.path stringByAppendingPathComponent:preferredRelative];
     }
-    return fallbackPath;
+    // Native selection returns an empty path when neither layout exists.
+    // Wait for getOverridesTablePath instead of creating an unconsumed copy.
+    return nil;
 }
 
 
