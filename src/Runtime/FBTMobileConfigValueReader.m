@@ -83,6 +83,17 @@ static id FBTRead(id context, SEL selector, uint64_t key, NSString *type, id opt
     return ((id (*)(id, SEL, FBTMCInspectionParam, id))objc_msgSend)(context, selector, param, options) ?: NSNull.null;
 }
 
+static NSString *FBTNativeOverridesFileForContext(id context) {
+    // Shared 584.1: ObjC getOverridesTablePath (0x27409d8) wraps the C++
+    // manager directory (0x52c5a0) in a file NSURL. Native load appends
+    // overridesFilename (0x15d34c), i.e. mc_overrides.json, to that directory.
+    if (!FBTNoArgMethod(context, @"getOverridesTablePath", '@')) return nil;
+    id location = ((id (*)(id, SEL))objc_msgSend)(context, NSSelectorFromString(@"getOverridesTablePath"));
+    NSString *directory = [location isKindOfClass:NSURL.class] && [location isFileURL] ? [location path] :
+        ([location isKindOfClass:NSString.class] ? location : nil);
+    return directory.length ? [directory stringByAppendingPathComponent:@"mc_overrides.json"] : nil;
+}
+
 static NSDictionary *FBTInspectParameterImpl(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {
     @try {
         NSNumber *packed = [FBTLocalConfigCatalog packedKeyForConfiguration:configuration parameter:parameter];
@@ -138,6 +149,7 @@ static NSDictionary *FBTInspectParameterImpl(NSDictionary *configuration, NSDict
             @"observed_bypass_value": systemValue ?: NSNull.null, @"effective_value": effective ?: NSNull.null,
             @"native_effective_value": nativeValue ?: NSNull.null,
             @"native_effective_source": FBTNativeSourceName(nativeSource), @"native_effective_source_raw": @(nativeSource),
+            @"native_overrides_file": FBTNativeOverridesFileForContext(selected) ?: NSNull.null,
             @"reload_requested": @(reload), @"reload_returned": @(reload), @"import_confirmed": @NO,
             @"source_raw": @(source), @"source": sourceName, @"source_hint": FBTSourceHint(sourceName),
             @"effective_source": runtimeOverride ? @"Override da tweak" : FBTNativeSourceName(effectiveSource),

@@ -101,7 +101,7 @@
     NSString *pid = [parameter[@"id"] stringValue], *type = parameter[@"type"];
     NSString *fileValue = self.values[pid];
     NSDictionary *reading = self.readings[pid];
-    NSString *state = fileValue ? [@"Override no arquivo: " stringByAppendingString:fileValue] : @"SYS (sem override no arquivo)";
+    NSString *state = fileValue ? [@"Override no arquivo editado: " stringByAppendingString:fileValue] : @"Sem override no arquivo editado";
     if (![reading[@"available"] boolValue]) return [NSString stringWithFormat:@"%@\n%@", state, reading[@"reason"] ?: @"Consultando o leitor nativo…"];
     NSString *systemText = [reading[@"system_available"] boolValue] ? FBTMobileConfigValueText(reading[@"system_value"], type) : @"não confirmado";
     return [NSString stringWithFormat:@"%@\nNativo: %@ · %@\nCom tweak: %@ · %@\nSYS: %@ · %@\n%@",
@@ -123,9 +123,11 @@
         [self message:reading[@"reason"] ?: @"Recarga indisponível." title:@"Recarga não confirmada"];
         return;
     }
-    NSString *message = [NSString stringWithFormat:@"%@.%@\nNativo: %@\nOrigem: %@\n\nO carregador retornou uma tabela. Compare o valor nativo com o arquivo; o retorno sozinho não confirma parsing. A recarga vale para o universo deste contexto e não recria objetos de startup nem inicia download.",
+    id nativePath = reading[@"native_overrides_file"];
+    NSString *message = [NSString stringWithFormat:@"%@.%@\nNativo: %@\nOrigem: %@\nArquivo deste contexto: %@\nArquivo do editor: %@\n\nO carregador retornou uma tabela. Compare o valor nativo com o arquivo deste contexto; o retorno sozinho não confirma parsing. A recarga vale para o universo deste contexto e não recria objetos de startup nem inicia download.",
         self.configuration[@"name"], parameter[@"name"],
-        FBTMobileConfigValueText(reading[@"native_effective_value"], parameter[@"type"]), reading[@"native_effective_source"]];
+        FBTMobileConfigValueText(reading[@"native_effective_value"], parameter[@"type"]), reading[@"native_effective_source"],
+        [nativePath isKindOfClass:NSString.class] ? nativePath : @"não exposto pelo contexto", [FBTMCOverridesFile path] ?: @"indisponível"];
     [self message:message title:@"Recarga executada; leitura nativa"];
 }
 - (void)shareValues {

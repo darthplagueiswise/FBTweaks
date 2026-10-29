@@ -47,6 +47,7 @@ NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key) {
 
 static void Check(BOOL value, NSString *message) { ++sChecks; if (!value) { NSLog(@"FAIL: %@", message); exit(1); } }
 @interface FixtureReader : NSObject
+- (NSURL *)getOverridesTablePath;
 - (int)getUnitType;
 - (BOOL)hasValidManager;
 - (BOOL)hasValidConfig;
@@ -64,6 +65,7 @@ static void VerifyOptions(FBMobileConfigOptions *options) {
     options.valueSource = options.ignore ? sBypassSource : 1;
 }
 @implementation FixtureReader
+- (NSURL *)getOverridesTablePath { return [NSURL fileURLWithPath:@"/fixture/native/mobileconfig"]; }
 - (int)getUnitType { return sUnit; }
 - (BOOL)hasValidManager { return YES; }
 - (BOOL)hasValidConfig { return YES; }
@@ -87,6 +89,7 @@ int main(void) { @autoreleasepool {
     Check([r[@"system_available"] boolValue] && [r[@"source"] hasPrefix:@"DEFAULT"], @"native default stays distinct from a server value");
     Check([r[@"native_effective_value"] isEqual:@NO], @"native override read excludes tweak forcing true");
     Check([r[@"native_effective_source"] isEqual:@"OVERRIDE"], @"native override source is reported separately");
+    Check([r[@"native_overrides_file"] isEqual:@"/fixture/native/mobileconfig/mc_overrides.json"], @"native manager directory is distinguished from the JSON file");
     Check(!FBTMobileConfigIsInspectingSystemValue(), @"inspection scope restored");
     Check(!FBTMobileConfigIsInspectingValue(), @"whole inspection scope restored");
     typedef NSDictionary *(*ReloadReadFn)(NSDictionary *, NSDictionary *);
