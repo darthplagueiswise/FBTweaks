@@ -77,7 +77,7 @@ BOOL FBTEmployeeApplyTWProbe(uint64_t key, BOOL value) {
 }
 
 void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, const void *caller) {
-    if (!FBTEmployeeDiagnosticsShouldObserve() || !source.length) return;
+    if (FBTMobileConfigIsInspectingValue() || !FBTEmployeeDiagnosticsShouldObserve() || !source.length) return;
     // Only developer-supplied labels reach this function; no object descriptions.
     Dl_info info = {0};
     NSString *image = @"unresolved", *rva = @"unresolved";
@@ -99,7 +99,7 @@ void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, con
 }
 
 void FBTEmployeeObserveMCBool(uint64_t key, BOOL original, BOOL effective, const void *caller) {
-    if (sIdentityInspecting || FBTMobileConfigShouldBypassTweakOverrides() ||
+    if (sIdentityInspecting || FBTMobileConfigIsInspectingValue() ||
         !FBTEmployeeDiagnosticsShouldObserve()) return;
     sIdentityInspecting = YES;
     @try {

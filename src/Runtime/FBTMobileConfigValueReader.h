@@ -2,6 +2,8 @@
 
 // Thread-local: excludes only this inspection from the tweak's override hooks.
 BOOL FBTMobileConfigIsInspectingSystemValue(void);
+// All synthetic inspection reads, including the read with tweak forcing.
+BOOL FBTMobileConfigIsInspectingValue(void);
 BOOL FBTMobileConfigShouldBypassTweakOverrides(void);
 NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDictionary *parameter);
 // Explicit action: force reload in the uniquely selected native context, then

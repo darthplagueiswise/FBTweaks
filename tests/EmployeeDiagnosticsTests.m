@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "../src/Runtime/FBTEmployeeDiagnostics.m"
 NSString * const FBTKeyMobileConfigFetchDiagnosticsEnabled = @"test.enabled";
-static BOOL enabled = YES, inspecting = NO, nativeProbe = NO;
+static BOOL enabled = YES, inspecting = NO, synthetic = NO, nativeProbe = NO;
 BOOL FBTMCNativeProbeAnyEnabled(void) { return nativeProbe; }
 @implementation FBTDefaults
 + (BOOL)boolForKey:(NSString *)key { return enabled; }
@@ -17,6 +17,7 @@ BOOL FBTMCNativeProbeAnyEnabled(void) { return nativeProbe; }
 @end
 BOOL FBTMobileConfigIsInspectingSystemValue(void) { return inspecting; }
 BOOL FBTMobileConfigShouldBypassTweakOverrides(void) { return inspecting; }
+BOOL FBTMobileConfigIsInspectingValue(void) { return inspecting || synthetic; }
 static void Check(BOOL ok, NSString *message) { if (!ok) { NSLog(@"FAIL %@", message); exit(1); } }
 int main(void) { @autoreleasepool {
     FBTEmployeeDiagnosticsReset();
@@ -33,7 +34,12 @@ int main(void) { @autoreleasepool {
         !FBTEmployeeApplyTWProbe(3, NO), @"only exact tw_is_employee.enabled affected");
     inspecting = YES;
     Check(!FBTEmployeeApplyTWProbe(1, NO), @"SYS inspection unaffected");
-    inspecting = NO; enabled = NO;
+    inspecting = NO; synthetic = YES;
+    Check(FBTEmployeeApplyTWProbe(1, NO), @"effective inspection retains temporary tweak forcing");
+    FBTEmployeeObserveBool(@"synthetic_direct", NO, YES, NULL);
+    FBTEmployeeObserveMCBool(1, NO, YES, NULL);
+    Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 1, @"synthetic effective reads are not employee observations");
+    synthetic = NO; enabled = NO;
     Check(!FBTEmployeeApplyTWProbe(1, NO), @"paused logging disables probe");
     FBTEmployeeObserveBool(@"should_not_exist", NO, YES, NULL);
     Check([FBTEmployeeDiagnosticsSnapshot()[@"reads"] count] == 1, @"paused capture stores nothing");

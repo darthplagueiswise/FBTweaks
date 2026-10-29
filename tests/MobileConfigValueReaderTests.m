@@ -7,7 +7,7 @@
 
 typedef struct mc_bool_param_t { uint64_t value; } mc_bool_param_t;
 static NSArray *sContexts;
-static BOOL sForced, sThrow;
+static BOOL sForced, sThrow, sThrowNative;
 static id sSystemValue;
 static int sUnit = 1;
 static NSInteger sBypassSource = 2;
@@ -56,8 +56,10 @@ static void Check(BOOL value, NSString *message) { ++sChecks; if (!value) { NSLo
 - (id)getString:(mc_bool_param_t)param withOptions:(FBMobileConfigOptions *)options;
 @end
 static void VerifyOptions(FBMobileConfigOptions *options) {
+    Check(FBTMobileConfigIsInspectingValue(), @"all three synthetic reads are marked as inspection");
     Check(options.noLogging && options.requestSource, @"inspection requests source without exposure logging");
     Check(options.ignore == FBTMobileConfigIsInspectingSystemValue(), @"native bypass and thread-local bypass agree");
+    if (sThrowNative && !options.ignore) @throw [NSException exceptionWithName:@"FixtureNativeRead" reason:@"fixture" userInfo:nil];
     if (sThrow) @throw [NSException exceptionWithName:@"FixtureRead" reason:@"fixture" userInfo:nil];
     options.valueSource = options.ignore ? sBypassSource : 1;
 }
@@ -86,6 +88,7 @@ int main(void) { @autoreleasepool {
     Check([r[@"native_effective_value"] isEqual:@NO], @"native override read excludes tweak forcing true");
     Check([r[@"native_effective_source"] isEqual:@"OVERRIDE"], @"native override source is reported separately");
     Check(!FBTMobileConfigIsInspectingSystemValue(), @"inspection scope restored");
+    Check(!FBTMobileConfigIsInspectingValue(), @"whole inspection scope restored");
     typedef NSDictionary *(*ReloadReadFn)(NSDictionary *, NSDictionary *);
     ReloadReadFn reloadRead = (ReloadReadFn)dlsym(RTLD_DEFAULT, "FBTMobileConfigReloadAndInspectParameter");
     Check(reloadRead != NULL, @"explicit reload and readback API exists");
@@ -116,7 +119,9 @@ int main(void) { @autoreleasepool {
     Check(![FBTMobileConfigInspectParameter(@{}, @{@"type": @"bool"})[@"available"] boolValue], @"unverified descriptor rejected");
     sContexts = @[[FixtureReader new]]; sThrow = YES;
     Check(![Read(@"bool")[@"available"] boolValue] && !FBTMobileConfigIsInspectingSystemValue(), @"exception restores bypass scope");
-    sThrow = NO; sSystemValue = @NO;
+    sThrow = NO; sThrowNative = YES;
+    Check(![Read(@"bool")[@"available"] boolValue] && !FBTMobileConfigShouldBypassTweakOverrides() && !FBTMobileConfigIsInspectingValue(), @"native-only exception restores tweak bypass and whole scope");
+    sThrowNative = NO; sSystemValue = @NO;
     Check([Read(@"bool")[@"available"] boolValue], @"reading recovers after an exception");
     sBypassSource = 0; r = Read(@"bool");
     Check([r[@"system_available"] boolValue] && [r[@"source"] isEqual:@"SERVER"], @"server source decoded by native formatter");

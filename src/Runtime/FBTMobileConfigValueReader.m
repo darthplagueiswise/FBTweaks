@@ -11,7 +11,9 @@
 typedef struct { uint64_t value; } FBTMCInspectionParam;
 static __thread unsigned int sSystemReadDepth;
 static __thread unsigned int sNativeReadDepth;
+static __thread unsigned int sInspectionDepth;
 BOOL FBTMobileConfigIsInspectingSystemValue(void) { return sSystemReadDepth != 0; }
+BOOL FBTMobileConfigIsInspectingValue(void) { return sInspectionDepth != 0; }
 BOOL FBTMobileConfigShouldBypassTweakOverrides(void) { return sSystemReadDepth != 0 || sNativeReadDepth != 0; }
 
 NSString *FBTMobileConfigValueText(id value, NSString *type) {
@@ -81,7 +83,7 @@ static id FBTRead(id context, SEL selector, uint64_t key, NSString *type, id opt
     return ((id (*)(id, SEL, FBTMCInspectionParam, id))objc_msgSend)(context, selector, param, options) ?: NSNull.null;
 }
 
-static NSDictionary *FBTInspectParameter(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {
+static NSDictionary *FBTInspectParameterImpl(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {
     @try {
         NSNumber *packed = [FBTLocalConfigCatalog packedKeyForConfiguration:configuration parameter:parameter];
         if (!packed) return FBTUnavailable(@"Descritor nativo não validado para este parâmetro/mapa.");
@@ -159,6 +161,12 @@ static NSDictionary *FBTInspectParameter(NSDictionary *configuration, NSDictiona
     } @catch (NSException *exception) {
         return FBTUnavailable([NSString stringWithFormat:@"Leitor nativo recusou a leitura (%@).", exception.name]);
     }
+}
+
+static NSDictionary *FBTInspectParameter(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {
+    ++sInspectionDepth;
+    @try { return FBTInspectParameterImpl(configuration, parameter, reload); }
+    @finally { --sInspectionDepth; }
 }
 
 NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDictionary *parameter) {

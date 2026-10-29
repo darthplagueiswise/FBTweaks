@@ -69,7 +69,7 @@ static void FBTMCPostUpdateThrottled(void) {
 }
 
 static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
-    if (FBTMobileConfigShouldBypassTweakOverrides()) return;
+    if (FBTMobileConfigIsInspectingValue()) return;
     pthread_mutex_lock(&sLock);
     BOOL capture = sCaptureEnabled;
     pthread_mutex_unlock(&sLock);
