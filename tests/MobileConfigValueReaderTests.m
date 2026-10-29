@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
-extern BOOL FBTMobileConfigShouldBypassTweakOverrides(void) __attribute__((weak_import));
 #import "../src/Runtime/FBTMobileConfigValueReader.h"
 #import "../src/Runtime/FBTLocalConfigCatalog.h"
 #import "../src/Runtime/FBTNativeMobileConfigOverrides.h"
@@ -26,7 +25,8 @@ NSString *NSStringFromFBMobileConfigOptionsValueSource(NSInteger value) {
 }
 NSArray *FBTNativeMobileConfigReaderContexts(void) { return sContexts; }
 NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key) {
-    return sForced && !(FBTMobileConfigShouldBypassTweakOverrides ? FBTMobileConfigShouldBypassTweakOverrides() : FBTMobileConfigIsInspectingSystemValue()) ? @{@"t": @"bool", @"v": @YES} : nil;
+    BOOL (*bypass)(void) = (BOOL (*)(void))dlsym(RTLD_DEFAULT, "FBTMobileConfigShouldBypassTweakOverrides");
+    return sForced && !(bypass ? bypass() : FBTMobileConfigIsInspectingSystemValue()) ? @{@"t": @"bool", @"v": @YES} : nil;
 }
 @implementation FBTLocalConfigCatalog
 + (NSNumber *)packedKeyForConfiguration:(NSDictionary *)configuration parameter:(NSDictionary *)parameter { return parameter[@"test_key"]; }
