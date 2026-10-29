@@ -1,4 +1,6 @@
 #import <Foundation/Foundation.h>
+#include <dlfcn.h>
+extern BOOL FBTMobileConfigShouldBypassTweakOverrides(void) __attribute__((weak_import));
 #import "../src/Runtime/FBTMobileConfigValueReader.h"
 #import "../src/Runtime/FBTLocalConfigCatalog.h"
 #import "../src/Runtime/FBTNativeMobileConfigOverrides.h"
@@ -10,13 +12,21 @@ static BOOL sForced, sThrow;
 static id sSystemValue;
 static int sUnit = 1;
 static NSInteger sBypassSource = 2;
-static NSUInteger sChecks;
+static NSUInteger sChecks, sReloadCalls;
+static BOOL sReloadOK = YES;
+static id sReloadValue;
+BOOL FBTNativeMobileConfigReloadOverridesForContext(id context, NSString **reason) {
+    ++sReloadCalls;
+    if (!sReloadOK) { if (reason) *reason = @"fixture reload refused"; return NO; }
+    sSystemValue = sReloadValue;
+    return YES;
+}
 NSString *NSStringFromFBMobileConfigOptionsValueSource(NSInteger value) {
     return @{@(-1): @"UNKNOWN_SOURCE", @0: @"SERVER", @1: @"OVERRIDE", @2: @"DEFAULT__SERVER_RETURNED_NULL", @9: @"MCS_CLIENT_OVERRIDE"}[@(value)] ?: @"UNKNOWN_SOURCE";
 }
 NSArray *FBTNativeMobileConfigReaderContexts(void) { return sContexts; }
 NSDictionary *FBTMobileConfigOverrideForKey(uint64_t key) {
-    return sForced && !FBTMobileConfigIsInspectingSystemValue() ? @{@"t": @"bool", @"v": @YES} : nil;
+    return sForced && !(FBTMobileConfigShouldBypassTweakOverrides ? FBTMobileConfigShouldBypassTweakOverrides() : FBTMobileConfigIsInspectingSystemValue()) ? @{@"t": @"bool", @"v": @YES} : nil;
 }
 @implementation FBTLocalConfigCatalog
 + (NSNumber *)packedKeyForConfiguration:(NSDictionary *)configuration parameter:(NSDictionary *)parameter { return parameter[@"test_key"]; }
@@ -49,7 +59,7 @@ static void VerifyOptions(FBMobileConfigOptions *options) {
     Check(options.noLogging && options.requestSource, @"inspection requests source without exposure logging");
     Check(options.ignore == FBTMobileConfigIsInspectingSystemValue(), @"native bypass and thread-local bypass agree");
     if (sThrow) @throw [NSException exceptionWithName:@"FixtureRead" reason:@"fixture" userInfo:nil];
-    options.valueSource = options.ignore ? sBypassSource : 3;
+    options.valueSource = options.ignore ? sBypassSource : 1;
 }
 @implementation FixtureReader
 - (int)getUnitType { return sUnit; }
@@ -73,7 +83,26 @@ int main(void) { @autoreleasepool {
     Check([r[@"available"] boolValue] && ![r[@"system_value"] boolValue] && [r[@"effective_value"] boolValue], @"SYS false and active override true remain separate");
     Check([r[@"effective_source"] isEqual:@"Override da tweak"] && [r[@"source_raw"] integerValue] == 2, @"source recorded without claiming overridden value is server");
     Check([r[@"system_available"] boolValue] && [r[@"source"] hasPrefix:@"DEFAULT"], @"native default stays distinct from a server value");
+    Check([r[@"native_effective_value"] isEqual:@NO], @"native override read excludes tweak forcing true");
+    Check([r[@"native_effective_source"] isEqual:@"OVERRIDE"], @"native override source is reported separately");
     Check(!FBTMobileConfigIsInspectingSystemValue(), @"inspection scope restored");
+    typedef NSDictionary *(*ReloadReadFn)(NSDictionary *, NSDictionary *);
+    ReloadReadFn reloadRead = (ReloadReadFn)dlsym(RTLD_DEFAULT, "FBTMobileConfigReloadAndInspectParameter");
+    Check(reloadRead != NULL, @"explicit reload and readback API exists");
+    NSDictionary *cfg = @{@"id": @103647, @"name": @"mobilehome_startup"};
+    NSDictionary *param = @{@"id": @3, @"type": @"bool", @"name": @"mobileconfig_use_intern_graph", @"test_key": @((uint64_t)1 << 54)};
+    sReloadValue = @YES;
+    r = reloadRead(cfg, param);
+    Check(sReloadCalls == 1 && [r[@"reload_returned"] boolValue] && [r[@"native_effective_value"] isEqual:@YES], @"explicit reload happens before native readback");
+    Check(![r[@"import_confirmed"] boolValue], @"returning a table never claims parser success");
+    sReloadOK = NO; r = reloadRead(cfg, param);
+    Check(![r[@"available"] boolValue] && [r[@"reason"] isEqual:@"fixture reload refused"], @"reload failure is unavailable rather than old success");
+    sReloadOK = YES;
+    sContexts = @[[FixtureReader new], [FixtureReader new]];
+    NSUInteger calls = sReloadCalls; r = reloadRead(cfg, param);
+    Check(![r[@"available"] boolValue] && sReloadCalls == calls, @"ambiguous scope never reloads either context");
+    sContexts = @[[FixtureReader new]];
+
     sForced = NO; sSystemValue = @YES; r = Read(@"bool");
     Check([r[@"system_value"] boolValue] && [r[@"effective_value"] boolValue], @"SYS true observed independently of an override");
     sSystemValue = @((int64_t)INT64_MAX); r = Read(@"int64");
