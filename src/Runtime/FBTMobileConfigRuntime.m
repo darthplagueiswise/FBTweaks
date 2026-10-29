@@ -69,7 +69,7 @@ static void FBTMCPostUpdateThrottled(void) {
 }
 
 static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
-    if (FBTMobileConfigIsInspectingSystemValue()) return;
+    if (FBTMobileConfigShouldBypassTweakOverrides()) return;
     pthread_mutex_lock(&sLock);
     BOOL capture = sCaptureEnabled;
     pthread_mutex_unlock(&sLock);
@@ -163,7 +163,7 @@ NSDictionary *FBTMobileConfigRuntimeStatus(void) {
 }
 
 static NSDictionary *FBTMCOverride(uint64_t key, NSString *expectedType) {
-    if (FBTMobileConfigIsInspectingSystemValue()) return nil;
+    if (FBTMobileConfigShouldBypassTweakOverrides()) return nil;
     pthread_mutex_lock(&sLock);
     NSDictionary *ov = sOverridesEnabled ? [sOverrides objectForKey:FBTMCKeyString(key)] : nil;
     pthread_mutex_unlock(&sLock);

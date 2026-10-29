@@ -16,6 +16,7 @@ BOOL FBTMCNativeProbeAnyEnabled(void) { return nativeProbe; }
 }
 @end
 BOOL FBTMobileConfigIsInspectingSystemValue(void) { return inspecting; }
+BOOL FBTMobileConfigShouldBypassTweakOverrides(void) { return inspecting; }
 static void Check(BOOL ok, NSString *message) { if (!ok) { NSLog(@"FAIL %@", message); exit(1); } }
 int main(void) { @autoreleasepool {
     FBTEmployeeDiagnosticsReset();

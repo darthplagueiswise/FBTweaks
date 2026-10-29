@@ -10,7 +10,9 @@
 // Facebook 583: all four mc_*_param_t arguments are one uint64_t struct.
 typedef struct { uint64_t value; } FBTMCInspectionParam;
 static __thread unsigned int sSystemReadDepth;
+static __thread unsigned int sNativeReadDepth;
 BOOL FBTMobileConfigIsInspectingSystemValue(void) { return sSystemReadDepth != 0; }
+BOOL FBTMobileConfigShouldBypassTweakOverrides(void) { return sSystemReadDepth != 0 || sNativeReadDepth != 0; }
 
 NSString *FBTMobileConfigValueText(id value, NSString *type) {
     if (!value || value == NSNull.null) return @"nil";
@@ -79,7 +81,7 @@ static id FBTRead(id context, SEL selector, uint64_t key, NSString *type, id opt
     return ((id (*)(id, SEL, FBTMCInspectionParam, id))objc_msgSend)(context, selector, param, options) ?: NSNull.null;
 }
 
-NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDictionary *parameter) {
+static NSDictionary *FBTInspectParameter(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {
     @try {
         NSNumber *packed = [FBTLocalConfigCatalog packedKeyForConfiguration:configuration parameter:parameter];
         if (!packed) return FBTUnavailable(@"Descritor nativo não validado para este parâmetro/mapa.");
@@ -102,8 +104,13 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             selected = context;
         }
         if (!selected) return FBTUnavailable(@"Contexto deste escopo ainda indisponível. Abra MobileConfig nativo e atualize.");
-        id sysOptions = FBTOptions(YES), effectiveOptions = FBTOptions(NO);
-        if (!sysOptions || !effectiveOptions) return FBTUnavailable(@"API nativa de origem/bypass incompatível com esta versão.");
+        id sysOptions = FBTOptions(YES), nativeOptions = FBTOptions(NO), effectiveOptions = FBTOptions(NO);
+        if (!sysOptions || !nativeOptions || !effectiveOptions) return FBTUnavailable(@"API nativa de origem/bypass incompatível com esta versão.");
+        if (reload) {
+            NSString *reason = nil;
+            if (!FBTNativeMobileConfigReloadOverridesForContext(selected, &reason))
+                return FBTUnavailable(reason ?: @"Recarga nativa indisponível.");
+        }
         id systemValue;
         ++sSystemReadDepth;
         @try { systemValue = FBTRead(selected, selector, key, type, sysOptions); }
@@ -111,6 +118,11 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
         NSInteger source = ((NSInteger (*)(id, SEL))objc_msgSend)(sysOptions, NSSelectorFromString(@"valueSource"));
         NSString *sourceName = FBTNativeSourceName(source);
         BOOL systemAvailable = [sourceName isEqualToString:@"SERVER"] || [sourceName hasPrefix:@"DEFAULT"];
+        id nativeValue;
+        ++sNativeReadDepth;
+        @try { nativeValue = FBTRead(selected, selector, key, type, nativeOptions); }
+        @finally { --sNativeReadDepth; }
+        NSInteger nativeSource = ((NSInteger (*)(id, SEL))objc_msgSend)(nativeOptions, NSSelectorFromString(@"valueSource"));
         NSDictionary *runtimeOverride = FBTMobileConfigOverrideForKey(key);
         id effective = FBTRead(selected, selector, key, type, effectiveOptions);
         NSInteger effectiveSource = ((NSInteger (*)(id, SEL))objc_msgSend)(effectiveOptions, NSSelectorFromString(@"valueSource"));
@@ -122,6 +134,9 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
             @"system_available": @(systemAvailable),
             @"system_value": systemAvailable ? (systemValue ?: NSNull.null) : NSNull.null,
             @"observed_bypass_value": systemValue ?: NSNull.null, @"effective_value": effective ?: NSNull.null,
+            @"native_effective_value": nativeValue ?: NSNull.null,
+            @"native_effective_source": FBTNativeSourceName(nativeSource), @"native_effective_source_raw": @(nativeSource),
+            @"reload_requested": @(reload), @"reload_returned": @(reload), @"import_confirmed": @NO,
             @"source_raw": @(source), @"source": sourceName, @"source_hint": FBTSourceHint(sourceName),
             @"effective_source": runtimeOverride ? @"Override da tweak" : FBTNativeSourceName(effectiveSource),
             @"reader": NSStringFromClass([selected class]), @"read_at": @([NSDate date].timeIntervalSince1970)};
@@ -144,4 +159,12 @@ NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDic
     } @catch (NSException *exception) {
         return FBTUnavailable([NSString stringWithFormat:@"Leitor nativo recusou a leitura (%@).", exception.name]);
     }
+}
+
+NSDictionary *FBTMobileConfigInspectParameter(NSDictionary *configuration, NSDictionary *parameter) {
+    return FBTInspectParameter(configuration, parameter, NO);
+}
+
+NSDictionary *FBTMobileConfigReloadAndInspectParameter(NSDictionary *configuration, NSDictionary *parameter) {
+    return FBTInspectParameter(configuration, parameter, YES);
 }

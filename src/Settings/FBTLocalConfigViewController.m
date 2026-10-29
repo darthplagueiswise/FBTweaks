@@ -104,9 +104,29 @@
     NSString *state = fileValue ? [@"Override no arquivo: " stringByAppendingString:fileValue] : @"SYS (sem override no arquivo)";
     if (![reading[@"available"] boolValue]) return [NSString stringWithFormat:@"%@\n%@", state, reading[@"reason"] ?: @"Consultando o leitor nativo…"];
     NSString *systemText = [reading[@"system_available"] boolValue] ? FBTMobileConfigValueText(reading[@"system_value"], type) : @"não confirmado";
-    return [NSString stringWithFormat:@"%@\nEm uso: %@ · SYS: %@\nOrigem SYS: %@ · Em uso: %@\n%@",
-        state, FBTMobileConfigValueText(reading[@"effective_value"], type),
-        systemText, reading[@"source"], reading[@"effective_source"], reading[@"source_hint"] ?: @""];
+    return [NSString stringWithFormat:@"%@\nNativo: %@ · %@\nCom tweak: %@ · %@\nSYS: %@ · %@\n%@",
+        state, FBTMobileConfigValueText(reading[@"native_effective_value"], type), reading[@"native_effective_source"],
+        FBTMobileConfigValueText(reading[@"effective_value"], type), reading[@"effective_source"],
+        systemText, reading[@"source"], reading[@"source_hint"] ?: @""];
+}
+- (void)reloadNativeParameter:(NSDictionary *)parameter {
+    // Explicit user action. Ordinary inspection remains observational.
+    ++self.readGeneration;
+    [self.refreshControl endRefreshing];
+    NSDictionary *reading = FBTMobileConfigReloadAndInspectParameter(self.configuration, parameter);
+    NSMutableDictionary *readings = [self.readings mutableCopy] ?: [NSMutableDictionary dictionary];
+    readings[[parameter[@"id"] stringValue]] = reading;
+    self.readings = readings;
+    [self reloadValues];
+    [self.tableView reloadData];
+    if (![reading[@"available"] boolValue]) {
+        [self message:reading[@"reason"] ?: @"Recarga indisponível." title:@"Recarga não confirmada"];
+        return;
+    }
+    NSString *message = [NSString stringWithFormat:@"%@.%@\nNativo: %@\nOrigem: %@\n\nO carregador retornou uma tabela. Compare o valor nativo com o arquivo; o retorno sozinho não confirma parsing. A recarga vale para o universo deste contexto e não recria objetos de startup nem inicia download.",
+        self.configuration[@"name"], parameter[@"name"],
+        FBTMobileConfigValueText(reading[@"native_effective_value"], parameter[@"type"]), reading[@"native_effective_source"]];
+    [self message:message title:@"Recarga executada; leitura nativa"];
 }
 - (void)shareValues {
     NSMutableArray *parameters = [NSMutableArray array];
@@ -115,7 +135,7 @@
         [parameters addObject:@{@"parameter": parameter, @"file_override": self.values[pid] ?: NSNull.null,
             @"reading": self.readings[pid] ?: @{@"available": @NO, @"reason": @"Leitura ainda não executada"}}];
     }
-    NSDictionary *report = @{@"schema_version": @1, @"configuration_id": self.configuration[@"id"],
+    NSDictionary *report = @{@"schema_version": @2, @"configuration_id": self.configuration[@"id"],
         @"configuration": self.configuration[@"name"], @"scope": self.configuration[@"scope"],
         @"map": self.configuration[@"source"], @"exported_at": @([NSDate date].timeIntervalSince1970), @"parameters": parameters};
     NSError *error = nil;
@@ -176,7 +196,7 @@
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return self.configuration ? @"Em uso é o retorno atual do leitor nativo. SYS ignora os overrides durante uma leitura isolada e mostra a origem informada pelo app, que pode ser servidor, cache ou default. Indisponível nunca significa false. Puxe para atualizar; compartilhe para exportar os valores. Alterações no arquivo precisam de reinício para serem reimportadas."
+    return self.configuration ? @"Nativo lê o contexto com os overrides da tweak suspensos. Com tweak mostra o retorno incluindo a tweak. SYS também ignora os overrides nativos. Puxar atualiza somente as leituras. Toque num parâmetro para reimportar o arquivo no contexto selecionado; objetos de startup já criados não são reconstruídos. Compartilhe para exportar os resultados e suas origens."
         : @"Catálogo dos mapas v2 do aplicativo, incluindo Page/Admin ID e React Native. A busca encontra nomes e IDs de configurações e parâmetros.";
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -246,6 +266,9 @@
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:row[@"name"]
         message:[NSString stringWithFormat:@"%@: %@ · parâmetro %@ · %@\n%@", self.configuration[@"id"], self.configuration[@"name"], row[@"id"], row[@"type"], [self valueDetailsForParameter:row]]
         preferredStyle:UIAlertControllerStyleActionSheet];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Reimportar arquivo e ler nativo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        [self reloadNativeParameter:row];
+    }]];
     if ([row[@"type"] isEqualToString:@"bool"]) {
         for (NSString *value in @[@"true", @"false"]) [alert addAction:[UIAlertAction actionWithTitle:[@"Gravar " stringByAppendingString:value] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self save:value parameter:row]; }]];
     } else [alert addAction:[UIAlertAction actionWithTitle:@"Editar valor…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self edit:row]; }]];

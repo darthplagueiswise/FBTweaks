@@ -61,7 +61,7 @@ void FBTEmployeeCancelTWProbe(void) {
     pthread_mutex_lock(&sIdentityLock); sTWDeadline = 0; pthread_mutex_unlock(&sIdentityLock);
 }
 BOOL FBTEmployeeApplyTWProbe(uint64_t key, BOOL value) {
-    if (sIdentityInspecting || FBTMobileConfigIsInspectingSystemValue() ||
+    if (sIdentityInspecting || FBTMobileConfigShouldBypassTweakOverrides() ||
         ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return value;
     pthread_mutex_lock(&sIdentityLock);
     BOOL armed = [NSProcessInfo processInfo].systemUptime < sTWDeadline;
@@ -99,7 +99,7 @@ void FBTEmployeeObserveBool(NSString *source, BOOL original, BOOL effective, con
 }
 
 void FBTEmployeeObserveMCBool(uint64_t key, BOOL original, BOOL effective, const void *caller) {
-    if (sIdentityInspecting || FBTMobileConfigIsInspectingSystemValue() ||
+    if (sIdentityInspecting || FBTMobileConfigShouldBypassTweakOverrides() ||
         !FBTEmployeeDiagnosticsShouldObserve()) return;
     sIdentityInspecting = YES;
     @try {

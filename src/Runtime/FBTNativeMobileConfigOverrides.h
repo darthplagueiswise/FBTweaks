@@ -22,6 +22,11 @@ NSUInteger FBTNativeMobileConfigContextCount(void);
 NSString *FBTNativeMobileConfigStatus(void);
 NSArray *FBTNativeMobileConfigReaderContexts(void);
 
+// force=true calls the native loader for this manager's universe. A returned
+// table is NOT proof of parsing/import success; inspect the native value next.
+// Does not create an override file or modify credentials.
+BOOL FBTNativeMobileConfigReloadOverridesForContext(id context, NSString **reason);
+
 // Aplica no FBMobileConfigOverridesTable nativo quando há contexto vivo.
 // A camada fishhook runtime continua como fallback persistente.
 BOOL FBTNativeMobileConfigApplyOverride(uint64_t key, NSString *type, id value);

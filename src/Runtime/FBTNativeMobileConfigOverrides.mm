@@ -27,7 +27,7 @@ class FBMobileConfigOverridesTable;
 - (std::shared_ptr<mobileconfig::FBMobileConfigManager>)getCurrentManager;
 - (std::shared_ptr<mobileconfig::FBMobileConfigManager>)configManager;
 @end
-typedef std::shared_ptr<mobileconfig::FBMobileConfigOverridesTable> (*FBTGetOrCreateTableFn)(mobileconfig::FBMobileConfigManager *manager, bool create);
+typedef std::shared_ptr<mobileconfig::FBMobileConfigOverridesTable> (*FBTGetOrCreateTableFn)(mobileconfig::FBMobileConfigManager *manager, bool force);
 typedef void (*FBTUpdateBoolFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, bool value, bool persist);
 typedef void (*FBTUpdateInt64Fn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, long long value, bool persist);
 typedef void (*FBTUpdateDoubleFn)(mobileconfig::FBMobileConfigOverridesTable *table, uint64_t key, double value, bool persist);
@@ -269,6 +269,52 @@ static NSArray *FBTNativeContextsSnapshot(void) {
 }
 
 NSArray *FBTNativeMobileConfigReaderContexts(void) { return FBTNativeContextsSnapshot(); }
+
+BOOL FBTNativeMobileConfigReloadOverridesForContext(id context, NSString **reason) {
+    if (reason) *reason = nil;
+    if (!context) {
+        if (reason) *reason = @"Contexto nativo indisponível.";
+        return NO;
+    }
+    FBTResolveNativeSymbols();
+    if (!sGetOrCreateTable) {
+        if (reason) *reason = @"API nativa de recarga indisponível nesta versão.";
+        return NO;
+    }
+    @try {
+        try {
+            std::shared_ptr<mobileconfig::FBMobileConfigManager> manager;
+            const char *expected = "{shared_ptr<mobileconfig::FBMobileConfigManager>=^{FBMobileConfigManager}^{__shared_weak_count}}16@0:8";
+            for (NSString *name in @[@"getCurrentManager", @"configManager"]) {
+                SEL selector = NSSelectorFromString(name);
+                Method method = class_getInstanceMethod([context class], selector);
+                if (!method || strcmp(method_getTypeEncoding(method), expected) != 0) continue;
+                id<FBTMCNativeManagerGetter> owner = context;
+                manager = [name isEqualToString:@"getCurrentManager"]
+                    ? [owner getCurrentManager] : [owner configManager];
+                if (manager.get()) break;
+            }
+            if (!manager.get()) {
+                if (reason) *reason = @"Manager ausente ou getter com ABI incompatível.";
+                return NO;
+            }
+            // Shared 584.1 0xd7725c..0xd77274: force=true invokes load for
+            // this manager's universe, including an already cached table.
+            auto table = sGetOrCreateTable(manager.get(), true);
+            if (!table.get()) {
+                if (reason) *reason = @"A recarga nativa não retornou uma tabela.";
+                return NO;
+            }
+            return YES;
+        } catch (...) {
+            if (reason) *reason = @"A recarga nativa lançou uma exceção C++.";
+            return NO;
+        }
+    } @catch (NSException *exception) {
+        if (reason) *reason = [NSString stringWithFormat:@"A recarga nativa foi recusada (%@).", exception.name];
+        return NO;
+    }
+}
 
 static BOOL FBTApplyWithObjCOverrideObject(id object, uint64_t key, NSString *type, id value, BOOL remove) {
     if (!object) return NO;
