@@ -115,8 +115,14 @@ static NSDictionary *FBTInspectorKnownHeaders(const void *request) {
         FBTHeaderResult found = sFindHeader(request, std::string(name));
         if (!found.bytes[24]) continue;
         std::string *value = reinterpret_cast<std::string *>(found.bytes);
-        if (value->size() <= 32768)
-            items[[NSString stringWithUTF8String:name]] = FBTTigonString(*value);
+        if (value->size() <= 32768) {
+            NSString *key = [NSString stringWithUTF8String:name];
+            // Inspector exports can be shared as diagnostic JSON. Never save
+            // OAuth tokens, session cookies or other credentials verbatim.
+            BOOL secret = [key caseInsensitiveCompare:@"Authorization"] == NSOrderedSame ||
+                          [key caseInsensitiveCompare:@"Cookie"] == NSOrderedSame;
+            items[key] = secret ? @"[REDACTED]" : FBTTigonString(*value);
+        }
         value->~basic_string();
     }
     return [items copy];
@@ -364,7 +370,16 @@ static void FBTTigonCaptureStarted(void *self, const void *request, BOOL simple)
         if (FBTNetworkInspectorIsCapturing()) {
             context[@"inspector_raw_host"] = host ?: @"";
             context[@"inspector_raw_path"] = path ?: @"";
-            if (sTigonURLQuery) context[@"inspector_query"] = FBTTigonString(sTigonURLQuery(url));
+            if (sTigonURLQuery) {
+                NSString *raw = FBTTigonString(sTigonURLQuery(url));
+                NSMutableArray *safe = [NSMutableArray array];
+                for (NSString *part in [raw componentsSeparatedByString:@"&"]) {
+                    NSRange equal = [part rangeOfString:@"="];
+                    NSString *name = equal.location == NSNotFound ? part : [part substringToIndex:equal.location];
+                    [safe addObject:equal.location == NSNotFound ? name : [name stringByAppendingString:@"=[REDACTED]"]];
+                }
+                context[@"inspector_query"] = [safe componentsJoinedByString:@"&"];
+            }
             context[@"inspector_headers"] = FBTInspectorKnownHeaders(request);
         }
 
