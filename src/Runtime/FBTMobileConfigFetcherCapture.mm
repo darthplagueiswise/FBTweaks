@@ -6,6 +6,7 @@
 #import "../FBTDefaults.h"
 #import "FBTEmployeeDiagnostics.h"
 #include "FBTMCRequestExperiment.hpp"
+#include "FBTMCQEFullProfile.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -14,6 +15,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstring>
+#include <cctype>
 #include <mutex>
 #import <objc/runtime.h>
 #include <dlfcn.h>
@@ -32,6 +34,29 @@ static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
 static fbt_mc_probe::OneShot sRequestExperiment;
+// Explicit one-shot, user-selected QE-full profile. Never mutate ordinary
+// name-only refreshes or background MobileConfig traffic without consent.
+static std::atomic<bool> sFullQEArmed(false);
+static std::atomic<double> sFullQEExpiresAt(0.0);
+void FBTMobileConfigArmFullQEInfoRequest(void) {
+    sFullQEExpiresAt.store(CACurrentMediaTime() + 120.0, std::memory_order_relaxed);
+    sFullQEArmed.store(true, std::memory_order_release);
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_full_profile_armed",
+        @{@"duration_seconds": @120, @"scope": @"next_mobileconfig_qe_info_POST_only"});
+}
+void FBTMobileConfigCancelFullQEInfoRequest(void) {
+    sFullQEArmed.store(false, std::memory_order_release);
+}
+static bool FBTConsumeFullQEProfile(const std::string &method, const std::string &purpose) {
+    if (method != "POST" || purpose != "mobileconfig_qe_info" ||
+        CACurrentMediaTime() > sFullQEExpiresAt.load(std::memory_order_relaxed)) return false;
+    bool armed = true;
+    return sFullQEArmed.compare_exchange_strong(armed, false, std::memory_order_acq_rel);
+}
+static unsigned FBTApplyFullQEProfile(FBTMCRequestPairs &pairs) {
+    // Only explicit user one-shot calls this helper. See portable C++ tests.
+    return fbt_mc_qe::apply(pairs);
+}
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSString *identifier = NSUUID.UUID.UUIDString;
@@ -189,12 +214,16 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
-    // Session-only diagnostics are strictly observational; the legacy LAB
-    // request-field A/B experiment is never applied through this toggle.
-    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
+    // A/B QE-info is an EXPLICIT, one-shot, 120-second user action. The
+    // verified, session-scoped fetcher wrapper already gates this path; the
+    // global invasive hooks remain disabled. Do not silently cancel B here,
+    // because doing so made the UI claim "is_employee=true" while sending A.
+    // Never apply this to requests other than the next QE-info POST.
     auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
+    bool fullQEProfile = FBTConsumeFullQEProfile(method, purpose);
+    unsigned fullQEFieldsChanged = fullQEProfile ? FBTApplyFullQEProfile(*outgoing) : 0;
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
     // Binary TigonRequest constructor and device logs prove argument 1 is the
@@ -207,6 +236,9 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"experiment_profile": selected.mode < 0 ? @"native" : selected.mode ? @"B_is_employee_true" : @"A_native",
         @"experiment_state": selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
         @"employee_field_added": @(added),
+        @"full_qe_profile_applied": @(fullQEProfile),
+        @"full_qe_fields_changed": @(fullQEFieldsChanged),
+        @"profile_source": fullQEProfile ? @"explicit_user_one_shot" : @"native_request",
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
@@ -235,6 +267,10 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             parameterShape[@"device_id_present"] = @(!pair.second.empty());
             parameterShape[@"device_id_bytes"] = @(pair.second.size());
             parameterShape[@"device_id_value_equals_field_name"] = @(pair.second == "device_id");
+            if (fullQEProfile && pair.second == "device_id") {
+                details[@"full_qe_device_id_state"] = @"unresolved_literal_from_native_builder";
+                // A profile change is not a device-ID repair.
+            }
             parameterShape[@"device_id_value_is_whitespace"] = @(!pair.second.empty() &&
                 pair.second.find_first_not_of(" \t\r\n") == std::string::npos);
         }
@@ -275,7 +311,17 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         for (const auto &pair : *outgoing) {
             total += pair.first.size() + pair.second.size();
             if (total > 1024 * 1024) break;
-            [rawPairs addObject:@{@"name": FBTMCText(pair.first), @"value": FBTMCText(pair.second)}];
+            // The exported Network Inspector must never disclose a session
+            // token, app-specific device ID, keychain credential or secret.
+            // Keep query IDs and content-selection flags for useful diagnostics.
+            std::string lowName(pair.first);
+            std::transform(lowName.begin(), lowName.end(), lowName.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            bool privateField = lowName == "device_id" || lowName.find("token") != std::string::npos ||
+                lowName.find("secret") != std::string::npos || lowName.find("authorization") != std::string::npos ||
+                lowName.find("cookie") != std::string::npos || lowName.find("password") != std::string::npos;
+            [rawPairs addObject:@{@"name": FBTMCText(pair.first),
+                @"value": privateField ? @"[REDACTED]" : FBTMCText(pair.second)}];
         }
         NSMutableDictionary *inspectorInfo = [details mutableCopy];
         inspectorInfo[@"inspector_request_truncated"] = @(total > 1024 * 1024);

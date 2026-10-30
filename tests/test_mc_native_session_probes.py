@@ -43,13 +43,19 @@ class MCNativeSessionProbes(unittest.TestCase):
         self.assertIn("if (!FBTQEInvasiveHooksAllowed()) return;",tig)
         self.assertIn("FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey)",tig)
         self.assertIn("FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)",fetch)
-    def test_opt_in_observation_does_not_mutate_server_requests_or_store_bodies(self):
+    def test_normal_observation_passive_only_explicit_one_shot_b_mutates_and_no_body_storage(self):
         fetch = src("src/Runtime/FBTMobileConfigFetcherCapture.mm")
         tig = src("src/Runtime/FBTMobileConfigTigonCapture.mm")
-        self.assertIn("if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();",fetch)
+        # No native request is modified in normal observation mode. The only
+        # exception is the user's separately armed one-shot B experiment.
+        self.assertIn("sRequestExperiment.consume(method, purpose, CACurrentMediaTime())",fetch)
+        self.assertIn("BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);",fetch)
+        self.assertNotIn("if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();",fetch)
+        self.assertIn("FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey)",fetch)
         self.assertIn("if (FBTQEInvasiveHooksAllowed() && success",fetch)
         self.assertIn("} else if (FBTQEInvasiveHooksAllowed()) {",tig)
         self.assertIn('@"tigon_native_response_metadata"',tig)
+        self.assertIn("tests/QEEmployeeFieldOneShotTests.cpp",src(".github/workflows/buildtweak.yml"))
     def test_legacy_lab_fixture_has_explicit_separate_opt_in(self):
         fixture = src("tests/TigonCaptureTests.mm")
         self.assertIn("#define FBT_ENABLE_QE_INVASIVE_HOOKS 1", fixture)

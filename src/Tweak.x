@@ -117,8 +117,13 @@ static void FBTInstallEnabledKnownFamilies(void) {
 
 %ctor {
     @autoreleasepool {
+        // Keep the launch-latched environment setting, but do not install
+        // Objective-C hooks, enumerate runtime classes or touch MobileConfig
+        // while dyld4 is executing this image's initializer.
         [FBTDefaults registerDefaultsOnce];
         FBTConfigureMobileLabEnvironment(); // before FBTweak hooks
+        dispatch_async(dispatch_get_main_queue(), ^{
+          @autoreleasepool {
         // Ring buffer initialized on demand after the host UI appears.
         // Migrate away from the duplicate employee sweep before loading hooks.
         // Only sweep:employee entries are removed; manual overrides remain.
@@ -173,7 +178,9 @@ static void FBTInstallEnabledKnownFamilies(void) {
             FBTInstallLiquidGlassHooks();
         }
 
-        FBTLog(@"ctor done (master=%d)",
+        FBTLog(@"post-dyld bootstrap done (master=%d)",
                [[NSUserDefaults standardUserDefaults] boolForKey:FBTKeyMasterEnabled]);
+          }
+        });
     }
 }

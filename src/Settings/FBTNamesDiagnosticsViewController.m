@@ -112,10 +112,11 @@ extern void FBTInitEmployeeGroup(void);
     self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local",
         @"Armar A: próximo pedido QE original", @"Armar B: próximo pedido QE + is_employee=true",
         @"Testar tw_is_employee=true por 120 s", @"Cancelar testes temporários",
-        [NSString stringWithFormat:@"Employee local (FBUser/gates): %@ — tocar alterna", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]],
+        [NSString stringWithFormat:@"Employee local (FBUser/gates): %@ — tocar alterna", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"],
+         @"Armar próximo QE-info completo (with_*=true; skip_qe=false; only=false)"],
         @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
         @[requestText, result, localState, interpretation, authText, identityText], historyText,
-        @[@"Inicie a captura uma vez. Arme A e execute Force name download; arme B e repita a mesma ação. Faça depois A/B na consulta de params. Cada armamento vale só para o próximo POST QE-info em até 120 s. Confira no histórico qual ação o consumiu.\n\nTeste FBUser/gates e tw_is_employee separadamente, mantendo o restante fixo. O teste tw_* afeta somente tw_is_employee.enabled nos leitores observados e expira em 120 s. Não grava mc_overrides.\n\nVolte e compartilhe o JSON. O relatório não contém seu token. Leituras locais de identidade são observações do processo, não prova de autorização remota nem de associação a um pedido específico."]];
+        @[@"Inicie a captura uma vez. Arme A e execute Force name download; arme B e repita a mesma ação. Faça depois A/B na consulta de params. Para testar o perfil com todos os with_* ativos, arme 'QE-info completo' e execute a ação nativa uma vez. O campo device_id permanece intacto: a origem nativa ainda precisa ser validada. Cada armamento vale só para o próximo POST QE-info em até 120 s. Confira no histórico qual ação o consumiu.\n\nTeste FBUser/gates e tw_is_employee separadamente, mantendo o restante fixo. O teste tw_* afeta somente tw_is_employee.enabled nos leitores observados e expira em 120 s. Não grava mc_overrides.\n\nVolte e compartilhe o JSON. O relatório não contém seu token. Leituras locais de identidade são observações do processo, não prova de autorização remota nem de associação a um pedido específico."]];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
@@ -157,6 +158,7 @@ extern void FBTInitEmployeeGroup(void);
         FBTMobileConfigFetchDiagnosticsReset();
         FBTMobileConfigResponseCaptureArm(@"force_name_download");
     } else if (path.row == 1) {
+        FBTMobileConfigCancelFullQEInfoRequest();
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
         [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
         FBTNativeTraceSetSessionCaptureEnabled(NO);
@@ -171,6 +173,8 @@ extern void FBTInitEmployeeGroup(void);
     else if (path.row == 8) {
         [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
         FBTInitEmployeeGroup();
+    } else if (path.row == 9) {
+        FBTMobileConfigArmFullQEInfoRequest();
     }
     [self refreshReport];
 }

@@ -15,6 +15,9 @@ NSDictionary *FBTMobileConfigFetcherCaptureStatus(void);
 // One-shot experiment, memory only, expires in 120 seconds.
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField);
 void FBTMobileConfigCancelEmployeeExperiment(void);
+// User-initiated next QE-info POST uses a full content profile; never overrides native identity.
+void FBTMobileConfigArmFullQEInfoRequest(void);
+void FBTMobileConfigCancelFullQEInfoRequest(void);
 NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void);
 // Selection-scoped correlation: begin/end on the same thread, in LIFO order.
 // Async callbacks own shared state, so a late response cannot touch a dead scope.

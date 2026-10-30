@@ -6,6 +6,7 @@ on:
       - 'flags'
       - 'main'
       - 'fix/watchdog-mc-recording-20261030'
+      - 'fix/coldstart-qe-diagnostics-20261030'
   workflow_dispatch:
 
 concurrency:
@@ -140,6 +141,15 @@ jobs:
           clang -std=c11 -fobjc-arc -framework Foundation -c src/Runtime/FBTNetworkInspectorStore.m -o /tmp/fbt-inspector-store.o
           clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
+
+      - name: Test opt-in full QE request profile and immutable device identity
+        run: |
+          cd main
+          clang++ -std=c++11 -Wall -Wextra -Werror tests/QEFullProfileTests.cpp -o /tmp/fbt-qe-full-profile-tests
+          /tmp/fbt-qe-full-profile-tests
+          clang++ -std=c++11 -Wall -Wextra -Werror tests/QEEmployeeFieldOneShotTests.cpp -o /tmp/fbt-qe-employee-one-shot-tests
+          /tmp/fbt-qe-employee-one-shot-tests
+          python3 -m unittest discover -s tests -p "test_coldstart_bootstrap.py" -v
 
       - name: Test native query correlation
         run: |
