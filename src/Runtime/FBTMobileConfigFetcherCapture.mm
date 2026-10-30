@@ -15,6 +15,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstring>
+#include <cctype>
 #include <mutex>
 #import <objc/runtime.h>
 #include <dlfcn.h>
@@ -308,7 +309,17 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         for (const auto &pair : *outgoing) {
             total += pair.first.size() + pair.second.size();
             if (total > 1024 * 1024) break;
-            [rawPairs addObject:@{@"name": FBTMCText(pair.first), @"value": FBTMCText(pair.second)}];
+            // The exported Network Inspector must never disclose a session
+            // token, app-specific device ID, keychain credential or secret.
+            // Keep query IDs and content-selection flags for useful diagnostics.
+            std::string lowName(pair.first);
+            std::transform(lowName.begin(), lowName.end(), lowName.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            bool privateField = lowName == "device_id" || lowName.find("token") != std::string::npos ||
+                lowName.find("secret") != std::string::npos || lowName.find("authorization") != std::string::npos ||
+                lowName.find("cookie") != std::string::npos || lowName.find("password") != std::string::npos;
+            [rawPairs addObject:@{@"name": FBTMCText(pair.first),
+                @"value": privateField ? @"[REDACTED]" : FBTMCText(pair.second)}];
         }
         NSMutableDictionary *inspectorInfo = [details mutableCopy];
         inspectorInfo[@"inspector_request_truncated"] = @(total > 1024 * 1024);
