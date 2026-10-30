@@ -32,6 +32,44 @@ static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
 static fbt_mc_probe::OneShot sRequestExperiment;
+// Explicit one-shot, user-selected QE-full profile. Never mutate ordinary
+// name-only refreshes or background MobileConfig traffic without consent.
+static std::atomic<bool> sFullQEArmed(false);
+static std::atomic<double> sFullQEExpiresAt(0.0);
+void FBTMobileConfigArmFullQEInfoRequest(void) {
+    sFullQEExpiresAt.store(CACurrentMediaTime() + 120.0, std::memory_order_relaxed);
+    sFullQEArmed.store(true, std::memory_order_release);
+    FBTMobileConfigFetchDiagnosticsRecord(@"qe_full_profile_armed",
+        @{@"duration_seconds": @120, @"scope": @"next_mobileconfig_qe_info_POST_only"});
+}
+void FBTMobileConfigCancelFullQEInfoRequest(void) {
+    sFullQEArmed.store(false, std::memory_order_release);
+}
+static bool FBTConsumeFullQEProfile(const std::string &method, const std::string &purpose) {
+    if (method != "POST" || purpose != "mobileconfig_qe_info" ||
+        CACurrentMediaTime() > sFullQEExpiresAt.load(std::memory_order_relaxed)) return false;
+    bool armed = true;
+    return sFullQEArmed.compare_exchange_strong(armed, false, std::memory_order_acq_rel);
+}
+static unsigned FBTApplyFullQEProfile(FBTMCRequestPairs &pairs) {
+    // This is a separate fetch experiment, not a rename of the native
+    // refreshNames request. Preserve original order, query list and auth.
+    unsigned changed = 0;
+    for (auto &pair : pairs) {
+        const std::string &name = pair.first;
+        if (name == "with_only_current_experiment_group" || name == "skip_qe") {
+            if (pair.second != "false") { pair.second = "false"; ++changed; }
+        } else if (name == "needs_name" || name == "with_universe_params" ||
+                   name == "with_current_experiment_group" || name == "with_experiments" ||
+                   name == "with_params" || name == "with_groups" ||
+                   name == "with_group_params" || name == "with_gatekeepers") {
+            if (pair.second != "true") { pair.second = "true"; ++changed; }
+        }
+        // Never manufacture a Meta device identity from IDFV/UDID or a literal
+        // placeholder. A valid native value source must be established first.
+    }
+    return changed;
+}
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSString *identifier = NSUUID.UUID.UUIDString;
@@ -195,6 +233,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
+    bool fullQEProfile = FBTConsumeFullQEProfile(method, purpose);
+    unsigned fullQEFieldsChanged = fullQEProfile ? FBTApplyFullQEProfile(*outgoing) : 0;
     unsigned long long requestID = ++sRequests;
     NSString *requestLabel = FBTMCText(purpose);
     // Binary TigonRequest constructor and device logs prove argument 1 is the
@@ -207,6 +247,9 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         @"experiment_profile": selected.mode < 0 ? @"native" : selected.mode ? @"B_is_employee_true" : @"A_native",
         @"experiment_state": selected.mode != 1 ? @"original_request" : added ? @"field_added" : @"skipped_existing_native_field",
         @"employee_field_added": @(added),
+        @"full_qe_profile_applied": @(fullQEProfile),
+        @"full_qe_fields_changed": @(fullQEFieldsChanged),
+        @"profile_source": fullQEProfile ? @"explicit_user_one_shot" : @"native_request",
         @"routing_hint_present": @(!routingHint.empty()),
         @"query_hash_source": @"native_request_parameter_pairs",
         @"query_hash_state": @"not_observed", @"one_query_hash_state": @"not_observed"} mutableCopy];
@@ -235,6 +278,10 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
             parameterShape[@"device_id_present"] = @(!pair.second.empty());
             parameterShape[@"device_id_bytes"] = @(pair.second.size());
             parameterShape[@"device_id_value_equals_field_name"] = @(pair.second == "device_id");
+            if (fullQEProfile && pair.second == "device_id") {
+                details[@"full_qe_device_id_state"] = @"unresolved_literal_from_native_builder";
+                // A profile change is not a device-ID repair.
+            }
             parameterShape[@"device_id_value_is_whitespace"] = @(!pair.second.empty() &&
                 pair.second.find_first_not_of(" \t\r\n") == std::string::npos);
         }
