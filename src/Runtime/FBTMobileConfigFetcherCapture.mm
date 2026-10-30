@@ -6,6 +6,7 @@
 #import "../FBTDefaults.h"
 #import "FBTEmployeeDiagnostics.h"
 #include "FBTMCRequestExperiment.hpp"
+#include "FBTMCQEFullProfile.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -52,23 +53,8 @@ static bool FBTConsumeFullQEProfile(const std::string &method, const std::string
     return sFullQEArmed.compare_exchange_strong(armed, false, std::memory_order_acq_rel);
 }
 static unsigned FBTApplyFullQEProfile(FBTMCRequestPairs &pairs) {
-    // This is a separate fetch experiment, not a rename of the native
-    // refreshNames request. Preserve original order, query list and auth.
-    unsigned changed = 0;
-    for (auto &pair : pairs) {
-        const std::string &name = pair.first;
-        if (name == "with_only_current_experiment_group" || name == "skip_qe") {
-            if (pair.second != "false") { pair.second = "false"; ++changed; }
-        } else if (name == "needs_name" || name == "with_universe_params" ||
-                   name == "with_current_experiment_group" || name == "with_experiments" ||
-                   name == "with_params" || name == "with_groups" ||
-                   name == "with_group_params" || name == "with_gatekeepers") {
-            if (pair.second != "true") { pair.second = "true"; ++changed; }
-        }
-        // Never manufacture a Meta device identity from IDFV/UDID or a literal
-        // placeholder. A valid native value source must be established first.
-    }
-    return changed;
+    // Only explicit user one-shot calls this helper. See portable C++ tests.
+    return fbt_mc_qe::apply(pairs);
 }
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
