@@ -3,6 +3,7 @@
 #import "FBGRGateCategoryVC.h"
 #import "FBGRGateRuntimeBrowserVC.h"
 #import "FBGRLogViewController.h"
+@interface FBGRBloksLiveDebugVC : UIViewController @end
 #import "../Runtime/FBGRGateRegistry.h"
 #import "../Runtime/FBGRGateStore.h"
 #import "../Runtime/FBGRMCCatalog.h"
@@ -90,7 +91,7 @@ void FBGRPresentMenu(void) {
         case FBGRRootSectionProviders: return (NSInteger)_providers.count;
         case FBGRRootSectionAllParams: return 1;
         case FBGRRootSectionObserver:  return 2; // toggle + flush
-        case FBGRRootSectionDiag:      return 3; // hooks diag + log + reset all
+        case FBGRRootSectionDiag:      return 4; // hooks diag + Bloks live trace + log + reset
         default: return 0;
     }
 }
@@ -174,6 +175,11 @@ void FBGRPresentMenu(void) {
         c.detailTextLabel.text = @"Ver estado dos hooks instalados";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (ip.row == 1) {
+        c.imageView.image = FBGRSymbol(@"waveform.path.ecg", UIColor.systemOrangeColor);
+        c.textLabel.text = @"Bloks Lab · Live Trace";
+        c.detailTextLabel.text = @"VPN, Employee, contexto, exportar JSONL";
+        c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (ip.row == 2) {
         c.imageView.image = FBGRSymbol(@"doc.text", UIColor.systemCyanColor);
         c.textLabel.text  = @"Log em tempo real";
         c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -216,6 +222,8 @@ void FBGRPresentMenu(void) {
             [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [self presentViewController:a animated:YES completion:nil];
         } else if (ip.row == 1) {
+            [self.navigationController pushViewController:[FBGRBloksLiveDebugVC new] animated:YES];
+        } else if (ip.row == 2) {
             [self.navigationController pushViewController:[FBGRLogViewController new] animated:YES];
         } else {
             FBGRGateClearAll();
