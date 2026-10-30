@@ -6,6 +6,7 @@ on:
       - 'flags'
       - 'main'
       - 'fix/watchdog-mc-recording-20261030'
+      - 'fix/coldstart-qe-diagnostics-20261030'
   workflow_dispatch:
 
 concurrency:
