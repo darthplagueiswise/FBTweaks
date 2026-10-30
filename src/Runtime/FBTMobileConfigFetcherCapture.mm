@@ -214,9 +214,11 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
         sOriginalFetch(fetcher, method, purpose, params, std::move(completion), routingHint, target);
         return;
     }
-    // Session-only diagnostics are strictly observational; the legacy LAB
-    // request-field A/B experiment is never applied through this toggle.
-    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
+    // A/B QE-info is an EXPLICIT, one-shot, 120-second user action. The
+    // verified, session-scoped fetcher wrapper already gates this path; the
+    // global invasive hooks remain disabled. Do not silently cancel B here,
+    // because doing so made the UI claim "is_employee=true" while sending A.
+    // Never apply this to requests other than the next QE-info POST.
     auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
