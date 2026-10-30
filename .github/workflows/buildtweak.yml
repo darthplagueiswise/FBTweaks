@@ -142,6 +142,13 @@ jobs:
           clang++ -std=c++11 -fobjc-arc -Wno-incomplete-implementation -framework Foundation -framework QuartzCore tests/TigonCaptureTests.mm /tmp/fbt-inspector-store.o -lz -o /tmp/fbt-tigon-tests
           /tmp/fbt-tigon-tests
 
+      - name: Test opt-in full QE request profile and immutable device identity
+        run: |
+          cd main
+          clang++ -std=c++11 -Wall -Wextra -Werror tests/QEFullProfileTests.cpp -o /tmp/fbt-qe-full-profile-tests
+          /tmp/fbt-qe-full-profile-tests
+          python3 -m unittest discover -s tests -p "test_coldstart_bootstrap.py" -v
+
       - name: Test native query correlation
         run: |
           cd main
