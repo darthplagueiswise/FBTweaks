@@ -147,6 +147,8 @@ jobs:
           cd main
           clang++ -std=c++11 -Wall -Wextra -Werror tests/QEFullProfileTests.cpp -o /tmp/fbt-qe-full-profile-tests
           /tmp/fbt-qe-full-profile-tests
+          clang++ -std=c++11 -Wall -Wextra -Werror tests/QEEmployeeFieldOneShotTests.cpp -o /tmp/fbt-qe-employee-one-shot-tests
+          /tmp/fbt-qe-employee-one-shot-tests
           python3 -m unittest discover -s tests -p "test_coldstart_bootstrap.py" -v
 
       - name: Test native query correlation
