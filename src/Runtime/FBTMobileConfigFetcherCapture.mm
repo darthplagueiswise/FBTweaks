@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <mutex>
 #import <objc/runtime.h>
 #include <dlfcn.h>
@@ -47,6 +48,12 @@ void FBTMobileConfigArmFullQEInfoRequest(void) {
 void FBTMobileConfigCancelFullQEInfoRequest(void) {
     sFullQEArmed.store(false, std::memory_order_release);
 }
+NSDictionary *FBTMobileConfigFullQEInfoRequestStatus(void) {
+    double left = sFullQEExpiresAt.load(std::memory_order_relaxed) - CACurrentMediaTime();
+    BOOL armed = sFullQEArmed.load(std::memory_order_acquire) && left > 0;
+    return @{@"armed": @(armed), @"expires_in_seconds": @(armed ? (NSInteger)ceil(left) : 0),
+             @"profile": armed ? @"qe_full" : @"native"};
+}
 static bool FBTConsumeFullQEProfile(const std::string &method, const std::string &purpose) {
     if (method != "POST" || purpose != "mobileconfig_qe_info" ||
         CACurrentMediaTime() > sFullQEExpiresAt.load(std::memory_order_relaxed)) return false;
@@ -67,8 +74,12 @@ void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
 }
 void FBTMobileConfigCancelEmployeeExperiment(void) { sRequestExperiment.cancel(); }
 NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void) {
-    auto pending = sRequestExperiment.pending(CACurrentMediaTime());
-    return @{@"armed": @(pending.mode >= 0), @"profile": pending.mode < 0 ? @"native" : pending.mode ? @"B_is_employee_true" : @"A_native"};
+    double now = CACurrentMediaTime();
+    auto pending = sRequestExperiment.pending(now);
+    double remaining = sRequestExperiment.secondsRemaining(now);
+    return @{@"armed": @(pending.mode >= 0),
+             @"expires_in_seconds": @((NSInteger)ceil(remaining)),
+             @"profile": pending.mode < 0 ? @"native" : pending.mode ? @"B_is_employee_true" : @"A_native"};
 }
 
 // Read-only observations; no tokens, IDs, request mutations or forced results.
@@ -426,6 +437,7 @@ void FBTMobileConfigFetcherCaptureInstall(void) {
 NSDictionary *FBTMobileConfigFetcherCaptureStatus(void) {
     return @{@"native_mc_fetcher_installed": @(sFetcherInstalled),
         @"employee_request_experiment": FBTMobileConfigEmployeeExperimentStatus(),
+        @"full_qe_profile": FBTMobileConfigFullQEInfoRequestStatus(),
         @"auth_validation_reads": FBTMCAuthReadSnapshot(),
         @"auth_validation_read_hook_failure": sAuthReadHookFailure ?: @"none_or_not_attempted",
         @"native_mc_fetcher_failure": sFetcherFailure ?: @"not_attempted",
