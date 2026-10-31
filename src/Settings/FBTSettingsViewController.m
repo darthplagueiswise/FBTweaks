@@ -947,6 +947,24 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     return cell;
 }
 
+- (void)reportRuntimeHookStatus:(NSDictionary *)entry action:(NSString *)action {
+    NSString *key = entry[@"key"] ?: @"";
+    BOOL installed = FBTRuntimeBoolHookInstalledForKey(key);
+    NSDictionary *persisted = FBTRuntimeBoolOverridesSnapshot()[key];
+    BOOL saved = [persisted isKindOfClass:NSDictionary.class];
+    NSString *state = installed ? @"Hook instalado; execução ainda não comprovada." :
+        (saved ? @"Preferência salva, mas hook pendente/recusado. Não está aplicando." :
+                 @"Nenhum override ativo para esta entrada.");
+    NSString *text = [NSString stringWithFormat:
+        @"%@\n\n%@[%@ %@]\n%@\n\nSalvo: %@ · instalado: %@\n\nConfirme a execução no contador de chamadas e no valor efetivo do browser. Hooks sem ABI compatível são recusados.",
+        action, [entry[@"classMethod"] boolValue] ? @"+" : @"-", entry[@"class"] ?: @"?",
+        entry[@"selector"] ?: @"?", state, saved ? @"SIM" : @"NÃO", installed ? @"SIM" : @"NÃO"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Estado do hook" message:text preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Entendi" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+    });
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (!self.filtered.count) return;
@@ -957,10 +975,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         e[@"installState"] ?: @"não solicitado", e[@"invocationCount"] ?: @0,
         e[@"observedOriginal"] ?: @"não observado",e[@"observedEffective"] ?: @"não observado"];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Inspeção de hook BOOL" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"Observar (sem forçar)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolObserve(e); [self runSearch]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Desfazer override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolClearOverride(e); [self runSearch]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Observar (sem forçar)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolObserve(e); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Observação"]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Force ON"]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Force OFF"]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Desfazer override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolClearOverride(e); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Override removido"]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     a.popoverPresentationController.sourceView = cell;
