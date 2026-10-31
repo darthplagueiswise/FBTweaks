@@ -325,7 +325,13 @@ static BOOL FBTCPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
     p.callerSymbol = caller;
     p.returnKind = [FBTCSymbolStub returnKindForSymbol:p.symbol];
 
-    if (p.objcSelectorName.length && p.objcClassName.length) {
+    // Swift-only or C++ direct dispatch cannot be treated as a C import
+    // trampoline. Swift @objc methods are handled above by the ObjC runtime.
+    if (p.swiftLike && !p.objcSelectorName.length) {
+        p.strategy = FBTCRuntimePatchStrategyNone;
+        p.reason = @"Swift/C++ direct call: no verified imported C ABI or writable binding slot.";
+        p.inlineToggleSafe = NO;
+    } else if (p.objcSelectorName.length && p.objcClassName.length) {
         p.strategy = FBTCRuntimePatchStrategyObjCBool;
         p.reason = @"ObjC no-arg BOOL getter; backend is live MSHookMessageEx override cache.";
         p.inlineToggleSafe = YES; p.safeAtLaunch = YES;
