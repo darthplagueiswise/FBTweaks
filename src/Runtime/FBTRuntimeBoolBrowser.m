@@ -210,12 +210,12 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     }
     char ret[16] = {0};
     method_getReturnType(m, ret, sizeof(ret));
-    if (!(ret[0] == 'B' || ret[0] == 'c')) {
+    if (ret[0] != 'B') {
         FBTBoolRecordInstallIssue(key, @"rejected", @"Tipo de retorno não é BOOL/char");
         return NO;
     }
     const char *encoding = method_getTypeEncoding(m);
-    if (!encoding || (strcmp(encoding,"B16@0:8") && strcmp(encoding,"c16@0:8"))) {
+    if (!encoding || strcmp(encoding,"B16@0:8") != 0) {
         FBTBoolRecordInstallIssue(key, @"rejected", @"Encoding ObjC não corresponde à ABI BOOL sem argumentos");
         return NO;
     }
@@ -320,21 +320,9 @@ void FBTRuntimeBoolRetryPendingHooks(void) {
     FBTRuntimeBoolReinstallPersistedHooks();
 }
 
-static BOOL FBTSelectorLooksUseful(NSString *sel) {
-    NSString *s = sel.lowercaseString;
-    // Avoid matching arbitrary names containing the 2-letter substring "is".
-    NSArray *needles = @[@"enabled", @"enable", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"dogfooding", @"dogfooder", @"debug", @"test", @"beta", @"force", @"gate", @"gating", @"eligible", @"isfbemployee", @"isinternal", @"isdebug", @"isdebugoptions", @"isdebugoverlay"];
-    if ([s hasPrefix:@"is"] && s.length > 2) return YES;
-    for (NSString *n in needles) if ([s containsString:n]) return YES;
-    return NO;
-}
-
-static BOOL FBTClassLooksUseful(NSString *cls) {
-    NSString *c = cls.lowercaseString;
-    NSArray *needles = @[@"fb", @"meta", @"dogfood", @"dogfooding", @"mobileconfig", @"metaconfig", @"gating", @"gate", @"internal", @"internalsettings", @"employee", @"settings", @"tabbar", @"gemstone", @"dating", @"debug", @"debugoverlay", @"bugreport", @"userpreferences", @"react", @"rct", @"rn", @"bloks", @"xplat", @"mobileconfigfbt"];
-    for (NSString *n in needles) if ([c containsString:n]) return YES;
-    return NO;
-}
+// Discover methods by Objective-C type encoding, NEVER by selector/class name.
+// 'c' is a char in the runtime (only historically also used for BOOL), so
+// it is ambiguous and must not be advertised as a verified Boolean hook.
 
 static NSString *FBTBoolCategory(NSString *cls, NSString *sel) {
     NSString *hay = [[NSString stringWithFormat:@"%@ %@",cls ?: @"",sel ?: @""] lowercaseString];
@@ -402,14 +390,6 @@ NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void) {
     return entries;
 }
 
-static NSInteger FBTBoolRelevance(NSDictionary *item) {
-    NSString *c = item[@"category"];
-    NSInteger score = [@[@"Employee",@"Internal",@"Dogfood",@"MobileConfig",@"Debug",@"Gating"] containsObject:c] ? 100 : 0;
-    if ([item[@"hookInstalled"] boolValue]) score += 40;
-    if ([item[@"forced"] boolValue]) score += 25;
-    if ([item[@"invocationCount"] unsignedLongLongValue] > 0) score += 15;
-    return score;
-}
 static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classMethods, NSString *query, NSUInteger limit) {
     Class methodClass = classMethods ? object_getClass(cls) : cls;
     unsigned int count = 0;
@@ -421,15 +401,13 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         if (method_getNumberOfArguments(m) != 2) continue;
         char ret[16] = {0};
         method_getReturnType(m, ret, sizeof(ret));
-        if (!(ret[0] == 'B' || ret[0] == 'c')) continue;
+        if (ret[0] != 'B') continue;
         NSString *sel = NSStringFromSelector(method_getName(m));
         NSString *imagePath = FBTImagePathForMethod(m);
         NSString *imageKind = FBTImageKindForPath(imagePath);
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", className, sel, imageKind ?: @"", imagePath ?: @""] lowercaseString];
         if (q.length) {
             if (!FBTQueryMatchesHaystack(q, hay)) continue;
-        } else {
-            if (!FBTSelectorLooksUseful(sel) && !FBTClassLooksUseful(className)) continue;
         }
         NSString *key = FBTBoolKey(className, sel, classMethods);
         NSDictionary *ov = FBTBoolOverrideForKey(key);
@@ -449,7 +427,7 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
             @"class": className ?: @"",
             @"selector": sel ?: @"",
             @"category": FBTBoolCategory(className, sel),
-            @"signature": [NSString stringWithFormat:@"%@ (%@)", ret[0] == 'B' ? @"BOOL" : @"char/BOOL", method_getTypeEncoding(m) ? [NSString stringWithUTF8String:method_getTypeEncoding(m)] : @"unknown"],
+            @"signature": [NSString stringWithFormat:@"%@ (%@)", @"BOOL", method_getTypeEncoding(m) ? [NSString stringWithUTF8String:method_getTypeEncoding(m)] : @"unknown"],
             @"classMethod": @(classMethods),
             @"key": key ?: @"",
             @"image": imagePath ?: @"",
@@ -462,39 +440,77 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
     if (methods) free(methods);
 }
 
+
 NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit) {
-    if (limit == 0) limit = 300;
-    int classCount = objc_getClassList(NULL, 0);
-    if (classCount <= 0) return @[];
-    Class *classes = (__unsafe_unretained Class *)calloc((size_t)classCount, sizeof(Class));
+    NSString *q = [query isKindOfClass:NSString.class] ? query : @"";
+    int capacity = objc_getClassList(NULL, 0);
+    if (capacity <= 0) return @[];
+    // ObjC runtime may load more classes while iterating. Allocate headroom
+    // and let objc_getClassList bound the result.
+    int allocated = capacity + 64;
+    Class *classes = (__unsafe_unretained Class *)calloc((size_t)allocated, sizeof(Class));
     if (!classes) return @[];
-    classCount = objc_getClassList(classes, classCount);
+    int classCount = objc_getClassList(classes, allocated);
     NSMutableArray *out = [NSMutableArray array];
-    // Scan a larger bounded pool before ranking; stopping at the first few
-    // classes previously hid the selectors the user was actually looking for.
-    NSUInteger scanLimit = query.length ? MAX(limit, 2400) : MAX(limit, 1600);
-    for (int i = 0; i < classCount && out.count < scanLimit; i++) {
+    for (int i = 0; i < classCount; i++) {
         Class cls = classes[i];
         if (!cls) continue;
-        NSString *className = NSStringFromClass(cls);
-        // Não pré-filtra por nome de classe quando a query está vazia.
-        // O bug real do browser era este: classes com selector útil (-isEmployee,
-        // -isDebugOptionsEnabled etc.) sumiam se o nome da classe não continha
-        // FB/Dogfood/MobileConfig. A filtragem correta acontece por método.
-        (void)className;
         @autoreleasepool {
-            FBTAppendMethodsForClass(out, cls, NO, query ?: @"", scanLimit);
-            FBTAppendMethodsForClass(out, cls, YES, query ?: @"", scanLimit);
+            // NSUIntegerMax: exhaustive scan, no preferred prefixes and no
+            // truncation before collecting all matching BOOL methods.
+            FBTAppendMethodsForClass(out, cls, NO, q, NSUIntegerMax);
+            FBTAppendMethodsForClass(out, cls, YES, q, NSUIntegerMax);
         }
     }
     free(classes);
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        NSInteger sa=FBTBoolRelevance(a), sb=FBTBoolRelevance(b);
-        if (sa!=sb) return sa>sb ? NSOrderedAscending : NSOrderedDescending;
         return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
     }];
-    if (out.count > limit) return [out subarrayWithRange:NSMakeRange(0, limit)];
-    return out;
+    return limit && out.count > limit ? [out subarrayWithRange:NSMakeRange(0, limit)] : out;
+}
+
+NSArray<NSDictionary *> *FBTRuntimeBoolSearchIvars(NSString *query, NSUInteger limit) {
+    NSString *q = [query isKindOfClass:NSString.class] ? query : @"";
+    int capacity = objc_getClassList(NULL, 0);
+    if (capacity <= 0) return @[];
+    int allocated = capacity + 64;
+    Class *classes = (__unsafe_unretained Class *)calloc((size_t)allocated, sizeof(Class));
+    if (!classes) return @[];
+    int classCount = objc_getClassList(classes, allocated);
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (int c = 0; c < classCount; c++) {
+        Class cls = classes[c];
+        if (!cls) continue;
+        @autoreleasepool {
+            unsigned int n = 0;
+            Ivar *ivars = class_copyIvarList(cls, &n);
+            NSString *className = NSStringFromClass(cls);
+            for (unsigned int i=0; i<n; i++) {
+                const char *encoding = ivar_getTypeEncoding(ivars[i]);
+                if (!encoding || strcmp(encoding, "B") != 0) continue;
+                const char *name = ivar_getName(ivars[i]);
+                NSString *ivarName = name ? [NSString stringWithUTF8String:name] : @"";
+                NSString *hay = [NSString stringWithFormat:@"%@ %@",className,ivarName];
+                if (!FBTQueryMatchesHaystack(q,hay)) continue;
+                [out addObject:@{
+                    @"key": [NSString stringWithFormat:@"%@#%@",className,ivarName],
+                    @"class": className ?: @"", @"selector": ivarName,
+                    @"entityType": @"ivar", @"signature": @"BOOL (ivar: B)",
+                    @"encoding": @"B", @"offset": @(ivar_getOffset(ivars[i])),
+                    @"category": FBTBoolCategory(className,ivarName),
+                    @"hookInstalled": @NO, @"installState": @"not_applicable",
+                    @"imageKind": @"ObjC instance storage", @"image": @"",
+                    @"invocationCount": @0, @"forced": @NO, @"observing": @NO
+                }];
+            }
+            if (ivars) free(ivars);
+        }
+    }
+    free(classes);
+    [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b){
+        return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
+    }];
+    return limit && out.count > limit ? [out subarrayWithRange:NSMakeRange(0,limit)] : out;
 }
 
 static NSMutableDictionary *sSweepStats;
