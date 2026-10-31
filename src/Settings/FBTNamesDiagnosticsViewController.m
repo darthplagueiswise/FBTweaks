@@ -9,6 +9,9 @@
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTEmployeeDiagnostics.h"
 #import "../Runtime/FBTNativeTrace.h"
+#import "../Runtime/FBTMCNativeSessionProbes.h"
+#import "FBTNetworkInspectorViewController.h"
+#import "FBTNativeTraceViewController.h"
 extern void FBTInitEmployeeGroup(void);
 
 @interface FBTNamesDiagnosticsViewController ()
@@ -16,12 +19,15 @@ extern void FBTInitEmployeeGroup(void);
 @property (nonatomic, copy) NSDictionary *report;
 @property (nonatomic, copy) NSArray<NSDictionary *> *history;
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *rows;
+@property (nonatomic, assign) NSInteger selectedProfile;
 @end
 
 @implementation FBTNamesDiagnosticsViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Fetch, FBUser e tw_*";
+    self.title = @"Centro de Diagnósticos";
+    self.selectedProfile = 0;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 64;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -109,74 +115,203 @@ extern void FBTInitEmployeeGroup(void);
         completion[@"authorization_state"] ?: @"não observado", completion[@"authorization_scheme"] ?: @"não observado",
         completion[@"authorization_credential_present"] ?: @"não observada", completion[@"authorization_observation_stage"] ?: @"não observada",
         request[@"experiment_profile"] ?: @"native", request[@"experiment_state"] ?: @"original"];
-    self.rows = @[@[@"Iniciar nova captura", @"Pausar captura", @"Copiar relatório JSON", @"Abrir mapa local",
-        @"Armar A: próximo pedido QE original", @"Armar B: próximo pedido QE + is_employee=true",
-        @"Testar tw_is_employee=true por 120 s", @"Cancelar testes temporários",
-        [NSString stringWithFormat:@"Employee local (FBUser/gates): %@ — tocar alterna", [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"],
-         @"Armar próximo QE-info completo (with_*=true; skip_qe=false; only=false)"],
-        @[status, [NSString stringWithFormat:@"%@\n\n%@\n\n%@", advice[@"title"], advice[@"explanation"], advice[@"next_step"]]],
-        @[requestText, result, localState, interpretation, authText, identityText], historyText,
-        @[@"Inicie a captura uma vez. Arme A e execute Force name download; arme B e repita a mesma ação. Faça depois A/B na consulta de params. Para testar o perfil com todos os with_* ativos, arme 'QE-info completo' e execute a ação nativa uma vez. O campo device_id permanece intacto: a origem nativa ainda precisa ser validada. Cada armamento vale só para o próximo POST QE-info em até 120 s. Confira no histórico qual ação o consumiu.\n\nTeste FBUser/gates e tw_is_employee separadamente, mantendo o restante fixo. O teste tw_* afeta somente tw_is_employee.enabled nos leitores observados e expira em 120 s. Não grava mc_overrides.\n\nVolte e compartilhe o JSON. O relatório não contém seu token. Leituras locais de identidade são observações do processo, não prova de autorização remota nem de associação a um pedido específico."]];
+    NSDictionary *pending = FBTMobileConfigEmployeeExperimentStatus();
+    NSDictionary *fullState = FBTMobileConfigFullQEInfoRequestStatus();
+    NSInteger secondsRemaining = [pending[@"expires_in_seconds"] integerValue];
+    NSString *armedText = [pending[@"armed"] boolValue] ?
+        [NSString stringWithFormat:@"%@ · %ld s restantes", pending[@"profile"] ?: @"QE", (long)secondsRemaining] :
+        @"Nenhum teste armado";
+    NSString *lastEmployee = request.count ? [NSString stringWithFormat:
+        @"Último pedido: %@ · is_employee acrescentado: %@",
+        request[@"experiment_profile"] ?: @"native",
+        [request[@"employee_field_added"] boolValue] ? @"SIM" : @"NÃO"] : @"Nenhum pedido QE-info desta sessão";
+    BOOL capture = [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+    BOOL fetcherProbe = FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey);
+    BOOL tigonProbe = FBTMCNativeProbeIsEnabled(FBTMCNativeProbeTigonKey);
+    self.rows = @[
+        @[status, armedText, lastEmployee],
+        @[[NSString stringWithFormat:@"Captura de diagnósticos: %@", capture ? @"ON" : @"OFF"],
+          [NSString stringWithFormat:@"Probe asyncFetch: %@", fetcherProbe ? @"ON" : @"OFF"],
+          [NSString stringWithFormat:@"Probe Tigon: %@", tigonProbe ? @"ON" : @"OFF"]],
+        @[@"Perfil A (nativo) ou B (is_employee=true)",
+          [pending[@"armed"] boolValue] ? @"Rearmar experimento" : @"Armar próximo QE-info",
+          @"Cancelar experimento",
+          [fullState[@"armed"] boolValue] ?
+              [NSString stringWithFormat:@"QE completo armado · %@ s", fullState[@"expires_in_seconds"]] :
+              @"Armar opções QE completas"],
+        @[requestText, result, interpretation, localState, authText, identityText],
+        @[@"Network Inspector", @"Catálogo MobileConfig", @"Native Live Trace",
+          @"Copiar JSON do diagnóstico", @"Compartilhar relatório"]
+    ];
     [self.tableView reloadData];
 }
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.rows.count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows[section].count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return @[@"Controles", @"Diagnóstico", @"Evidências", @"Histórico da sessão — toque para detalhes", @"Como usar"][section];
+    return @[@"Visão geral", @"Captura e transporte", @"Experimento QE-info", @"Evidências", @"Ferramentas"][section];
+}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 2) return @"Apenas o próximo POST mobileconfig_qe_info consome o teste (120 s). Armar não dispara uma requisição. Se não aparecer 'is_employee acrescentado: SIM' no pedido, examine a instalação do probe.";
+    if (section == 1) return @"Os probes dependem da captura. Um switch ligado não comprova resposta HTTP nem autorização Employee.";
+    return nil;
+}
+- (UIButton *)fbtActionButton:(NSString *)title prominent:(BOOL)prominent identifier:(NSString *)identifier action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    UIButtonConfiguration *cfg;
+    if (@available(iOS 26.0, *)) {
+        cfg = prominent ? [UIButtonConfiguration prominentGlassButtonConfiguration] : [UIButtonConfiguration glassButtonConfiguration];
+    } else {
+        cfg = prominent ? [UIButtonConfiguration filledButtonConfiguration] : [UIButtonConfiguration tintedButtonConfiguration];
+    }
+    cfg.title = title;
+    cfg.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+    button.configuration = cfg;
+    button.frame = CGRectMake(0, 0, 132, 42);
+    button.accessibilityIdentifier = identifier;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"NamesDiagnostic"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"NamesDiagnostic"];
-    cell.textLabel.numberOfLines = 0;
-    cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    cell.textLabel.text = self.rows[path.section][path.row];
-    cell.textLabel.textColor = path.section == 0 ? UIColor.systemBlueColor : UIColor.labelColor;
-    cell.selectionStyle = (path.section == 0 || (path.section == 3 && self.history.count)) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DiagnosticHub"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"DiagnosticHub"];
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
+    cfg.text = self.rows[path.section][path.row];
+    cfg.textProperties.numberOfLines = 0;
+    cfg.secondaryTextProperties.numberOfLines = 0;
+    if (path.section == 1) {
+        UISwitch *sw = [UISwitch new];
+        sw.tag = 100 + path.row;
+        sw.accessibilityIdentifier = @[@"fbt.diagnostics.capture", @"fbt.diagnostics.fetcher", @"fbt.diagnostics.tigon"][path.row];
+        sw.on = path.row == 0 ? [FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled] :
+            FBTMCNativeProbeIsEnabled(path.row == 1 ? FBTMCNativeProbeFetcherKey : FBTMCNativeProbeTigonKey);
+        [sw addTarget:self action:@selector(diagnosticsSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
+    } else if (path.section == 2) {
+        if (path.row == 0) {
+            UISegmentedControl *profiles = [[UISegmentedControl alloc] initWithItems:@[@"A · Nativo", @"B · Employee"]];
+            profiles.selectedSegmentIndex = self.selectedProfile;
+            profiles.accessibilityIdentifier = @"fbt.diagnostics.profile";
+            profiles.frame = CGRectMake(0, 0, 187, 38);
+            [profiles addTarget:self action:@selector(profileChanged:) forControlEvents:UIControlEventValueChanged];
+            cfg.text = @"Perfil";
+            cell.accessoryView = profiles;
+        } else if (path.row == 1) {
+            cell.accessoryView = [self fbtActionButton:@"Armar teste" prominent:YES
+                identifier:@"fbt.diagnostics.arm" action:@selector(armExperiment:)];
+        } else if (path.row == 2) {
+            cell.accessoryView = [self fbtActionButton:@"Cancelar" prominent:NO
+                identifier:@"fbt.diagnostics.cancel" action:@selector(cancelExperiment:)];
+        } else if (path.row == 3) {
+            cell.accessoryView = [self fbtActionButton:@"Armar QE" prominent:NO
+                identifier:@"fbt.diagnostics.qe-full" action:@selector(armFullQE:)];
+        }
+    } else if (path.section == 4) {
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+    cell.contentConfiguration = cfg;
     return cell;
+}
+- (void)showDiagnosticInfo:(NSString *)title message:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)profileChanged:(UISegmentedControl *)control {
+    self.selectedProfile = control.selectedSegmentIndex;
+    [self refreshReport];
+}
+- (void)diagnosticsSwitchChanged:(UISwitch *)control {
+    if (control.tag == 100) {
+        [FBTDefaults setBool:control.isOn forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+        if (control.isOn) {
+            FBTNativeTraceSetSessionCaptureEnabled(YES);
+            FBTMobileConfigResponseCaptureInstall();
+            FBTInstallMobileConfigDebugUIBootstrap();
+            FBTMobileConfigFetchDiagnosticsRecord(@"capture_started", @{@"source": @"diagnostics_hub"});
+        } else {
+            FBTMCNativeProbeDisableAll();
+            FBTMobileConfigCancelEmployeeExperiment();
+            FBTMobileConfigCancelFullQEInfoRequest();
+            FBTNativeTraceSetSessionCaptureEnabled(NO);
+            FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{@"source": @"diagnostics_hub"});
+        }
+    } else {
+        NSString *key = control.tag == 101 ? FBTMCNativeProbeFetcherKey : FBTMCNativeProbeTigonKey;
+        if (control.isOn && ![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+            [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+            FBTMobileConfigResponseCaptureInstall();
+            FBTInstallMobileConfigDebugUIBootstrap();
+        }
+        NSString *reason = nil;
+        BOOL ok = FBTMCNativeProbeSetEnabled(key, control.isOn, &reason);
+        if (!ok) {
+            control.on = NO;
+            [self showDiagnosticInfo:@"Probe indisponível" message:reason ?: @"Hook não validado para a imagem carregada."];
+        }
+    }
+    [self refreshReport];
+}
+- (BOOL)ensureFetcherReady {
+    if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) {
+        [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
+        FBTMobileConfigResponseCaptureInstall();
+        FBTInstallMobileConfigDebugUIBootstrap();
+    }
+    NSDictionary *native = FBTMobileConfigFetcherCaptureStatus();
+    if (FBTMCNativeProbeIsEnabled(FBTMCNativeProbeFetcherKey) && [native[@"native_mc_fetcher_installed"] boolValue])
+        return YES;
+    NSString *reason = nil;
+    if (!FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &reason)) {
+        [self showDiagnosticInfo:@"Probe indisponível" message:reason ?: @"Não foi possível interceptar asyncFetch com ABI validada."];
+        [self refreshReport];
+        return NO;
+    }
+    return YES;
+}
+- (void)armExperiment:(id)sender {
+    if (![self ensureFetcherReady]) return;
+    FBTMobileConfigArmEmployeeExperiment(self.selectedProfile == 1);
+    NSDictionary *pending = FBTMobileConfigEmployeeExperimentStatus();
+    if (![pending[@"armed"] boolValue]) {
+        [self showDiagnosticInfo:@"Falha no armamento" message:@"A sessão não aceitou o experimento. Verifique o log."];
+    } else {
+        NSString *name = self.selectedProfile == 1 ? @"B · is_employee=true" : @"A · request original";
+        [self showDiagnosticInfo:@"Experimento armado"
+                         message:[NSString stringWithFormat:@"%@. Válido por 120 segundos, somente para o próximo POST QE-info. Agora execute a ação nativa de fetch. O botão NÃO dispara uma requisição.", name]];
+    }
+    [self refreshReport];
+}
+- (void)cancelExperiment:(id)sender {
+    FBTMobileConfigCancelEmployeeExperiment();
+    FBTMobileConfigCancelFullQEInfoRequest();
+    FBTEmployeeCancelTWProbe();
+    [self refreshReport];
+}
+- (void)armFullQE:(id)sender {
+    if (![self ensureFetcherReady]) return;
+    FBTMobileConfigArmFullQEInfoRequest();
+    [self showDiagnosticInfo:@"QE completo armado"
+                     message:@"O próximo POST QE-info receberá as opções completas. Identidade e token permanecem inalterados. Expira em 120 segundos."];
+    [self refreshReport];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];
-    if (path.section == 3 && path.row < self.history.count) {
-        NSData *data = [NSJSONSerialization dataWithJSONObject:self.history[path.row] options:NSJSONWritingPrettyPrinted error:nil];
-        NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
-        UIAlertController *detail = [UIAlertController alertControllerWithTitle:@"Detalhes do pedido" message:text preferredStyle:UIAlertControllerStyleAlert];
-        [detail addAction:[UIAlertAction actionWithTitle:@"Copiar" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = text; }]];
-        [detail addAction:[UIAlertAction actionWithTitle:@"Fechar" style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:detail animated:YES completion:nil]; return;
+    if (path.section == 3) {
+        NSString *detail = self.rows[path.section][path.row];
+        [self showDiagnosticInfo:@"Detalhes do diagnóstico" message:detail];
+        return;
     }
-    if (path.section != 0) return;
-    if (path.row == 0) {
-        [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
-        FBTNativeTraceClear();
-        FBTNativeTraceSetSessionCaptureEnabled(YES);
-        FBTMobileConfigResponseCaptureInstall();
-        FBTInstallMobileConfigDebugUIBootstrap();
-        FBTInitEmployeeGroup();
-        FBTInstallMobileConfigRuntime();
-        FBTMobileConfigCancelEmployeeExperiment();
-        FBTEmployeeDiagnosticsReset();
-        FBTMobileConfigFetchDiagnosticsReset();
-        FBTMobileConfigResponseCaptureArm(@"force_name_download");
-    } else if (path.row == 1) {
-        FBTMobileConfigCancelFullQEInfoRequest();
-        FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
-        [FBTDefaults setBool:NO forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
-        FBTNativeTraceSetSessionCaptureEnabled(NO);
-        FBTMobileConfigResponseCaptureDisarm();
-        FBTMobileConfigCancelEmployeeExperiment();
-        FBTEmployeeCancelTWProbe();
-    } else if (path.row == 2) [UIPasteboard generalPasteboard].string = FBTMobileConfigFetchDiagnosticsJSON();
-    else if (path.row == 3) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
-    else if (path.row == 4 || path.row == 5) FBTMobileConfigArmEmployeeExperiment(path.row == 5);
-    else if (path.row == 6) FBTEmployeeArmTWProbe();
-    else if (path.row == 7) { FBTMobileConfigCancelEmployeeExperiment(); FBTEmployeeCancelTWProbe(); }
-    else if (path.row == 8) {
-        [FBTDefaults setBool:![FBTDefaults boolForKey:FBTKeyEmployeeEnabled] forKey:FBTKeyEmployeeEnabled];
-        FBTInitEmployeeGroup();
-    } else if (path.row == 9) {
-        FBTMobileConfigArmFullQEInfoRequest();
-    }
-    [self refreshReport];
+    if (path.section != 4) return;
+    if (path.row == 0) [self.navigationController pushViewController:[[FBTNetworkInspectorViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
+    else if (path.row == 1) [self.navigationController pushViewController:[[FBTLocalConfigViewController alloc] initWithSearchQuery:@""] animated:YES];
+    else if (path.row == 2) [self.navigationController pushViewController:[[FBTNativeTraceViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
+    else if (path.row == 3) UIPasteboard.generalPasteboard.string = FBTMobileConfigFetchDiagnosticsJSON();
+    else if (path.row == 4) [self shareReport];
 }
 - (void)shareReport {
     NSString *json = FBTMobileConfigFetchDiagnosticsJSON();
