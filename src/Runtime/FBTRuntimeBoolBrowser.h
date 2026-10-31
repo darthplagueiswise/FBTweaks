@@ -19,5 +19,9 @@ void FBTRuntimeBoolClearAllOverrides(void);
 void FBTRuntimeBoolClearSweep(NSString *mode);
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit);
 NSDictionary *FBTRuntimeBoolSweepStats(void);
+// Bounded, per-process snapshot: saved/registered/invoked/pending/rejected and reasons.
+// Registration reflects only successful local installer completion; invocation
+// counters are the evidence that the installed wrapper actually ran.
+NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void);
 
 #endif /* FBT_RUNTIME_BOOL_BROWSER_H */
