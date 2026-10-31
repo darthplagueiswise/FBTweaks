@@ -51,12 +51,14 @@ static long long FBTParseLongLongString(NSString *string) {
 
 static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
     if (!vc.navigationController) return;
-    UINavigationBarAppearance *nav = [UINavigationBarAppearance new];
-    [nav configureWithDefaultBackground];
-    vc.navigationController.navigationBar.standardAppearance = nav;
-    vc.navigationController.navigationBar.scrollEdgeAppearance = nav;
-    vc.navigationController.navigationBar.compactAppearance = nav;
-    vc.navigationController.navigationBar.prefersLargeTitles = NO;
+    // Preserve the system-owned navigation bar material. A forced opaque
+    // UINavigationBarAppearance defeats native Liquid Glass on iOS 26+.
+    if (@available(iOS 26.0, *)) {
+        vc.navigationController.navigationBar.prefersLargeTitles = YES;
+        vc.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAutomatic;
+    } else {
+        vc.navigationController.navigationBar.prefersLargeTitles = NO;
+    }
 }
 
 static UILabel *FBTSecondaryLabel(NSString *text) {
@@ -130,11 +132,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     FBTSettingsViewController *root = [[FBTSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
-    [appearance configureWithDefaultBackground];
-    nav.navigationBar.standardAppearance = appearance;
-    nav.navigationBar.scrollEdgeAppearance = appearance;
-    nav.navigationBar.compactAppearance = appearance;
+    // Let UIKit render the native material, including Liquid Glass on iOS 26+.
+    if (@available(iOS 26.0, *)) nav.navigationBar.prefersLargeTitles = YES;
     return nav;
 }
 @end
@@ -870,7 +869,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"ObjC BOOL Runtime";
+    self.title = @"BOOL Runtime · Classes e funções";
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 100;
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithTitle:@"Trace" style:UIBarButtonItemStylePlain target:self action:@selector(showNativeTrace)],
@@ -925,17 +926,21 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     }
     NSDictionary *e = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
-    cfg.text = [NSString stringWithFormat:@"%@%@", [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"selector"] ?: @""];
+    // Never truncate the exact selector: category tags are secondary metadata.
+    cfg.text = [NSString stringWithFormat:@"%@[%@ %@]",
+        [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"class"] ?: @"?", e[@"selector"] ?: @"?"];
+    cfg.textProperties.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightMedium];
+    cfg.textProperties.numberOfLines = 0;
     NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : ([e[@"observing"] boolValue] ? @" · OBSERVE" : @"");
-    NSString *hookState = e[@"installState"] ?: @"unknown";
+    NSString *hookState = e[@"installState"] ?: @"not_requested";
     id original = e[@"observedOriginal"];
     id effective = e[@"observedEffective"];
-    NSString *originalLabel = original && original != [NSNull null] ? FBTBoolText([original boolValue]) : @"?";
-    NSString *effectiveLabel = effective && effective != [NSNull null] ? FBTBoolText([effective boolValue]) : @"?";
-    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@%@\nHook: %@ · Original: %@ · Efetivo: %@ · Chamadas: %@",
-                         e[@"class"] ?: @"", e[@"imageKind"] ?: @"unknown", force, hookState,
-                         originalLabel, effectiveLabel, e[@"invocationCount"] ?: @0];
-    cfg.secondaryTextProperties.numberOfLines = 3;
+    NSString *originalLabel = original && original != [NSNull null] ? FBTBoolText([original boolValue]) : @"não medido";
+    NSString *effectiveLabel = effective && effective != [NSNull null] ? FBTBoolText([effective boolValue]) : @"não medido";
+    cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@%@\n%@\nHook: %@ · Original: %@ · Efetivo: %@ · Chamadas: %@",
+                         e[@"category"] ?: @"BOOL", e[@"imageKind"] ?: @"unknown", force, e[@"signature"] ?: @"BOOL",
+                         hookState, originalLabel, effectiveLabel, e[@"invocationCount"] ?: @0];
+    cfg.secondaryTextProperties.numberOfLines = 0;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cell.contentConfiguration = cfg;
     cell.accessoryType = [e[@"forced"] boolValue] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
@@ -946,8 +951,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (!self.filtered.count) return;
     NSDictionary *e = self.filtered[indexPath.row];
-    NSString *msg = [NSString stringWithFormat:@"%@\n%@", e[@"class"] ?: @"", e[@"image"] ?: @""];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:e[@"selector"] message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *msg = [NSString stringWithFormat:@"Função: %@[%@ %@]\nFramework: %@\nImagem: %@\nAssinatura: %@\nHook: %@\nChamadas: %@\nValor original: %@\nValor efetivo: %@\n\nSalvar uma força não comprova execução. Verifique chamadas/efetivo após acionar o recurso nativo.",
+        [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"class"] ?: @"",e[@"selector"] ?: @"",
+        e[@"imageKind"] ?: @"unknown",e[@"image"] ?: @"",e[@"signature"] ?: @"BOOL",
+        e[@"installState"] ?: @"não solicitado", e[@"invocationCount"] ?: @0,
+        e[@"observedOriginal"] ?: @"não observado",e[@"observedEffective"] ?: @"não observado"];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Inspeção de hook BOOL" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Observar (sem forçar)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolObserve(e); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; }]];
