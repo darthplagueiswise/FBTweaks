@@ -159,70 +159,75 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 - (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (void)rebuildSections {
+    // A single source of truth for navigation. No shadowed probe toggles:
+    // the Diagnostics Center owns capture, fetcher, Tigon and QE experiments.
     self.sections = @[
         @[
-            @{ @"kind": @"switch", @"title": @"Tweak ativada", @"subtitle": @"Kill switch global.", @"key": FBTKeyMasterEnabled },
-            @{ @"kind": @"switch", @"title": @"Toque duplo com três dedos", @"subtitle": @"Abre a FBTweak em qualquer tela. O ícone em Configurações continua disponível.", @"key": FBTKeyOpenThreeFingerDoubleTap },
+            @{ @"kind": @"switch", @"title": @"FBTweak ativa", @"subtitle": @"Chave geral dos hooks; desligar interrompe a aplicação de forças sem apagar preferências.", @"key": FBTKeyMasterEnabled },
+            @{ @"kind": @"switch", @"title": @"Abrir com toque de três dedos", @"subtitle": @"Toque duplo com três dedos para abrir a central.", @"key": FBTKeyOpenThreeFingerDoubleTap },
+            @{ @"kind": @"nav", @"title": @"Centro de Diagnósticos", @"subtitle": @"Captura, probes, experimento A/B, estado de execução e histórico em um só lugar.", @"dest": @"namesdiagnostic" },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Mobile Lab (LAB_IS_ACTIVE)", @"subtitle": @"Ativado por padrao. Define a variavel no inicio do processo; exige encerrar totalmente e reiniciar o Facebook. Nao concede permissao Employee no servidor.", @"key": FBTKeyMobileLabEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
-            @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
-            @{ @"kind": @"switch", @"title": @"C import: Internal Settings", @"subtitle": @"fishhook em FBShouldEnableInternalSettings importado pelo executable; toggle runtime após instalar.", @"key": FBTKeyInternalCImportsEnabled },
-            @{ @"kind": @"switch", @"title": @"C import: EasyGating internal", @"subtitle": @"fishhook de teste em EasyGatingGetBoolean_Internal_DoNotUseOrMock; pode ser amplo, use isolado.", @"key": FBTKeyEasyGatingInternalEnabled },
-            @{ @"kind": @"switch", @"title": @"Liquid Glass", @"subtitle": @"fishhook import + Runtime BOOL; sem patch direto em __TEXT assinado.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Getters conhecidos do tab bar.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
-            @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates Msys exportados; exige restart.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
-            @{ @"kind": @"nav", @"title": @"Liquid Glass — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:LiquidGlass" },
-            @{ @"kind": @"nav", @"title": @"Floating Tab Bar — params", @"subtitle": @"Toggle por param MobileConfig (SYS/OFF/ON) via mc_overrides.json nativo.", @"dest": @"feat:FloatingTab" },
-            @{ @"kind": @"nav", @"title": @"Dating / Gemstone — gates", @"subtitle": @"Gates employee/test-user/internal via mc_overrides.json nativo.", @"dest": @"feat:DatingGemstone" },
+            @{ @"kind": @"switch", @"title": @"Employee (estado local)", @"subtitle": @"Aplica somente getters conhecidos. Não comprova identidade nem autorização remota.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Mobile Lab no lançamento", @"subtitle": @"LAB_IS_ACTIVE antes dos hooks. Reinicie o processo; não concede autorização no servidor.", @"key": FBTKeyMobileLabEnabled, @"restart": @YES },
+            @{ @"kind": @"action", @"title": @"Abrir Internal Settings do Facebook", @"subtitle": @"Tenta a entrada nativa usando a sessão atual; requer os gates do próprio app.", @"action": @"native" },
+            @{ @"kind": @"action", @"title": @"Abrir diagnóstico Whitehat nativo", @"subtitle": @"Acesso apenas à interface disponibilizada pelo aplicativo.", @"action": @"whitehat" },
         ],
         @[
-            @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
-            @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
-            @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa, sem interceptação global. Ative antes dos probes nativos.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
-            @{ @"kind": @"switch", @"title": @"Probe Tigon nativo (sessão / experimental)", @"subtitle": @"Captura status e callback TigonSimpleCallbacks com slots+UUID verificados. Não intercepta NSURLSession ou __TEXT. Desativa ao reiniciar.", @"key": FBTMCNativeProbeTigonKey },
-            @{ @"kind": @"switch", @"title": @"Probe fetch MobileConfig (sessão / experimental)", @"subtitle": @"Observa asyncFetch e callback original do FBMobileConfigTigonFetcher; nenhum parâmetro enviado é alterado. Desativa ao reiniciar.", @"key": FBTMCNativeProbeFetcherKey },
-            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta OverridesTable nativo quando há contexto vivo; mantém fallback por accessor fishhookado.", @"key": FBTKeyMobileConfigOverridesEnabled },
-            @{ @"kind": @"switch", @"title": @"Runtime BOOL browser", @"subtitle": @"Busca main-exec/FBShared/RN/framework por classe, selector e imagem; salva Force ON/OFF.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
+            @{ @"kind": @"switch", @"title": @"Leitores MobileConfig", @"subtitle": @"Ativa sessão e leitores nativos; não altera automaticamente resultados de rede.", @"key": FBTKeyMobileConfigRuntimeEnabled },
+            @{ @"kind": @"switch", @"title": @"Registrar leituras MobileConfig", @"subtitle": @"Histórico de getters, tipos e valores; pode afetar desempenho.", @"key": FBTKeyMobileConfigCaptureEnabled },
+            @{ @"kind": @"switch", @"title": @"Aplicar overrides MobileConfig", @"subtitle": @"Tenta tabela nativa e fallback; confira o resultado efetivo no runtime.", @"key": FBTKeyMobileConfigOverridesEnabled },
+            @{ @"kind": @"nav", @"title": @"Catálogo e overrides", @"subtitle": @"Pesquise configurações por ID ou nome; SYS, ON, OFF.", @"dest": @"localconfig" },
+            @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Leituras efetivas, origem, overrides e diagnóstico da sessão.", @"dest": @"mobileconfig" },
         ],
         @[
-            @{ @"kind": @"nav", @"title": @"MobileConfig local — todos os mapas", @"subtitle": @"Busca por nome/ID e edição de overrides sem depender de QE-info.", @"dest": @"localconfig" },
-            @{ @"kind": @"nav", @"title": @"Network Inspector — 100% iPhone", @"subtitle": @"Request/response MobileConfig e QE-info, correlação Tigon, exportação de bytes e headers conhecidos. Sem proxy.", @"dest": @"networkinspector" },
-            @{ @"kind": @"nav", @"title": @"Diagnóstico do download de nomes", @"subtitle": @"Capturar, ver o erro remoto e compartilhar pelo iPhone.", @"dest": @"namesdiagnostic" },
-            @{ @"kind": @"nav", @"title": @"MobileConfig Live", @"subtitle": @"Monitor + override por uint64 capturado.", @"dest": @"mobileconfig" },
-            @{ @"kind": @"nav", @"title": @"Runtime Browser", @"subtitle": @"Exec + FBShared + FBSharedDynamic + RN. Abas ObjC/C/DATA/Swift. Force ON/OFF.", @"dest": @"bool" },
-            @{ @"kind": @"nav", @"title": @"ObjC BOOL Live", @"subtitle": @"Observar sem alterar retorno ou manter Force ON/OFF persistido.", @"dest": @"boollive" },
-            @{ @"kind": @"nav", @"title": @"Native Live Trace", @"subtitle": @"Eventos BOOL + QE/Tigon, buffer em memória e exportação JSON; sem Frida.", @"dest": @"livetrace" },
-            @{ @"kind": @"nav", @"title": @"Headline flags", @"subtitle": @"Flags filtradas: internal, dogfood, dating, debug.", @"dest": @"headline" },
-            @{ @"kind": @"nav", @"title": @"Dump completo de flags", @"subtitle": @"FBTFlags.json empacotado.", @"dest": @"flags" },
-            @{ @"kind": @"nav", @"title": @"Query configs enviados", @"subtitle": @"GraphQL IDs/variáveis empacotados no bundle.", @"dest": @"queries" },
+            @{ @"kind": @"switch", @"title": @"Liquid Glass no aplicativo", @"subtitle": @"Hooks de aparência do Facebook; requer cold start.", @"key": FBTKeyLiquidGlassEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Floating Tab Bar", @"subtitle": @"Hooks de tab bar; requer cold start.", @"key": FBTKeyFloatingTabBarEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Dating / Gemstone", @"subtitle": @"Gates locais; nenhum efeito remoto é presumido.", @"key": FBTKeyDatingEnabled, @"restart": @YES },
+            @{ @"kind": @"nav", @"title": @"Parâmetros Liquid Glass", @"subtitle": @"Overrides nativos por configuração.", @"dest": @"feat:LiquidGlass" },
+            @{ @"kind": @"nav", @"title": @"Parâmetros Floating Tab Bar", @"subtitle": @"Overrides nativos por configuração.", @"dest": @"feat:FloatingTab" },
+            @{ @"kind": @"nav", @"title": @"Gates Dating / Gemstone", @"subtitle": @"Controles e pré-requisitos específicos.", @"dest": @"feat:DatingGemstone" },
         ],
         @[
-            @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
-            @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
-            @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
-            @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
-            @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
+            @{ @"kind": @"switch", @"title": @"Habilitar Runtime BOOL Browser", @"subtitle": @"Chave geral. Um override salvo só atua depois de um hook instalado e chamado.", @"key": FBTKeyRuntimeBoolBrowserEnabled },
+            @{ @"kind": @"switch", @"title": @"Sweep Dogfood (avançado)", @"subtitle": @"Aplica somente selectors verificados; mostra número de instalações reais. Desligar limpa apenas esse sweep.", @"key": FBTKeyDogfoodSweepEnabled },
+            @{ @"kind": @"switch", @"title": @"Sweep Internal/Debug (avançado)", @"subtitle": @"Mesmo fluxo de verificação e limpeza isolada. Pode afetar funções do app.", @"key": FBTKeyInternalDebugSweepEnabled },
+            @{ @"kind": @"switch", @"title": @"Import FBShouldEnableInternalSettings", @"subtitle": @"Hook C específico; exige validação de import no executável.", @"key": FBTKeyInternalCImportsEnabled },
+            @{ @"kind": @"switch", @"title": @"Import EasyGating (experimental)", @"subtitle": @"Interceptação C ampla: deixe desativada salvo diagnóstico controlado.", @"key": FBTKeyEasyGatingInternalEnabled },
+            @{ @"kind": @"nav", @"title": @"Runtime Browser — ObjC, C, Swift", @"subtitle": @"Busca classes, selectors, módulos, ABI e estado efetivo de cada hook.", @"dest": @"bool" },
+            @{ @"kind": @"nav", @"title": @"BOOL Live — classes e selectors", @"subtitle": @"Mostra assinatura completa, imagem, original, efetivo e invocações.", @"dest": @"boollive" },
+            @{ @"kind": @"nav", @"title": @"Native Live Trace", @"subtitle": @"Registro estruturado de chamadas; preferir uso temporário.", @"dest": @"livetrace" },
+            @{ @"kind": @"nav", @"title": @"Network Inspector", @"subtitle": @"Requests e responses correlacionados; exportação sanitizada.", @"dest": @"networkinspector" },
         ],
+        @[
+            @{ @"kind": @"nav", @"title": @"Flags relevantes", @"subtitle": @"Employee, internal, dogfood, debug e outros grupos.", @"dest": @"headline" },
+            @{ @"kind": @"nav", @"title": @"Todas as flags", @"subtitle": @"Catálogo empacotado para busca.", @"dest": @"flags" },
+            @{ @"kind": @"nav", @"title": @"Queries e configurações", @"subtitle": @"Query IDs e variáveis empacotadas.", @"dest": @"queries" },
+        ],
+        @[
+            @{ @"kind": @"action", @"title": @"Validar arquivo mc_overrides.json", @"subtitle": @"Confirma o caminho obtido do runtime nativo.", @"action": @"ensure_mc_file" },
+            @{ @"kind": @"action", @"title": @"A/B das flags de refresh/hash", @"subtitle": @"Experimento separado do A/B Employee do Centro de Diagnósticos.", @"action": @"qe_ab" },
+            @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Ação destrutiva com confirmação.", @"action": @"clear" },
+        ]
     ];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
-        case 0: return @"Geral";
-        case 1: return @"Hooks conhecidos";
-        case 2: return @"Runtime";
-        case 3: return @"Browsers";
-        case 4: return @"Ações";
+        case 0: return @"Essencial";
+        case 1: return @"Employee e laboratório";
+        case 2: return @"MobileConfig";
+        case 3: return @"Aparência e recursos";
+        case 4: return @"Instrumentação avançada";
+        case 5: return @"Biblioteca de ferramentas";
+        case 6: return @"Manutenção";
         default: return nil;
     }
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"Ativar a instrumentação ou o log não confirma que o fetch funcionou. Confira os hooks disponíveis, leituras observadas e respostas no diagnóstico.";
-    if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
+    if (section == 1) return @"Employee local não é identidade autenticada e não garante autorização do endpoint QE-info.";
+    if (section == 4) return @"Hooks avançados devem ser testados individualmente. Salvo ≠ instalado ≠ invocado ≠ valor efetivo.";
     return nil;
 }
 
