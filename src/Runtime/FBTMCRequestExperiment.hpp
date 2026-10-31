@@ -17,6 +17,11 @@ public:
         next.mode = employee ? 1 : 0; next.id = id; deadline = now + 120;
     }
     void cancel() { std::lock_guard<std::mutex> guard(mutex); next = Selection(); deadline = 0; }
+    double secondsRemaining(double now) {
+        std::lock_guard<std::mutex> guard(mutex);
+        if (next.mode < 0 || now >= deadline) return 0.;
+        return deadline - now;
+    }
     Selection pending(double now) {
         std::lock_guard<std::mutex> guard(mutex);
         return now < deadline ? next : Selection();

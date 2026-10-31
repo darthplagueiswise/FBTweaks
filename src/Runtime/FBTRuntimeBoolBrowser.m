@@ -17,6 +17,7 @@ typedef struct {
     IMP orig;
     CFStringRef key;
     int forceMode;  // -1 original, 0 OFF, 1 ON; atomic accesses
+    int registrationVerified; // 1: ObjC active IMP matches replacement OR wrapper invoked
     int observedOriginal; // -1 until original really executed
     int observedEffective; // -1 until any invocation
     unsigned long long invocationCount;
@@ -24,6 +25,7 @@ typedef struct {
 
 static NSMutableDictionary<NSString *, NSValue *> *sInstalled; // key -> descriptor ptr
 static NSDictionary *sOverrides;                                // key -> {force,class,selector,classMethod}
+static NSMutableDictionary<NSString *, NSDictionary *> *sInstallFailures; // key -> state/reason
 static BOOL sBoolBrowserEnabled = NO;
 static pthread_mutex_t sBoolLock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -127,9 +129,9 @@ NSNumber *FBTRuntimeBoolObservedOriginal(NSString *key) {
 BOOL FBTRuntimeBoolHookInstalledForKey(NSString *key) {
     if (!key.length) return NO;
     pthread_mutex_lock(&sBoolLock);
-    BOOL installed = sInstalled[key] != nil;
+    FBTBoolHookDescriptor *descriptor = [sInstalled[key] pointerValue];
     pthread_mutex_unlock(&sBoolLock);
-    return installed;
+    return descriptor && __atomic_load_n(&descriptor->registrationVerified,__ATOMIC_ACQUIRE) == 1;
 }
 
 // class_getInstanceMethod() also finds inherited methods. Only hook methods
@@ -145,6 +147,13 @@ static BOOL FBTBoolClassImplementsSelector(Class hookClass, SEL sel) {
     return found;
 }
 
+static void FBTBoolRecordInstallIssue(NSString *key, NSString *state, NSString *reason) {
+    if (!key.length) return;
+    pthread_mutex_lock(&sBoolLock);
+    if (!sInstallFailures) sInstallFailures = [NSMutableDictionary dictionary];
+    sInstallFailures[key] = @{@"status": state ?: @"rejected", @"reason": reason ?: @"unknown"};
+    pthread_mutex_unlock(&sBoolLock);
+}
 static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName, BOOL isClassMethod) {
     if (!className.length || !selectorName.length) return NO;
     NSString *key = FBTBoolKey(className, selectorName, isClassMethod);
@@ -172,37 +181,65 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     });
     if (!isClassMethod && [knownOwners[className] containsObject:selectorName]) {
         FBTLog(@"runtime BOOL skipped (known hook owns %@)",key);
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Selector controlado por outro hook conhecido");
         return NO;
     }
 
     pthread_mutex_lock(&sBoolLock);
-    if (sInstalled[key]) { pthread_mutex_unlock(&sBoolLock); return YES; }
+    if (sInstalled[key]) {
+        FBTBoolHookDescriptor *existing = [sInstalled[key] pointerValue];
+        pthread_mutex_unlock(&sBoolLock);
+        return existing && __atomic_load_n(&existing->registrationVerified,__ATOMIC_ACQUIRE) == 1;
+    }
     pthread_mutex_unlock(&sBoolLock);
 
     Class cls = objc_getClass(className.UTF8String);
-    if (!cls) return NO;
+    if (!cls) {
+        FBTBoolRecordInstallIssue(key, @"pending", @"Classe ainda não carregada pelo runtime");
+        return NO;
+    }
     Class hookClass = isClassMethod ? object_getClass(cls) : cls;
     SEL sel = NSSelectorFromString(selectorName);
-    if (!FBTBoolClassImplementsSelector(hookClass, sel)) return NO;
+    if (!FBTBoolClassImplementsSelector(hookClass, sel)) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Selector ausente nesta classe/metaclasse");
+        return NO;
+    }
     Method m = class_getInstanceMethod(hookClass, sel);
-    if (!m) return NO;
-    if (method_getNumberOfArguments(m) != 2) return NO;
+    if (!m) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Method não localizado");
+        return NO;
+    }
+    if (method_getNumberOfArguments(m) != 2) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Método exige argumentos; ABI incompatível");
+        return NO;
+    }
     char ret[16] = {0};
     method_getReturnType(m, ret, sizeof(ret));
-    if (!(ret[0] == 'B' || ret[0] == 'c')) return NO;
+    if (ret[0] != 'B') {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Tipo de retorno não é BOOL/char");
+        return NO;
+    }
     const char *encoding = method_getTypeEncoding(m);
-    if (!encoding || (strcmp(encoding,"B16@0:8") && strcmp(encoding,"c16@0:8"))) return NO;
+    if (!encoding || strcmp(encoding,"B16@0:8") != 0) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Encoding ObjC não corresponde à ABI BOOL sem argumentos");
+        return NO;
+    }
 
     FBTBoolHookDescriptor *desc = calloc(1, sizeof(FBTBoolHookDescriptor));
-    if (!desc) return NO;
+    if (!desc) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Falha de alocação de descriptor");
+        return NO;
+    }
     desc->sel = sel;
     desc->key = (CFStringRef)CFBridgingRetain(key);
     desc->forceMode = FBTBoolMode(FBTBoolOverrideForKey(key), sBoolBrowserEnabled);
+    desc->registrationVerified = 0;
     desc->observedOriginal = -1;
     desc->observedEffective = -1;
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
+        __atomic_store_n(&captured->registrationVerified,1,__ATOMIC_RELEASE);
         unsigned long long count = __atomic_add_fetch(&captured->invocationCount, 1ULL, __ATOMIC_RELAXED);
         int mode = __atomic_load_n(&captured->forceMode, __ATOMIC_ACQUIRE);
         // No original call on a forced path: getters may have side effects.
@@ -223,14 +260,25 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     });
 
     MSHookMessageEx(hookClass, sel, replacement, (IMP *)&desc->orig);
+    // MSHookMessageEx has no success return. Validate the currently routed
+    // Objective-C IMP when possible; never claim "registered" just because
+    // the installation function was called. Some substrate backends install
+    // another wrapper; their proof is a real invocation of our block.
+    Method afterMethod = class_getInstanceMethod(hookClass,sel);
+    IMP effectiveIMP = afterMethod ? method_getImplementation(afterMethod) : NULL;
+    BOOL verified = effectiveIMP == replacement;
+    __atomic_store_n(&desc->registrationVerified,verified ? 1 : 0,__ATOMIC_RELEASE);
+    if (!verified) FBTBoolRecordInstallIssue(key, @"unverified",
+        @"MSHookMessageEx retornou sem estado; IMP atual não confirma o wrapper. Aguardar invocação.");
 
     pthread_mutex_lock(&sBoolLock);
     if (!sInstalled) sInstalled = [NSMutableDictionary dictionary];
     sInstalled[key] = [NSValue valueWithPointer:desc];
+    if (verified) [sInstallFailures removeObjectForKey:key];
     pthread_mutex_unlock(&sBoolLock);
 
-    FBTLog(@"runtime bool hook instalado: %@", key);
-    return YES;
+    FBTLog(@"runtime bool hook %@: %@", verified ? @"confirmado" : @"não verificado",key);
+    return verified;
 }
 
 void FBTRuntimeBoolMigrateLegacySymbolOverrides(void) {
@@ -289,18 +337,77 @@ void FBTRuntimeBoolRetryPendingHooks(void) {
     FBTRuntimeBoolReinstallPersistedHooks();
 }
 
-static BOOL FBTSelectorLooksUseful(NSString *sel) {
-    NSString *s = sel.lowercaseString;
-    NSArray *needles = @[@"enabled", @"enable", @"is", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"dogfooding", @"dogfooder", @"debug", @"test", @"beta", @"force", @"gate", @"gating", @"eligible", @"fbtemployee", @"isfbemployee", @"isinternal", @"isdebug", @"isdebugoptions", @"isdebugoverlay"];
-    for (NSString *n in needles) if ([s containsString:n]) return YES;
-    return NO;
-}
+// Discover methods by Objective-C type encoding, NEVER by selector/class name.
+// 'c' is a char in the runtime (only historically also used for BOOL), so
+// it is ambiguous and must not be advertised as a verified Boolean hook.
 
-static BOOL FBTClassLooksUseful(NSString *cls) {
-    NSString *c = cls.lowercaseString;
-    NSArray *needles = @[@"fb", @"meta", @"dogfood", @"dogfooding", @"mobileconfig", @"metaconfig", @"gating", @"gate", @"internal", @"internalsettings", @"employee", @"settings", @"tabbar", @"gemstone", @"dating", @"debug", @"debugoverlay", @"bugreport", @"userpreferences", @"react", @"rct", @"rn", @"bloks", @"xplat", @"mobileconfigfbt"];
-    for (NSString *n in needles) if ([c containsString:n]) return YES;
-    return NO;
+static NSString *FBTBoolCategory(NSString *cls, NSString *sel) {
+    NSString *hay = [[NSString stringWithFormat:@"%@ %@",cls ?: @"",sel ?: @""] lowercaseString];
+    if ([hay containsString:@"employee"] || [hay containsString:@"fbuser"]) return @"Employee";
+    if ([hay containsString:@"dogfood"] || [hay containsString:@"dogfooding"]) return @"Dogfood";
+    if ([hay containsString:@"internal"] || [hay containsString:@"whitehat"]) return @"Internal";
+    if ([hay containsString:@"mobileconfig"] || [hay containsString:@"metaconfig"]) return @"MobileConfig";
+    if ([hay containsString:@"debug"] || [hay containsString:@"devmenu"]) return @"Debug";
+    if ([hay containsString:@"gate"] || [hay containsString:@"eligible"]) return @"Gating";
+    return @"Outro BOOL";
+}
+// Snapshot never enumerates the entire ObjC runtime: only selected or
+// installed targets and explicit failed attempts. Read under a short lock;
+// format the UI and compute counters after unlocking it.
+NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void) {
+    NSDictionary *preferences=nil, *issues=nil, *registered=nil;
+    pthread_mutex_lock(&sBoolLock);
+    preferences = [sOverrides copy] ?: @{};
+    issues = [sInstallFailures copy] ?: @{};
+    registered = [sInstalled copy] ?: @{};
+    BOOL browserEnabled = sBoolBrowserEnabled;
+    pthread_mutex_unlock(&sBoolLock);
+    NSMutableSet<NSString *> *allKeys = [NSMutableSet setWithArray:preferences.allKeys];
+    [allKeys addObjectsFromArray:issues.allKeys];
+    [allKeys addObjectsFromArray:registered.allKeys];
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    for (NSString *key in allKeys) {
+        NSString *className=nil, *selector=nil; BOOL isClass=NO;
+        if (!FBTBoolDecodeKey(key,&className,&selector,&isClass)) continue;
+        NSDictionary *preference = [preferences[key] isKindOfClass:NSDictionary.class] ? preferences[key] : nil;
+        NSDictionary *issue = [issues[key] isKindOfClass:NSDictionary.class] ? issues[key] : nil;
+        FBTBoolHookDescriptor *desc = [registered[key] pointerValue];
+        unsigned long long calls = desc ? __atomic_load_n(&desc->invocationCount,__ATOMIC_RELAXED) : 0;
+        BOOL confirmed = desc && __atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE) == 1;
+        int original = desc ? __atomic_load_n(&desc->observedOriginal,__ATOMIC_ACQUIRE) : -1;
+        int effective = desc ? __atomic_load_n(&desc->observedEffective,__ATOMIC_ACQUIRE) : -1;
+        int mode = desc ? __atomic_load_n(&desc->forceMode,__ATOMIC_ACQUIRE) : -1;
+        NSString *status = calls > 0 ? @"invoked" : confirmed ? @"registered" :
+            desc ? @"unverified" : issue[@"status"] ?: (preference ? @"pending" : @"not_requested");
+        NSString *reason = issue[@"reason"];
+        if (!reason.length && !desc) reason = @"Hook ainda não registrado";
+        if (!reason.length && confirmed && calls == 0) reason = @"IMP do wrapper confirmado; aguardando primeira chamada";
+        if (!reason.length && desc && !confirmed) reason = @"Trampoline solicitado; sem confirmação de IMP ou invocação";
+        if (!reason.length && calls > 0) reason = @"Execução do wrapper observada";
+        id force = preference[@"force"];
+        [entries addObject:@{
+            @"key": key, @"class": className ?: @"", @"selector": selector ?: @"",
+            @"classMethod": @(isClass), @"category": FBTBoolCategory(className,selector),
+            @"source": preference[@"source"] ?: @"runtime",
+            @"status": status, @"reason": reason ?: @"",
+            @"registered": @(confirmed), @"invoked": @(calls > 0),
+            @"installationAttempted": @(desc != NULL),
+            @"saved": @(preference != nil), @"masterEnabled": @(browserEnabled),
+            @"forced": @([force respondsToSelector:@selector(boolValue)]),
+            @"force": [force respondsToSelector:@selector(boolValue)] ? force : [NSNull null],
+            @"activeForce": @(mode >= 0), @"invocationCount": @(calls),
+            @"observedOriginal": original >= 0 ? @(original != 0) : [NSNull null],
+            @"observedEffective": effective >= 0 ? @(effective != 0) : [NSNull null]
+        }];
+    }
+    [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSArray *order = @[@"rejected",@"pending",@"registered",@"invoked",@"not_requested"];
+        NSUInteger left = [order indexOfObject:a[@"status"]];
+        NSUInteger right = [order indexOfObject:b[@"status"]];
+        if (left != right) return left < right ? NSOrderedAscending : NSOrderedDescending;
+        return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
+    }];
+    return entries;
 }
 
 static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classMethods, NSString *query, NSUInteger limit) {
@@ -314,15 +421,13 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         if (method_getNumberOfArguments(m) != 2) continue;
         char ret[16] = {0};
         method_getReturnType(m, ret, sizeof(ret));
-        if (!(ret[0] == 'B' || ret[0] == 'c')) continue;
+        if (ret[0] != 'B') continue;
         NSString *sel = NSStringFromSelector(method_getName(m));
         NSString *imagePath = FBTImagePathForMethod(m);
         NSString *imageKind = FBTImageKindForPath(imagePath);
         NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", className, sel, imageKind ?: @"", imagePath ?: @""] lowercaseString];
         if (q.length) {
             if (!FBTQueryMatchesHaystack(q, hay)) continue;
-        } else {
-            if (!FBTSelectorLooksUseful(sel) && !FBTClassLooksUseful(className)) continue;
         }
         NSString *key = FBTBoolKey(className, sel, classMethods);
         NSDictionary *ov = FBTBoolOverrideForKey(key);
@@ -334,13 +439,15 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         int effective = desc ? __atomic_load_n(&desc->observedEffective, __ATOMIC_RELAXED) : -1;
         unsigned long long count = desc ? __atomic_load_n(&desc->invocationCount, __ATOMIC_RELAXED) : 0;
         [out addObject:@{
-            @"hookInstalled": @(desc != NULL),
-            @"installState": desc ? @"installed" : (ov ? @"pending" : @"not_requested"),
+            @"hookInstalled": @(desc && __atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE)),
+            @"installState": desc ? (__atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE) ? @"registered" : @"unverified") : (ov ? @"pending" : @"not_requested"),
             @"observedOriginal": original < 0 ? [NSNull null] : @(original != 0),
             @"observedEffective": effective < 0 ? [NSNull null] : @(effective != 0),
             @"invocationCount": @(count),
             @"class": className ?: @"",
             @"selector": sel ?: @"",
+            @"category": FBTBoolCategory(className, sel),
+            @"signature": [NSString stringWithFormat:@"%@ (%@)", @"BOOL", method_getTypeEncoding(m) ? [NSString stringWithUTF8String:method_getTypeEncoding(m)] : @"unknown"],
             @"classMethod": @(classMethods),
             @"key": key ?: @"",
             @"image": imagePath ?: @"",
@@ -353,33 +460,77 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
     if (methods) free(methods);
 }
 
+
 NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit) {
-    if (limit == 0) limit = 300;
-    int classCount = objc_getClassList(NULL, 0);
-    if (classCount <= 0) return @[];
-    Class *classes = (__unsafe_unretained Class *)calloc((size_t)classCount, sizeof(Class));
+    NSString *q = [query isKindOfClass:NSString.class] ? query : @"";
+    int capacity = objc_getClassList(NULL, 0);
+    if (capacity <= 0) return @[];
+    // ObjC runtime may load more classes while iterating. Allocate headroom
+    // and let objc_getClassList bound the result.
+    int allocated = capacity + 64;
+    Class *classes = (__unsafe_unretained Class *)calloc((size_t)allocated, sizeof(Class));
     if (!classes) return @[];
-    classCount = objc_getClassList(classes, classCount);
+    int classCount = objc_getClassList(classes, allocated);
     NSMutableArray *out = [NSMutableArray array];
-    for (int i = 0; i < classCount && out.count < limit; i++) {
+    for (int i = 0; i < classCount; i++) {
         Class cls = classes[i];
         if (!cls) continue;
-        NSString *className = NSStringFromClass(cls);
-        // Não pré-filtra por nome de classe quando a query está vazia.
-        // O bug real do browser era este: classes com selector útil (-isEmployee,
-        // -isDebugOptionsEnabled etc.) sumiam se o nome da classe não continha
-        // FB/Dogfood/MobileConfig. A filtragem correta acontece por método.
-        (void)className;
         @autoreleasepool {
-            FBTAppendMethodsForClass(out, cls, NO, query ?: @"", limit);
-            FBTAppendMethodsForClass(out, cls, YES, query ?: @"", limit);
+            // NSUIntegerMax: exhaustive scan, no preferred prefixes and no
+            // truncation before collecting all matching BOOL methods.
+            FBTAppendMethodsForClass(out, cls, NO, q, NSUIntegerMax);
+            FBTAppendMethodsForClass(out, cls, YES, q, NSUIntegerMax);
         }
     }
     free(classes);
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
     }];
-    return out;
+    return limit && out.count > limit ? [out subarrayWithRange:NSMakeRange(0, limit)] : out;
+}
+
+NSArray<NSDictionary *> *FBTRuntimeBoolSearchIvars(NSString *query, NSUInteger limit) {
+    NSString *q = [query isKindOfClass:NSString.class] ? query : @"";
+    int capacity = objc_getClassList(NULL, 0);
+    if (capacity <= 0) return @[];
+    int allocated = capacity + 64;
+    Class *classes = (__unsafe_unretained Class *)calloc((size_t)allocated, sizeof(Class));
+    if (!classes) return @[];
+    int classCount = objc_getClassList(classes, allocated);
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (int c = 0; c < classCount; c++) {
+        Class cls = classes[c];
+        if (!cls) continue;
+        @autoreleasepool {
+            unsigned int n = 0;
+            Ivar *ivars = class_copyIvarList(cls, &n);
+            NSString *className = NSStringFromClass(cls);
+            for (unsigned int i=0; i<n; i++) {
+                const char *encoding = ivar_getTypeEncoding(ivars[i]);
+                if (!encoding || strcmp(encoding, "B") != 0) continue;
+                const char *name = ivar_getName(ivars[i]);
+                NSString *ivarName = name ? [NSString stringWithUTF8String:name] : @"";
+                NSString *hay = [NSString stringWithFormat:@"%@ %@",className,ivarName];
+                if (!FBTQueryMatchesHaystack(q,hay)) continue;
+                [out addObject:@{
+                    @"key": [NSString stringWithFormat:@"%@#%@",className,ivarName],
+                    @"class": className ?: @"", @"selector": ivarName,
+                    @"entityType": @"ivar", @"signature": @"BOOL (ivar: B)",
+                    @"encoding": @"B", @"offset": @(ivar_getOffset(ivars[i])),
+                    @"category": FBTBoolCategory(className,ivarName),
+                    @"hookInstalled": @NO, @"installState": @"not_applicable",
+                    @"imageKind": @"ObjC instance storage", @"image": @"",
+                    @"invocationCount": @0, @"forced": @NO, @"observing": @NO
+                }];
+            }
+            if (ivars) free(ivars);
+        }
+    }
+    free(classes);
+    [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b){
+        return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
+    }];
+    return limit && out.count > limit ? [out subarrayWithRange:NSMakeRange(0,limit)] : out;
 }
 
 static NSMutableDictionary *sSweepStats;
@@ -431,7 +582,10 @@ static void FBTRuntimeBoolSetOverrideWithSource(NSDictionary *candidate,
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit) {
     if (limit == 0) limit = 120;
     FBTRuntimeBoolReloadPrefs();
-    sBoolBrowserEnabled = YES;
+    if (![FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
+        FBTLog(@"runtime BOOL sweep denied: browser master toggle disabled");
+        return 0;
+    }
 
     NSDictionary<NSString *, NSArray<NSString *> *> *queriesByMode = @{
         @"dogfood": @[@"enableDogfoodingView", @"triageToDogfoodingAssistantSession", @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"],
@@ -442,7 +596,8 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     NSArray<NSString *> *queries = queriesByMode[normalizedMode] ?: @[];
     NSString *source = [@"sweep:" stringByAppendingString:normalizedMode];
     NSMutableDictionary *seen = [NSMutableDictionary dictionary];
-    NSUInteger installed = 0;
+    NSUInteger installed = 0, rejected = 0, alreadyOwned = 0;
+    NSDictionary *existing = FBTRuntimeBoolOverridesSnapshot();
 
     for (NSString *q in queries) {
         NSArray<NSDictionary *> *hits = FBTRuntimeBoolSearch(q, 600);
@@ -451,8 +606,18 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
             if (!key.length || seen[key]) continue;
             seen[key] = @YES;
             if (!FBTSweepCandidateMatches(hit, normalizedMode)) continue;
+            NSDictionary *existingEntry = [existing[key] isKindOfClass:NSDictionary.class] ? existing[key] : nil;
+            NSString *currentSource = existingEntry[@"source"];
+            if (existingEntry && ![currentSource isEqualToString:source]) {
+                ++alreadyOwned; // Never overwrite a manual/other family override.
+                continue;
+            }
+            if (!FBTRuntimeBoolInstallOne(hit[@"class"],hit[@"selector"],[hit[@"classMethod"] boolValue])) {
+                ++rejected; // Does not count as installed or persist unhookable rows.
+                continue;
+            }
             FBTRuntimeBoolSetOverrideWithSource(hit, forcedValue, source);
-            installed++;
+            if (FBTRuntimeBoolHookInstalledForKey(key)) ++installed;
             if (installed >= limit) break;
         }
         if (installed >= limit) break;
@@ -461,6 +626,8 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     if (!sSweepStats) sSweepStats = [NSMutableDictionary dictionary];
     sSweepStats[mode ?: @"unknown"] = @{
         @"installed": @(installed),
+        @"rejected": @(rejected),
+        @"skipped_other_owner": @(alreadyOwned),
         @"force": @(forcedValue),
         @"limit": @(limit),
         @"timestamp": @([[NSDate date] timeIntervalSince1970])

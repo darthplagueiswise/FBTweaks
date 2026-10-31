@@ -14,7 +14,7 @@ checks={
  "no global C++ ring constructor": "static fbt_trace::Ring sTrace;" not in trace and "static fbt_trace::Ring instance;" in trace,
  "no trace initialization in dyld constructor": "FBTNativeTraceReloadPrefs();" not in boot[boot.index("%ctor {"):].split("FBTNotificationPrefsChanged")[0],
  "no duplicated symbol hook restoration": "[FBTSymbolBrowserEngine reinstallPersistedHooks];" not in boot,
- "ABI-specific BOOL getters": 'strcmp(encoding,"B16@0:8")' in core and 'strcmp(encoding,"c16@0:8")' in core,
+ "ABI-specific BOOL getters": 'strcmp(encoding,"B16@0:8")' in core and 'ret[0] != \'B\'' in core and 'c16@0:8' not in core,
  "legacy symbol override migration": '@"fbt_symbol_overrides_migrated_v1"' in core,
 }
 for k,v in checks.items():print(("PASS" if v else "FAIL")+": "+k)

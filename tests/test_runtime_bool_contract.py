@@ -45,7 +45,7 @@ class RuntimeBoolContractTests(unittest.TestCase):
         self.assertLess(segment.index("[FBTDefaults setDict:all"), segment.index("FBTRuntimeBoolInstallOne("))
         self.assertIn("void FBTRuntimeBoolRetryPendingHooks(void)", source)
         retry = source[source.index("void FBTRuntimeBoolRetryPendingHooks(void)"):
-                       source.index("static BOOL FBTSelectorLooksUseful")]
+                       source.index("// Discover methods by Objective-C type encoding")]
         self.assertIn("FBTRuntimeBoolReinstallPersistedHooks();", retry)
         self.assertNotIn("objc_getClassList", retry)
 

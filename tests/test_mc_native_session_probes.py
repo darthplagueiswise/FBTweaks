@@ -7,9 +7,9 @@ def src(p): return (R / p).read_text(encoding="utf-8")
 class MCNativeSessionProbes(unittest.TestCase):
     def test_session_only_and_real_toggles(self):
         state = src("src/Runtime/FBTMCNativeSessionProbes.m")
-        ui = src("src/Settings/FBTSettingsViewController.m")
+        ui = src("src/Settings/FBTNamesDiagnosticsViewController.m")
         self.assertIn("atomic_bool",state)
-        self.assertIn("FBTMCNativeProbeSetEnabled(sender.prefKey, sender.isOn",ui)
+        self.assertIn("FBTMCNativeProbeSetEnabled(key, control.isOn",ui)
         self.assertIn("FBTMCNativeProbeTigonKey",ui)
         self.assertIn("FBTMCNativeProbeFetcherKey",ui)
         self.assertNotIn("setBool:",state)
