@@ -17,6 +17,7 @@ typedef struct {
     IMP orig;
     CFStringRef key;
     int forceMode;  // -1 original, 0 OFF, 1 ON; atomic accesses
+    int registrationVerified; // 1: ObjC active IMP matches replacement OR wrapper invoked
     int observedOriginal; // -1 until original really executed
     int observedEffective; // -1 until any invocation
     unsigned long long invocationCount;
@@ -128,9 +129,9 @@ NSNumber *FBTRuntimeBoolObservedOriginal(NSString *key) {
 BOOL FBTRuntimeBoolHookInstalledForKey(NSString *key) {
     if (!key.length) return NO;
     pthread_mutex_lock(&sBoolLock);
-    BOOL installed = sInstalled[key] != nil;
+    FBTBoolHookDescriptor *descriptor = [sInstalled[key] pointerValue];
     pthread_mutex_unlock(&sBoolLock);
-    return installed;
+    return descriptor && __atomic_load_n(&descriptor->registrationVerified,__ATOMIC_ACQUIRE) == 1;
 }
 
 // class_getInstanceMethod() also finds inherited methods. Only hook methods
@@ -185,7 +186,11 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     }
 
     pthread_mutex_lock(&sBoolLock);
-    if (sInstalled[key]) { pthread_mutex_unlock(&sBoolLock); return YES; }
+    if (sInstalled[key]) {
+        FBTBoolHookDescriptor *existing = [sInstalled[key] pointerValue];
+        pthread_mutex_unlock(&sBoolLock);
+        return existing && __atomic_load_n(&existing->registrationVerified,__ATOMIC_ACQUIRE) == 1;
+    }
     pthread_mutex_unlock(&sBoolLock);
 
     Class cls = objc_getClass(className.UTF8String);
@@ -228,11 +233,13 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     desc->sel = sel;
     desc->key = (CFStringRef)CFBridgingRetain(key);
     desc->forceMode = FBTBoolMode(FBTBoolOverrideForKey(key), sBoolBrowserEnabled);
+    desc->registrationVerified = 0;
     desc->observedOriginal = -1;
     desc->observedEffective = -1;
 
     __block FBTBoolHookDescriptor *captured = desc;
     IMP replacement = imp_implementationWithBlock(^BOOL(id receiver) {
+        __atomic_store_n(&captured->registrationVerified,1,__ATOMIC_RELEASE);
         unsigned long long count = __atomic_add_fetch(&captured->invocationCount, 1ULL, __ATOMIC_RELAXED);
         int mode = __atomic_load_n(&captured->forceMode, __ATOMIC_ACQUIRE);
         // No original call on a forced path: getters may have side effects.
@@ -253,15 +260,25 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     });
 
     MSHookMessageEx(hookClass, sel, replacement, (IMP *)&desc->orig);
+    // MSHookMessageEx has no success return. Validate the currently routed
+    // Objective-C IMP when possible; never claim "registered" just because
+    // the installation function was called. Some substrate backends install
+    // another wrapper; their proof is a real invocation of our block.
+    Method afterMethod = class_getInstanceMethod(hookClass,sel);
+    IMP effectiveIMP = afterMethod ? method_getImplementation(afterMethod) : NULL;
+    BOOL verified = effectiveIMP == replacement;
+    __atomic_store_n(&desc->registrationVerified,verified ? 1 : 0,__ATOMIC_RELEASE);
+    if (!verified) FBTBoolRecordInstallIssue(key, @"unverified",
+        @"MSHookMessageEx retornou sem estado; IMP atual não confirma o wrapper. Aguardar invocação.");
 
     pthread_mutex_lock(&sBoolLock);
     if (!sInstalled) sInstalled = [NSMutableDictionary dictionary];
     sInstalled[key] = [NSValue valueWithPointer:desc];
-    [sInstallFailures removeObjectForKey:key];
+    if (verified) [sInstallFailures removeObjectForKey:key];
     pthread_mutex_unlock(&sBoolLock);
 
-    FBTLog(@"runtime bool hook instalado: %@", key);
-    return YES;
+    FBTLog(@"runtime bool hook %@: %@", verified ? @"confirmado" : @"não verificado",key);
+    return verified;
 }
 
 void FBTRuntimeBoolMigrateLegacySymbolOverrides(void) {
@@ -356,14 +373,16 @@ NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void) {
         NSDictionary *issue = [issues[key] isKindOfClass:NSDictionary.class] ? issues[key] : nil;
         FBTBoolHookDescriptor *desc = [registered[key] pointerValue];
         unsigned long long calls = desc ? __atomic_load_n(&desc->invocationCount,__ATOMIC_RELAXED) : 0;
+        BOOL confirmed = desc && __atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE) == 1;
         int original = desc ? __atomic_load_n(&desc->observedOriginal,__ATOMIC_ACQUIRE) : -1;
         int effective = desc ? __atomic_load_n(&desc->observedEffective,__ATOMIC_ACQUIRE) : -1;
         int mode = desc ? __atomic_load_n(&desc->forceMode,__ATOMIC_ACQUIRE) : -1;
-        NSString *status = calls > 0 ? @"invoked" : desc ? @"registered" :
-            issue[@"status"] ?: (preference ? @"pending" : @"not_requested");
+        NSString *status = calls > 0 ? @"invoked" : confirmed ? @"registered" :
+            desc ? @"unverified" : issue[@"status"] ?: (preference ? @"pending" : @"not_requested");
         NSString *reason = issue[@"reason"];
         if (!reason.length && !desc) reason = @"Hook ainda não registrado";
-        if (!reason.length && desc && calls == 0) reason = @"Trampoline registrado; aguardando primeira chamada";
+        if (!reason.length && confirmed && calls == 0) reason = @"IMP do wrapper confirmado; aguardando primeira chamada";
+        if (!reason.length && desc && !confirmed) reason = @"Trampoline solicitado; sem confirmação de IMP ou invocação";
         if (!reason.length && calls > 0) reason = @"Execução do wrapper observada";
         id force = preference[@"force"];
         [entries addObject:@{
@@ -371,7 +390,8 @@ NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void) {
             @"classMethod": @(isClass), @"category": FBTBoolCategory(className,selector),
             @"source": preference[@"source"] ?: @"runtime",
             @"status": status, @"reason": reason ?: @"",
-            @"registered": @(desc != NULL), @"invoked": @(calls > 0),
+            @"registered": @(confirmed), @"invoked": @(calls > 0),
+            @"installationAttempted": @(desc != NULL),
             @"saved": @(preference != nil), @"masterEnabled": @(browserEnabled),
             @"forced": @([force respondsToSelector:@selector(boolValue)]),
             @"force": [force respondsToSelector:@selector(boolValue)] ? force : [NSNull null],
@@ -419,8 +439,8 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
         int effective = desc ? __atomic_load_n(&desc->observedEffective, __ATOMIC_RELAXED) : -1;
         unsigned long long count = desc ? __atomic_load_n(&desc->invocationCount, __ATOMIC_RELAXED) : 0;
         [out addObject:@{
-            @"hookInstalled": @(desc != NULL),
-            @"installState": desc ? @"installed" : (ov ? @"pending" : @"not_requested"),
+            @"hookInstalled": @(desc && __atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE)),
+            @"installState": desc ? (__atomic_load_n(&desc->registrationVerified,__ATOMIC_ACQUIRE) ? @"registered" : @"unverified") : (ov ? @"pending" : @"not_requested"),
             @"observedOriginal": original < 0 ? [NSNull null] : @(original != 0),
             @"observedEffective": effective < 0 ? [NSNull null] : @(effective != 0),
             @"invocationCount": @(count),
