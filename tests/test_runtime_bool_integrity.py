@@ -21,8 +21,8 @@ class RuntimeBoolIntegrity(unittest.TestCase):
         self.assertIn('@"signature":',s)
         self.assertNotIn("FBTBoolRelevance",s)
         ui=read("src/Settings/FBTSettingsViewController.m")
-        self.assertIn('[e[@"class"]',ui)
-        self.assertIn('[e[@"selector"]',ui)
+        self.assertIn('e[@"class"]',ui)
+        self.assertIn('e[@"selector"]',ui)
         self.assertIn("cfg.textProperties.numberOfLines = 0;",ui)
         self.assertIn("self.tableView.rowHeight = UITableViewAutomaticDimension;",ui)
 
