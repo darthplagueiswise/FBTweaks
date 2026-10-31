@@ -291,7 +291,9 @@ void FBTRuntimeBoolRetryPendingHooks(void) {
 
 static BOOL FBTSelectorLooksUseful(NSString *sel) {
     NSString *s = sel.lowercaseString;
-    NSArray *needles = @[@"enabled", @"enable", @"is", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"dogfooding", @"dogfooder", @"debug", @"test", @"beta", @"force", @"gate", @"gating", @"eligible", @"fbtemployee", @"isfbemployee", @"isinternal", @"isdebug", @"isdebugoptions", @"isdebugoverlay"];
+    // Avoid matching arbitrary names containing the 2-letter substring "is".
+    NSArray *needles = @[@"enabled", @"enable", @"has", @"can", @"should", @"allow", @"supports", @"internal", @"employee", @"dogfood", @"dogfooding", @"dogfooder", @"debug", @"test", @"beta", @"force", @"gate", @"gating", @"eligible", @"isfbemployee", @"isinternal", @"isdebug", @"isdebugoptions", @"isdebugoverlay"];
+    if ([s hasPrefix:@"is"] && s.length > 2) return YES;
     for (NSString *n in needles) if ([s containsString:n]) return YES;
     return NO;
 }
@@ -303,6 +305,24 @@ static BOOL FBTClassLooksUseful(NSString *cls) {
     return NO;
 }
 
+static NSString *FBTBoolCategory(NSString *cls, NSString *sel) {
+    NSString *hay = [[NSString stringWithFormat:@"%@ %@",cls ?: @"",sel ?: @""] lowercaseString];
+    if ([hay containsString:@"employee"] || [hay containsString:@"fbuser"]) return @"Employee";
+    if ([hay containsString:@"dogfood"] || [hay containsString:@"dogfooding"]) return @"Dogfood";
+    if ([hay containsString:@"internal"] || [hay containsString:@"whitehat"]) return @"Internal";
+    if ([hay containsString:@"mobileconfig"] || [hay containsString:@"metaconfig"]) return @"MobileConfig";
+    if ([hay containsString:@"debug"] || [hay containsString:@"devmenu"]) return @"Debug";
+    if ([hay containsString:@"gate"] || [hay containsString:@"eligible"]) return @"Gating";
+    return @"Outro BOOL";
+}
+static NSInteger FBTBoolRelevance(NSDictionary *item) {
+    NSString *c = item[@"category"];
+    NSInteger score = [@[@"Employee",@"Internal",@"Dogfood",@"MobileConfig",@"Debug",@"Gating"] containsObject:c] ? 100 : 0;
+    if ([item[@"hookInstalled"] boolValue]) score += 40;
+    if ([item[@"forced"] boolValue]) score += 25;
+    if ([item[@"invocationCount"] unsignedLongLongValue] > 0) score += 15;
+    return score;
+}
 static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classMethods, NSString *query, NSUInteger limit) {
     Class methodClass = classMethods ? object_getClass(cls) : cls;
     unsigned int count = 0;
@@ -341,6 +361,8 @@ static void FBTAppendMethodsForClass(NSMutableArray *out, Class cls, BOOL classM
             @"invocationCount": @(count),
             @"class": className ?: @"",
             @"selector": sel ?: @"",
+            @"category": FBTBoolCategory(className, sel),
+            @"signature": [NSString stringWithFormat:@"%@ (%@)", ret[0] == 'B' ? @"BOOL" : @"char/BOOL", method_getTypeEncoding(m) ? [NSString stringWithUTF8String:method_getTypeEncoding(m)] : @"unknown"],
             @"classMethod": @(classMethods),
             @"key": key ?: @"",
             @"image": imagePath ?: @"",
@@ -361,7 +383,10 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
     if (!classes) return @[];
     classCount = objc_getClassList(classes, classCount);
     NSMutableArray *out = [NSMutableArray array];
-    for (int i = 0; i < classCount && out.count < limit; i++) {
+    // Scan a larger bounded pool before ranking; stopping at the first few
+    // classes previously hid the selectors the user was actually looking for.
+    NSUInteger scanLimit = query.length ? MAX(limit, 2400) : MAX(limit, 1600);
+    for (int i = 0; i < classCount && out.count < scanLimit; i++) {
         Class cls = classes[i];
         if (!cls) continue;
         NSString *className = NSStringFromClass(cls);
@@ -371,14 +396,17 @@ NSArray<NSDictionary *> *FBTRuntimeBoolSearch(NSString *query, NSUInteger limit)
         // FB/Dogfood/MobileConfig. A filtragem correta acontece por método.
         (void)className;
         @autoreleasepool {
-            FBTAppendMethodsForClass(out, cls, NO, query ?: @"", limit);
-            FBTAppendMethodsForClass(out, cls, YES, query ?: @"", limit);
+            FBTAppendMethodsForClass(out, cls, NO, query ?: @"", scanLimit);
+            FBTAppendMethodsForClass(out, cls, YES, query ?: @"", scanLimit);
         }
     }
     free(classes);
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSInteger sa=FBTBoolRelevance(a), sb=FBTBoolRelevance(b);
+        if (sa!=sb) return sa>sb ? NSOrderedAscending : NSOrderedDescending;
         return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
     }];
+    if (out.count > limit) return [out subarrayWithRange:NSMakeRange(0, limit)];
     return out;
 }
 
@@ -431,7 +459,10 @@ static void FBTRuntimeBoolSetOverrideWithSource(NSDictionary *candidate,
 NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteger limit) {
     if (limit == 0) limit = 120;
     FBTRuntimeBoolReloadPrefs();
-    sBoolBrowserEnabled = YES;
+    if (![FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled]) {
+        FBTLog(@"runtime BOOL sweep denied: browser master toggle disabled");
+        return 0;
+    }
 
     NSDictionary<NSString *, NSArray<NSString *> *> *queriesByMode = @{
         @"dogfood": @[@"enableDogfoodingView", @"triageToDogfoodingAssistantSession", @"isDogfooder", @"isDogfooding", @"dogfoodingEnabled", @"isDogfoodEnabled"],
@@ -442,7 +473,8 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     NSArray<NSString *> *queries = queriesByMode[normalizedMode] ?: @[];
     NSString *source = [@"sweep:" stringByAppendingString:normalizedMode];
     NSMutableDictionary *seen = [NSMutableDictionary dictionary];
-    NSUInteger installed = 0;
+    NSUInteger installed = 0, rejected = 0, alreadyOwned = 0;
+    NSDictionary *existing = FBTRuntimeBoolOverridesSnapshot();
 
     for (NSString *q in queries) {
         NSArray<NSDictionary *> *hits = FBTRuntimeBoolSearch(q, 600);
@@ -451,8 +483,18 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
             if (!key.length || seen[key]) continue;
             seen[key] = @YES;
             if (!FBTSweepCandidateMatches(hit, normalizedMode)) continue;
+            NSDictionary *existingEntry = [existing[key] isKindOfClass:NSDictionary.class] ? existing[key] : nil;
+            NSString *currentSource = existingEntry[@"source"];
+            if (existingEntry && ![currentSource isEqualToString:source]) {
+                ++alreadyOwned; // Never overwrite a manual/other family override.
+                continue;
+            }
+            if (!FBTRuntimeBoolInstallOne(hit[@"class"],hit[@"selector"],[hit[@"classMethod"] boolValue])) {
+                ++rejected; // Does not count as installed or persist unhookable rows.
+                continue;
+            }
             FBTRuntimeBoolSetOverrideWithSource(hit, forcedValue, source);
-            installed++;
+            if (FBTRuntimeBoolHookInstalledForKey(key)) ++installed;
             if (installed >= limit) break;
         }
         if (installed >= limit) break;
@@ -461,6 +503,8 @@ NSUInteger FBTRuntimeBoolInstallSweep(NSString *mode, BOOL forcedValue, NSUInteg
     if (!sSweepStats) sSweepStats = [NSMutableDictionary dictionary];
     sSweepStats[mode ?: @"unknown"] = @{
         @"installed": @(installed),
+        @"rejected": @(rejected),
+        @"skipped_other_owner": @(alreadyOwned),
         @"force": @(forcedValue),
         @"limit": @(limit),
         @"timestamp": @([[NSDate date] timeIntervalSince1970])
