@@ -164,7 +164,7 @@
     NSString *wanted = @[@"", @"invoked", @"registered", @"pending", @"rejected"][MIN(self.selectedFilter,4)];
     if (!wanted.length) self.visibleHooks = self.allHooks;
     else self.visibleHooks = [self.allHooks filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *item, __unused NSDictionary *bindings) {
-        return [item[@"status"] isEqualToString:wanted];
+        return [item[@"status"] isEqualToString:wanted] || ([wanted isEqualToString:@"pending"] && [item[@"status"] isEqualToString:@"unverified"]);
     }]];
     [self.tableView reloadData];
 }
