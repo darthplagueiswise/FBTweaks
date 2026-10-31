@@ -3,6 +3,7 @@
 #import "FBTNamesDiagnosticsViewController.h"
 #import "FBTNetworkInspectorViewController.h"
 #import "FBTNativeTraceViewController.h"
+#import "FBTHookAuditViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
@@ -112,6 +113,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 @property (nonatomic, strong) NSArray<NSDictionary *> *entries;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, assign) NSInteger entityMode;
 @end
 
 @interface FBTFlagDumpViewController : UITableViewController <UISearchResultsUpdating>
@@ -193,8 +195,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"switch", @"title": @"Sweep Internal/Debug (avançado)", @"subtitle": @"Mesmo fluxo de verificação e limpeza isolada. Pode afetar funções do app.", @"key": FBTKeyInternalDebugSweepEnabled },
             @{ @"kind": @"switch", @"title": @"Import FBShouldEnableInternalSettings", @"subtitle": @"Hook C específico; exige validação de import no executável.", @"key": FBTKeyInternalCImportsEnabled },
             @{ @"kind": @"switch", @"title": @"Import EasyGating (experimental)", @"subtitle": @"Interceptação C ampla: deixe desativada salvo diagnóstico controlado.", @"key": FBTKeyEasyGatingInternalEnabled },
-            @{ @"kind": @"nav", @"title": @"Runtime Browser — ObjC, C, Swift", @"subtitle": @"Busca classes, selectors, módulos, ABI e estado efetivo de cada hook.", @"dest": @"bool" },
-            @{ @"kind": @"nav", @"title": @"BOOL Live — classes e selectors", @"subtitle": @"Mostra assinatura completa, imagem, original, efetivo e invocações.", @"dest": @"boollive" },
+            @{ @"kind": @"nav", @"title": @"Runtime Browser — métodos BOOL e ivars", @"subtitle": @"Enumeração por type encoding, classe, selector, assinatura, chamadas e estado.", @"dest": @"boollive" },
+            @{ @"kind": @"nav", @"title": @"Auditoria de hooks", @"subtitle": @"Registrados, executados, pendentes e recusados com motivo real.", @"dest": @"hookaudit" },
             @{ @"kind": @"nav", @"title": @"Native Live Trace", @"subtitle": @"Registro estruturado de chamadas; preferir uso temporário.", @"dest": @"livetrace" },
             @{ @"kind": @"nav", @"title": @"Network Inspector", @"subtitle": @"Requests e responses correlacionados; exportação sanitizada.", @"dest": @"networkinspector" },
         ],
@@ -464,6 +466,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         else if ([dest isEqualToString:@"mobileconfig"]) vc = [[FBTMobileConfigViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"bool"]) vc = [[FBTSymbolsBrowserViewController alloc] initWithMode:FBTCSymbolsBrowserModeObjCMethods];
         else if ([dest isEqualToString:@"boollive"]) vc = [[FBTRuntimeBoolViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+        else if ([dest isEqualToString:@"hookaudit"]) vc = [[FBTHookAuditViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest isEqualToString:@"livetrace"]) vc = [[FBTNativeTraceViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         else if ([dest hasPrefix:@"feat:"]) vc = [[FBTFeatureParamsViewController alloc] initWithFeatureId:[dest substringFromIndex:5]];
         else if ([dest isEqualToString:@"headline"]) { FBTFlagDumpViewController *f = [[FBTFlagDumpViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]; f.headlineOnly = YES; vc = f; }
@@ -869,7 +872,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"BOOL Runtime · Classes e funções";
+    self.title = @"Runtime BOOL · Métodos e ivars";
+    self.entityMode = 0;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 100;
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
@@ -882,6 +886,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Classe/selector/image: dogfood, FBShared, main-exec…";
     self.navigationItem.searchController = self.searchController;
+    UISegmentedControl *types = [[UISegmentedControl alloc] initWithItems:@[@"Métodos BOOL", @"Ivars BOOL"]];
+    types.selectedSegmentIndex = 0;
+    types.accessibilityIdentifier = @"fbt.boolBrowser.entityType";
+    [types addTarget:self action:@selector(entityTypeChanged:) forControlEvents:UIControlEventValueChanged];
+    types.frame = CGRectMake(0, 0, 320, 45);
+    self.tableView.tableHeaderView = types;
     [self runSearch];
 }
 
@@ -896,13 +906,17 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [self.tableView reloadData];
 }
 
+- (void)entityTypeChanged:(UISegmentedControl *)sender {
+    self.entityMode = sender.selectedSegmentIndex;
+    [self runSearch];
+}
 - (void)showNativeTrace {
     [self.navigationController pushViewController:[[FBTNativeTraceViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
 }
 - (void)runSearch {
     NSString *q = self.searchController.searchBar.text ?: @"";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *result = FBTRuntimeBoolSearch(q, 400);
+        NSArray *result = self.entityMode == 1 ? FBTRuntimeBoolSearchIvars(q, 0) : FBTRuntimeBoolSearch(q, 0);
         dispatch_async(dispatch_get_main_queue(), ^{
             self.entries = result;
             self.filtered = result;
@@ -917,8 +931,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:FBTCellID forIndexPath:indexPath];
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
-        cfg.text = @"Nenhum getter BOOL encontrado";
-        cfg.secondaryText = @"Busca por termos como dogfood, internal, employee, debug, RCT, React, FBShared ou main-exec. A busca aceita múltiplas palavras e roda só pós-launch.";
+        cfg.text = @"Nenhuma entrada BOOL encontrada";
+        cfg.secondaryText = @"Enumeração por encoding Objective-C real, sem categorias pré-selecionadas. Ivars booleanas são dados, não métodos interceptáveis.";
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
         cell.accessoryType = UITableViewCellAccessoryNone;
@@ -927,12 +941,14 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *e = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     // Never truncate the exact selector: category tags are secondary metadata.
-    cfg.text = [NSString stringWithFormat:@"%@[%@ %@]",
+    BOOL ivar = [e[@"entityType"] isEqualToString:@"ivar"];
+    cfg.text = ivar ? [NSString stringWithFormat:@"%@.%@ (ivar)",e[@"class"] ?: @"?",e[@"selector"] ?: @"?"] :
+        [NSString stringWithFormat:@"%@[%@ %@]",
         [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"class"] ?: @"?", e[@"selector"] ?: @"?"];
     cfg.textProperties.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightMedium];
     cfg.textProperties.numberOfLines = 0;
     NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : ([e[@"observing"] boolValue] ? @" · OBSERVE" : @"");
-    NSString *hookState = e[@"installState"] ?: @"not_requested";
+    NSString *hookState = [e[@"entityType"] isEqualToString:@"ivar"] ? @"Sem hook: armazenamento de dados, não método" : e[@"installState"] ?: @"not_requested";
     id original = e[@"observedOriginal"];
     id effective = e[@"observedEffective"];
     NSString *originalLabel = original && original != [NSNull null] ? FBTBoolText([original boolValue]) : @"não medido";
@@ -975,10 +991,14 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         e[@"installState"] ?: @"não solicitado", e[@"invocationCount"] ?: @0,
         e[@"observedOriginal"] ?: @"não observado",e[@"observedEffective"] ?: @"não observado"];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Inspeção de hook BOOL" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    if ([e[@"entityType"] isEqualToString:@"ivar"]) {
+        [a addAction:[UIAlertAction actionWithTitle:@"Copiar metadados" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { UIPasteboard.generalPasteboard.string = msg; }]];
+    } else {
     [a addAction:[UIAlertAction actionWithTitle:@"Observar (sem forçar)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolObserve(e); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Observação"]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, YES); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Force ON"]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolSetOverride(e, NO); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Force OFF"]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Desfazer override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) { FBTRuntimeBoolClearOverride(e); [self runSearch]; [self reportRuntimeHookStatus:e action:@"Override removido"]; }]];
+    }
     [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     a.popoverPresentationController.sourceView = cell;
