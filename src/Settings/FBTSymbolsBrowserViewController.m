@@ -1167,7 +1167,7 @@ static char kFBTCSymbolGroupPayloadKey;
         [self rebuildSections];
         return;
     }
-    if (!plan.inlineToggleSafe) {
+    if (!plan.inlineToggleSafe || entry.swiftLike) {
         sender.on = NO;
         [self pushRealtimeDetailForEntry:entry];
         return;
@@ -1258,17 +1258,17 @@ static char kFBTCSymbolGroupPayloadKey;
         [a addAction:[UIAlertAction actionWithTitle:@"Force param YES via MobileConfig BOOL reader" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:@YES]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force param NO via MobileConfig BOOL reader" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:@NO]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Clear param force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:nil]; }]];
-    } else if (entry.function && [FBTCSymbolStub isForceableSymbol:entry.name]) {
+    } else if (entry.function && !entry.swiftLike && [weakSelf entryHasInlineToggle:entry] && [FBTCSymbolStub isForceableSymbol:entry.name]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL YES (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL NO (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setForce:@NO forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Observe only" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Clear BOOL force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-    } else if (entry.function && [FBTCSymbolStub isTypedForceableSymbol:entry.name]) {
+    } else if (entry.function && !entry.swiftLike && [weakSelf resolverPlanForEntry:entry].hasBindPointer && [FBTCSymbolStub isTypedForceableSymbol:entry.name]) {
         NSString *kind = [FBTCSymbolStub returnKindForSymbol:entry.name] ?: @"typed";
         [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Force %@ value…", kind] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf promptTypedForceForEntry:entry]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Observe only" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Clear typed force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setTypedForceValue:nil returnKind:kind forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-    } else if (entry.function && [FBTCSymbolStub isHookableSymbol:entry.name]) {
+    } else if (entry.function && !entry.swiftLike && [weakSelf entryHasInlineToggle:entry] && [FBTCSymbolStub isHookableSymbol:entry.name]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Observe action/function" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [FBTCSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
     } else {
         UIAlertAction *blocked = [UIAlertAction actionWithTitle:@"No safe runtime hook: see ABI/Hook plan" style:UIAlertActionStyleDefault handler:nil];
@@ -1449,14 +1449,14 @@ static char kFBTCSymbolGroupPayloadKey;
         } else if ([weakSelf entryLooksParamDescriptor:entry]) {
             [items addObject:[UIAction actionWithTitle:@"Force param YES via reader" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setParamEntry:entry force:@YES]; }]];
             [items addObject:[UIAction actionWithTitle:@"Clear param force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setParamEntry:entry force:nil]; }]];
-        } else if (entry.function && [FBTCSymbolStub isForceableSymbol:entry.name]) {
+        } else if (entry.function && !entry.swiftLike && [weakSelf entryHasInlineToggle:entry] && [FBTCSymbolStub isForceableSymbol:entry.name]) {
             [items addObject:[UIAction actionWithTitle:@"Force BOOL YES (hardstub)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [FBTCSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
             [items addObject:[UIAction actionWithTitle:@"Clear BOOL force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [FBTCSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-        } else if (entry.function && [FBTCSymbolStub isTypedForceableSymbol:entry.name]) {
+        } else if (entry.function && !entry.swiftLike && [weakSelf resolverPlanForEntry:entry].hasBindPointer && [FBTCSymbolStub isTypedForceableSymbol:entry.name]) {
             NSString *kind = [FBTCSymbolStub returnKindForSymbol:entry.name] ?: @"typed";
             [items addObject:[UIAction actionWithTitle:[NSString stringWithFormat:@"Force %@ value…", kind] image:[UIImage systemImageNamed:@"number"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf promptTypedForceForEntry:entry]; }]];
             [items addObject:[UIAction actionWithTitle:@"Clear typed force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [FBTCSymbolStub setTypedForceValue:nil returnKind:kind forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-        } else if (entry.function && [FBTCSymbolStub isHookableSymbol:entry.name]) {
+        } else if (entry.function && !entry.swiftLike && [weakSelf entryHasInlineToggle:entry] && [FBTCSymbolStub isHookableSymbol:entry.name]) {
             [items addObject:[UIAction actionWithTitle:@"Observe action/function" image:[UIImage systemImageNamed:@"eye"] identifier:nil handler:^(__unused UIAction *action) { [FBTCSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         }
         [items addObject:[UIAction actionWithTitle:@"Copy symbol" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = entry.name ?: @""; }]];
