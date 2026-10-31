@@ -318,13 +318,30 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         FBTRuntimeBoolReloadPrefs();
         if (sender.isOn) FBTRuntimeBoolReinstallPersistedHooks();
     }
-    if ([sender.prefKey isEqualToString:FBTKeyDogfoodSweepEnabled] && sender.isOn) {
-        NSUInteger n = FBTRuntimeBoolInstallSweep(@"dogfood", YES, 160);
-        [self showInfoTitle:@"Dogfood sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
-    }
-    if ([sender.prefKey isEqualToString:FBTKeyInternalDebugSweepEnabled] && sender.isOn) {
-        NSUInteger n = FBTRuntimeBoolInstallSweep(@"internaldebug", YES, 160);
-        [self showInfoTitle:@"Internal/debug sweep" message:[NSString stringWithFormat:@"Instalados %lu hooks BOOL persistidos.", (unsigned long)n]];
+    if ([sender.prefKey isEqualToString:FBTKeyDogfoodSweepEnabled] ||
+        [sender.prefKey isEqualToString:FBTKeyInternalDebugSweepEnabled]) {
+        NSString *mode = [sender.prefKey isEqualToString:FBTKeyDogfoodSweepEnabled] ? @"dogfood" : @"internaldebug";
+        if (!sender.isOn) {
+            FBTRuntimeBoolClearSweep(mode);
+            [self showInfoTitle:@"Sweep desativado"
+                        message:@"Overrides deste sweep foram removidos. Trampolines previamente instalados continuam no processo, mas retornam ao comportamento original. Outras forças não foram alteradas."];
+        } else {
+            BOOL browserWasOff = ![FBTDefaults boolForKey:FBTKeyRuntimeBoolBrowserEnabled];
+            if (browserWasOff) [FBTDefaults setBool:YES forKey:FBTKeyRuntimeBoolBrowserEnabled];
+            FBTRuntimeBoolReloadPrefs();
+            NSUInteger n = FBTRuntimeBoolInstallSweep(mode, YES, 160);
+            NSDictionary *stats = FBTRuntimeBoolSweepStats()[mode] ?: @{};
+            if (!n) {
+                [FBTDefaults setBool:NO forKey:sender.prefKey];
+                sender.on = NO;
+            }
+            [self showInfoTitle:n ? @"Sweep aplicado" : @"Nenhum hook instalado"
+                        message:[NSString stringWithFormat:
+                            @"Instalados: %lu. Rejeitados: %@. Preservados de outros donos: %@.%@\nA instalação não prova invocação. Consulte o Runtime BOOL para ver contador e valor efetivo.",
+                            (unsigned long)n, stats[@"rejected"] ?: @0, stats[@"skipped_other_owner"] ?: @0,
+                            browserWasOff ? @"\nRuntime BOOL Browser foi habilitado por dependência." : @""]];
+        }
+        [self.tableView reloadData];
     }
     if ([sender.prefKey isEqualToString:FBTKeyInternalCImportsEnabled] ||
         [sender.prefKey isEqualToString:FBTKeyEasyGatingInternalEnabled]) {
