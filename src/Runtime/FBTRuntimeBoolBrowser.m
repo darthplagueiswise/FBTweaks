@@ -24,6 +24,7 @@ typedef struct {
 
 static NSMutableDictionary<NSString *, NSValue *> *sInstalled; // key -> descriptor ptr
 static NSDictionary *sOverrides;                                // key -> {force,class,selector,classMethod}
+static NSMutableDictionary<NSString *, NSDictionary *> *sInstallFailures; // key -> state/reason
 static BOOL sBoolBrowserEnabled = NO;
 static pthread_mutex_t sBoolLock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -145,6 +146,13 @@ static BOOL FBTBoolClassImplementsSelector(Class hookClass, SEL sel) {
     return found;
 }
 
+static void FBTBoolRecordInstallIssue(NSString *key, NSString *state, NSString *reason) {
+    if (!key.length) return;
+    pthread_mutex_lock(&sBoolLock);
+    if (!sInstallFailures) sInstallFailures = [NSMutableDictionary dictionary];
+    sInstallFailures[key] = @{@"status": state ?: @"rejected", @"reason": reason ?: @"unknown"};
+    pthread_mutex_unlock(&sBoolLock);
+}
 static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName, BOOL isClassMethod) {
     if (!className.length || !selectorName.length) return NO;
     NSString *key = FBTBoolKey(className, selectorName, isClassMethod);
@@ -172,6 +180,7 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     });
     if (!isClassMethod && [knownOwners[className] containsObject:selectorName]) {
         FBTLog(@"runtime BOOL skipped (known hook owns %@)",key);
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Selector controlado por outro hook conhecido");
         return NO;
     }
 
@@ -180,21 +189,42 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     pthread_mutex_unlock(&sBoolLock);
 
     Class cls = objc_getClass(className.UTF8String);
-    if (!cls) return NO;
+    if (!cls) {
+        FBTBoolRecordInstallIssue(key, @"pending", @"Classe ainda não carregada pelo runtime");
+        return NO;
+    }
     Class hookClass = isClassMethod ? object_getClass(cls) : cls;
     SEL sel = NSSelectorFromString(selectorName);
-    if (!FBTBoolClassImplementsSelector(hookClass, sel)) return NO;
+    if (!FBTBoolClassImplementsSelector(hookClass, sel)) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Selector ausente nesta classe/metaclasse");
+        return NO;
+    }
     Method m = class_getInstanceMethod(hookClass, sel);
-    if (!m) return NO;
-    if (method_getNumberOfArguments(m) != 2) return NO;
+    if (!m) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Method não localizado");
+        return NO;
+    }
+    if (method_getNumberOfArguments(m) != 2) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Método exige argumentos; ABI incompatível");
+        return NO;
+    }
     char ret[16] = {0};
     method_getReturnType(m, ret, sizeof(ret));
-    if (!(ret[0] == 'B' || ret[0] == 'c')) return NO;
+    if (!(ret[0] == 'B' || ret[0] == 'c')) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Tipo de retorno não é BOOL/char");
+        return NO;
+    }
     const char *encoding = method_getTypeEncoding(m);
-    if (!encoding || (strcmp(encoding,"B16@0:8") && strcmp(encoding,"c16@0:8"))) return NO;
+    if (!encoding || (strcmp(encoding,"B16@0:8") && strcmp(encoding,"c16@0:8"))) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Encoding ObjC não corresponde à ABI BOOL sem argumentos");
+        return NO;
+    }
 
     FBTBoolHookDescriptor *desc = calloc(1, sizeof(FBTBoolHookDescriptor));
-    if (!desc) return NO;
+    if (!desc) {
+        FBTBoolRecordInstallIssue(key, @"rejected", @"Falha de alocação de descriptor");
+        return NO;
+    }
     desc->sel = sel;
     desc->key = (CFStringRef)CFBridgingRetain(key);
     desc->forceMode = FBTBoolMode(FBTBoolOverrideForKey(key), sBoolBrowserEnabled);
@@ -227,6 +257,7 @@ static BOOL FBTRuntimeBoolInstallOne(NSString *className, NSString *selectorName
     pthread_mutex_lock(&sBoolLock);
     if (!sInstalled) sInstalled = [NSMutableDictionary dictionary];
     sInstalled[key] = [NSValue valueWithPointer:desc];
+    [sInstallFailures removeObjectForKey:key];
     pthread_mutex_unlock(&sBoolLock);
 
     FBTLog(@"runtime bool hook instalado: %@", key);
@@ -315,6 +346,62 @@ static NSString *FBTBoolCategory(NSString *cls, NSString *sel) {
     if ([hay containsString:@"gate"] || [hay containsString:@"eligible"]) return @"Gating";
     return @"Outro BOOL";
 }
+// Snapshot never enumerates the entire ObjC runtime: only selected or
+// installed targets and explicit failed attempts. Read under a short lock;
+// format the UI and compute counters after unlocking it.
+NSArray<NSDictionary *> *FBTRuntimeBoolHookAuditSnapshot(void) {
+    NSDictionary *preferences=nil, *issues=nil, *registered=nil;
+    pthread_mutex_lock(&sBoolLock);
+    preferences = [sOverrides copy] ?: @{};
+    issues = [sInstallFailures copy] ?: @{};
+    registered = [sInstalled copy] ?: @{};
+    BOOL browserEnabled = sBoolBrowserEnabled;
+    pthread_mutex_unlock(&sBoolLock);
+    NSMutableSet<NSString *> *allKeys = [NSMutableSet setWithArray:preferences.allKeys];
+    [allKeys addObjectsFromArray:issues.allKeys];
+    [allKeys addObjectsFromArray:registered.allKeys];
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    for (NSString *key in allKeys) {
+        NSString *className=nil, *selector=nil; BOOL isClass=NO;
+        if (!FBTBoolDecodeKey(key,&className,&selector,&isClass)) continue;
+        NSDictionary *preference = [preferences[key] isKindOfClass:NSDictionary.class] ? preferences[key] : nil;
+        NSDictionary *issue = [issues[key] isKindOfClass:NSDictionary.class] ? issues[key] : nil;
+        FBTBoolHookDescriptor *desc = [registered[key] pointerValue];
+        unsigned long long calls = desc ? __atomic_load_n(&desc->invocationCount,__ATOMIC_RELAXED) : 0;
+        int original = desc ? __atomic_load_n(&desc->observedOriginal,__ATOMIC_ACQUIRE) : -1;
+        int effective = desc ? __atomic_load_n(&desc->observedEffective,__ATOMIC_ACQUIRE) : -1;
+        int mode = desc ? __atomic_load_n(&desc->forceMode,__ATOMIC_ACQUIRE) : -1;
+        NSString *status = calls > 0 ? @"invoked" : desc ? @"registered" :
+            issue[@"status"] ?: (preference ? @"pending" : @"not_requested");
+        NSString *reason = issue[@"reason"];
+        if (!reason.length && !desc) reason = @"Hook ainda não registrado";
+        if (!reason.length && desc && calls == 0) reason = @"Trampoline registrado; aguardando primeira chamada";
+        if (!reason.length && calls > 0) reason = @"Execução do wrapper observada";
+        id force = preference[@"force"];
+        [entries addObject:@{
+            @"key": key, @"class": className ?: @"", @"selector": selector ?: @"",
+            @"classMethod": @(isClass), @"category": FBTBoolCategory(className,selector),
+            @"source": preference[@"source"] ?: @"runtime",
+            @"status": status, @"reason": reason ?: @"",
+            @"registered": @(desc != NULL), @"invoked": @(calls > 0),
+            @"saved": @(preference != nil), @"masterEnabled": @(browserEnabled),
+            @"forced": @([force respondsToSelector:@selector(boolValue)]),
+            @"force": [force respondsToSelector:@selector(boolValue)] ? force : [NSNull null],
+            @"activeForce": @(mode >= 0), @"invocationCount": @(calls),
+            @"observedOriginal": original >= 0 ? @(original != 0) : [NSNull null],
+            @"observedEffective": effective >= 0 ? @(effective != 0) : [NSNull null]
+        }];
+    }
+    [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSArray *order = @[@"rejected",@"pending",@"registered",@"invoked",@"not_requested"];
+        NSUInteger left = [order indexOfObject:a[@"status"]];
+        NSUInteger right = [order indexOfObject:b[@"status"]];
+        if (left != right) return left < right ? NSOrderedAscending : NSOrderedDescending;
+        return [a[@"key"] compare:b[@"key"] options:NSCaseInsensitiveSearch];
+    }];
+    return entries;
+}
+
 static NSInteger FBTBoolRelevance(NSDictionary *item) {
     NSString *c = item[@"category"];
     NSInteger score = [@[@"Employee",@"Internal",@"Dogfood",@"MobileConfig",@"Debug",@"Gating"] containsObject:c] ? 100 : 0;
