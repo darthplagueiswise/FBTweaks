@@ -1,6 +1,7 @@
 #import "FBTHookAuditViewController.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "../Runtime/FBTMCNativeSessionProbes.h"
+#import "../UI/FBTUIKit26LiquidGlass.h"
 
 @interface FBTHookAuditViewController ()
 @property (nonatomic, copy) NSArray<NSDictionary *> *allHooks;
@@ -85,9 +86,10 @@
         // container. UIKit handles the merging / morphing during animations.
         UIVisualEffectView *glass;
         if (@available(iOS 26.0, *)) {
-            UIGlassEffect *effect = [[UIGlassEffect alloc] initWithStyle:UIGlassEffectStyleRegular];
-            effect.interactive = YES;
-            glass = [[UIVisualEffectView alloc] initWithEffect:effect];
+            // UIGlassEffect is created by the project's SDK-compatibility
+            // factory: SDK 26.2 exposes effectWithStyle:, not initWithStyle:.
+            glass = [[UIVisualEffectView alloc] initWithEffect:
+                FBTUIKit26GlassEffect(NO, YES, nil)];
         } else {
             glass = [[UIVisualEffectView alloc] initWithEffect:
                 [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial]];
