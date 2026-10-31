@@ -23,7 +23,7 @@ class MobileLabBootstrapTests(unittest.TestCase):
             self.assertNotIn(unsafe, fn)
     def test_ui_switch_is_restart_latched(self):
         ui = load("src/Settings/FBTSettingsViewController.m")
-        self.assertIn('@"title": @"Mobile Lab (LAB_IS_ACTIVE)"', ui)
+        self.assertIn('@"title": @"Mobile Lab no lançamento"', ui)
         self.assertIn('@"key": FBTKeyMobileLabEnabled, @"restart": @YES', ui)
     def test_existing_containment_stays(self):
         self.assertIn("#define FBT_ENABLE_QE_INVASIVE_HOOKS 0", load("src/Runtime/FBTMobileConfigFetchDiagnostics.h"))
