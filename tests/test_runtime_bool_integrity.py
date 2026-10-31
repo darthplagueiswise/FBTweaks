@@ -19,7 +19,7 @@ class RuntimeBoolIntegrity(unittest.TestCase):
         s=read("src/Runtime/FBTRuntimeBoolBrowser.m")
         self.assertIn('@"category": FBTBoolCategory(className, sel)',s)
         self.assertIn('@"signature":',s)
-        self.assertIn("FBTBoolRelevance",s)
+        self.assertNotIn("FBTBoolRelevance",s)
         ui=read("src/Settings/FBTSettingsViewController.m")
         self.assertIn('[e[@"class"]',ui)
         self.assertIn('[e[@"selector"]',ui)
