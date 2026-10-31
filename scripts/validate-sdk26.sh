@@ -44,6 +44,12 @@ grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/Settings/FBTSettingsView
 grep -q "FBTKeyMobileConfigFetchDiagnosticsEnabled" src/FBTDefaults.m || fail "preferência de captura QE-info sem default persistente"
 grep -q "fbt_fetch_diagnostics.json" src/Runtime/FBTMobileConfigFetchDiagnostics.m || fail "relatorio de fetch nao persiste no AppGroup"
 grep -q "showFetchDiagnostics" src/Settings/FBTSettingsViewController.m || fail "UI sem acesso ao diagnóstico de fetch"
-grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m || fail "UI UIKit sem default Liquid Glass appearance"
+# iOS 26+: preserve native system navigation material, rather than forcing
+# the old opaque UINavigationBarAppearance which suppresses Liquid Glass.
+grep -q "FBTConfigureDefaultLiquidGlass" src/Settings/FBTSettingsViewController.m || fail "UI sem configuração adaptativa de navegação"
+grep -q "@available(iOS 26.0" src/Settings/FBTSettingsViewController.m || fail "UI sem fallback de versão"
+if grep -q "configureWithDefaultBackground" src/Settings/FBTSettingsViewController.m; then
+  fail "UI reinstala aparência opaca legada sobre Liquid Glass"
+fi
 
 echo "[validate] OK"
