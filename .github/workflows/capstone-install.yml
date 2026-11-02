@@ -6,6 +6,7 @@ on:
       - tools/capstone-instagram-20261101
     paths:
       - .github/workflows/capstone-install.yml
+      - tools/instagram_re/verify_ig453_bl_words.py
   workflow_dispatch:
 
 permissions:
@@ -15,6 +16,7 @@ jobs:
   capstone-arm64:
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -47,8 +49,12 @@ jobs:
               json.dump(data, f, indent=2)
           print(json.dumps(data, indent=2))
           PY
+      - name: Verify extracted Instagram 453 BL instruction words with Capstone
+        run: python tools/instagram_re/verify_ig453_bl_words.py
       - name: Upload verification
         uses: actions/upload-artifact@v4
         with:
           name: capstone-arm64-verification
-          path: capstone_install_verification.json
+          path: |
+            capstone_install_verification.json
+            ig453_capstone_verified_xrefs.json
