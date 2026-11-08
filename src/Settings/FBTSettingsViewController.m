@@ -18,6 +18,7 @@
 #import "../Runtime/FBTMCNativeSessionProbes.h"
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
+#import "../Runtime/FBTDogFoodNative.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <math.h>
@@ -201,6 +202,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
+            @{ @"kind": @"action", @"title": @"Abrir DogFood / Gold nativo", @"subtitle": @"Abre o nag sheet Swift do Facebook com a sessão ativa. Ativar atualiza managedPhoneFlag; Depois registra snooze local.", @"action": @"dogfood_nag" },
             @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
@@ -453,6 +455,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         NSString *action = item[@"action"];
         if ([action isEqualToString:@"native"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
+        } else if ([action isEqualToString:@"dogfood_nag"]) {
+            NSString *reason = nil;
+            if (!FBTDogFoodPresentNativeNag(self, &reason)) {
+                [self showInfoTitle:@"DogFood / Gold nativo" message:reason ?: @"Interface nativa indisponível."];
+            }
         } else if ([action isEqualToString:@"whitehat"]) {
             FBTOpenNativeWhitehatSettings();
         } else if ([action isEqualToString:@"ensure_mc_file"]) {
