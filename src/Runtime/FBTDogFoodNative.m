@@ -8,6 +8,7 @@
 
 #import "FBTDogFoodNative.h"
 #import "../FBTUtils.h"
+#import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -134,6 +135,38 @@ static id FBTDogFoodResolveSession(UIViewController *presenter) {
     return nil;
 }
 
+// The Facebook 567 Internal Settings gate reads session.userPreferences.isEmployee.
+// This is a local preference write through its verified native ObjC setter.
+// It is independent of Gold device management and remote account entitlements.
+static NSString *FBTDogFoodWriteEmployeePreference(id session) {
+    id prefs = FBTDogFoodSafeGetter(session, @"userPreferences");
+    if (!prefs) return @"native_userPreferences_unavailable";
+
+    SEL setter = @selector(setEmployee:);
+    Method setterMethod = class_getInstanceMethod([prefs class], setter);
+    if (!setterMethod || ![prefs respondsToSelector:setter] ||
+        method_getNumberOfArguments(setterMethod) != 3) {
+        return @"native_setEmployee_unavailable";
+    }
+    char *ret = method_copyReturnType(setterMethod);
+    char *arg = method_copyArgumentType(setterMethod, 2);
+    BOOL compatible = ret && ret[0] == 'v' && arg &&
+        (arg[0] == 'B' || arg[0] == 'c');
+    if (ret) free(ret);
+    if (arg) free(arg);
+    if (!compatible) return @"native_setEmployee_abi_mismatch";
+
+    @try {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(prefs, setter, YES);
+        // Getter may itself be hooked: do not treat YES as evidence of a
+        // server entitlement or even independent persistence verification.
+        return @"native_setEmployee_called";
+    } @catch (NSException *exception) {
+        FBTLog(@"DogFood Employee setter exception: %@", exception.name);
+        return @"native_setEmployee_exception";
+    }
+}
+
 static Class FBTDogFoodControllerClass(void) {
     Class cls = NSClassFromString(@"_TtC11FBDogFoodUI17DogFoodController");
     if (!cls) cls = NSClassFromString(@"FBDogFoodUI.DogFoodController");
@@ -191,10 +224,20 @@ BOOL FBTDogFoodPresentNativeNag(UIViewController *presenter, NSString **error) {
             [defaults removeObjectForKey:kFBTSnoozedOnDismiss];
             [defaults removeObjectForKey:kFBTSnoozedOnSwitch];
             [defaults setInteger:0 forKey:kFBTDismissCount];
+
+            // A user-selected DogFood activation also opts into the existing
+            // Employee/Internal family; it is not a remote auth mutation.
+            // FBTDefaults notifies the installed preference observer, which
+            // installs/reloads FBTEmployee and known gate hooks as needed.
+            if (![FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) {
+                [FBTDefaults setBool:YES forKey:FBTKeyEmployeeEnabled];
+            }
+            NSString *employeeStatus = FBTDogFoodWriteEmployeePreference(session);
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
-            FBTLog(@"DogFood native switch: managedPhoneFlag=%d",
-                   [defaults boolForKey:kFBTManagedPhone]);
+            FBTLog(@"DogFood switch: managedPhoneFlag=%d employeeToggle=%d employeeNative=%@",
+                   [defaults boolForKey:kFBTManagedPhone],
+                   [FBTDefaults boolForKey:FBTKeyEmployeeEnabled], employeeStatus);
         });
     };
     void (^onSnooze)(void) = ^{
