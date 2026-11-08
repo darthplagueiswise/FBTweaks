@@ -1,0 +1,92 @@
+name: Rebuild FBTweaks dev #19 (26560665144)
+on:
+  push:
+    branches:
+      - rebuild/fbt-dev-run19-26560665144
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fbt-dev-run19-26560665144
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Rebuild original dev #19
+    runs-on: macos-latest
+    steps:
+      - name: Checkout exact source commit from 28 May 2026
+        uses: actions/checkout@v4
+        with:
+          ref: 712ccf78bf76ae4c11e8180041e609c1d50320be
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify original commit and normalize script permissions
+        run: |
+          test "$(git rev-parse HEAD)" = "712ccf78bf76ae4c11e8180041e609c1d50320be"
+          chmod +x ./build.sh || true
+          find . -name "*.sh" -exec chmod +x {} \; || true
+
+      - name: Install build dependencies
+        run: brew install ldid dpkg make
+
+      - name: Add GNU make to PATH
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Setup Theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
+
+      - name: Cache historical iOS 16.2 SDK
+        id: sdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/theos/sdks/
+          key: iPhoneOS16.2.sdk
+
+      - name: Download iOS 16.2 SDK
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
+          cd iOS-SDKs
+          git sparse-checkout set --no-cone iPhoneOS16.2.sdk
+          git checkout
+          mkdir -p "$THEOS/sdks"
+          mv *.sdk "$THEOS/sdks"
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Verify SDK and restore original dev #19 package version
+        run: |
+          test -d "$THEOS/sdks/iPhoneOS16.2.sdk"
+          grep -q '^Version: 0.1.0$' control
+          sed -i '' 's/^Version:.*/Version: 0.1.0.19/' control
+          grep '^Version:' control
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Build the original May 28 source
+        run: |
+          export THEOS="${{ github.workspace }}/theos"
+          bash ./build.sh
+          mkdir -p release
+          DEB="$(ls -t packages/*.deb 2>/dev/null | head -n1)"
+          test -f "$DEB"
+          cp "$DEB" "release/FBTweaks_dev_0.1.0_#19.deb"
+          shasum -a 256 "release/FBTweaks_dev_0.1.0_#19.deb" > release/SHA256SUMS.txt
+          ls -lah release
+
+      - name: Upload historical #19 deb and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: FBTweaks_dev_v0.1.0_19_rebuild-26560665144
+          path: release/
+          retention-days: 90
+          if-no-files-found: error
