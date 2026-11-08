@@ -202,7 +202,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
-            @{ @"kind": @"action", @"title": @"Abrir DogFood / Gold nativo", @"subtitle": @"Abre o nag sheet Swift do Facebook. Ativar grava managedPhoneFlag e habilita Employee/Internal local via preferência nativa; Depois registra snooze.", @"action": @"dogfood_nag" },
+            @{ @"kind": @"action", @"title": @"Abrir DogFood / Gold nativo", @"subtitle": @"Abre o nag sheet Swift do Facebook. Ativar grava managedPhoneFlag e liga o toggle Employee/Internal existente; Depois registra snooze.", @"action": @"dogfood_nag" },
             @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
