@@ -171,7 +171,7 @@ BOOL FBTDogFoodPresentNativeNag(UIViewController *presenter, NSString **error) {
     Class controller = FBTDogFoodControllerClass();
     SEL selector = NSSelectorFromString(
         @"getNagSheetWithSession:title:message:switchButtonText:"
-         "snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:");
+         @"snoozeButtonText:snoozeEnabled:onSwitch:onSnooze:");
     if (!FBTDogFoodFactoryIsCompatible(controller, selector)) {
         if (error) *error = @"DogFoodController ou assinatura nativa indisponível nesta build.";
         return NO;
