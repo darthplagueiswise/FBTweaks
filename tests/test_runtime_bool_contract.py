@@ -30,9 +30,13 @@ class RuntimeBoolContractTests(unittest.TestCase):
     def test_legacy_migration_is_scoped(self):
         boot = text("src/Tweak.x")
         runtime = text("src/Runtime/FBTRuntimeBoolBrowser.m")
-        # The migration runs in %ctor, but automatic restoration now occurs
-        # post-launch in viewDidAppear; source order no longer means run order.
-        self.assertIn('FBTRuntimeBoolClearSweep(@"employee");', boot[boot.index('%ctor {'):])
+        # Both cleanup and restoration must run after dyld initialization.
+        bootstrap = boot.split("static void FBTBootstrapAfterDyld(void) {", 1)[1].split(
+            "static void FBTBootstrapMainQueue(void *context)", 1
+        )[0]
+        self.assertIn('FBTRuntimeBoolClearSweep(@"employee");', bootstrap)
+        ctor = boot.split("%ctor {", 1)[1]
+        self.assertNotIn('FBTRuntimeBoolClearSweep(@"employee");', ctor)
         self.assertIn('FBTRuntimeBoolReinstallPersistedHooks();', boot[:boot.index('%ctor {')])
         self.assertIn('[entry[@"source"] isEqualToString:source]', runtime)
         self.assertIn('if (!changed) return;', runtime)
