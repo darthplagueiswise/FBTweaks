@@ -20,6 +20,7 @@
 #import "../Features/Employee/FBTInternalImports.h"
 #import "../Runtime/FBTDogFoodNative.h"
 #import "../Runtime/FBTNativeInternalSurfaces.h"
+#import "../Runtime/FBTNativeInternalMenus.h"
 #import "../Features/ReactNative/FBTReactNativeInternal.h"
 #include <stdlib.h>
 #include <errno.h>
@@ -279,15 +280,22 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings RN", @"subtitle": @"Usa a rota React Native fb://rninternalsettings existente na IPA 567.", @"action": @"rn_internal" },
             @{ @"kind": @"action", @"title": @"Mostrar React Native Dev Menu", @"subtitle": @"Procura o RCTDevMenu da bridge ativa e chama o método nativo -show; não cria bridge nova.", @"action": @"rn_dev" },
-            @{ @"kind": @"action", @"title": @"Dogfooding Assistant — buscar no nativo", @"subtitle": @"Abre Internal Settings e procura Dogfooding no catálogo nativo; disponível só se o provider existir.", @"action": @"dogfood_assistant" },
-            @{ @"kind": @"action", @"title": @"FFDB — buscar plugin nativo", @"subtitle": @"Usa o buscador do menu nativo; depende do plugin FFDB registrado.", @"action": @"ffdb_internal" },
-            @{ @"kind": @"action", @"title": @"MobileConfig Debug — buscar nativo", @"subtitle": @"Usa busca nativa preservando os context managers sessioned e sessionless.", @"action": @"mc_debug_native" },
-            @{ @"kind": @"action", @"title": @"Employee Settings — buscar nativo", @"subtitle": @"Procura Employee no Internal Settings original, conforme plugins disponíveis.", @"action": @"employee_internal" },
+            @{ @"kind": @"action", @"title": @"Dogfooding Assistant / RageShake nativo", @"subtitle": @"Usa FBBugReportInitialCoordinator.openBugReportForm; depende do coordinator real.", @"action": @"dogfood_assistant" },
+            @{ @"kind": @"action", @"title": @"FFDB — controlador nativo", @"subtitle": @"Abre FFDBInternalSettingsViewController diretamente de FBRarelyUsedFramework.", @"action": @"ffdb_internal" },
+            @{ @"kind": @"action", @"title": @"MobileConfig Debug — plugin nativo", @"subtitle": @"Seleciona a row MobileConfig do provider nativo; não usa busca nem fabrica os seis managers.", @"action": @"mc_debug_native" },
+            @{ @"kind": @"action", @"title": @"Employee Settings — opção nativa", @"subtitle": @"Executa FBEmployeeSettingsUserOption somente com sessão, tabID e coordinator reais.", @"action": @"employee_internal" },
             @{ @"kind": @"action", @"title": @"Aviso DogFood / Gold — painel nativo", @"subtitle": @"Abre o painel Swift com callback LOCAL. Não equivale à adesão Gold/MDM.", @"action": @"dogfood_nag" },
             @{ @"kind": @"action", @"title": @"DogFood / Gold — estado local", @"subtitle": @"Mostra managedPhoneFlag e o estado Employee; não afirma elegibilidade MDM ou Gold remoto.", @"action": @"gold_status" },
             @{ @"kind": @"action", @"title": @"Gold — página oficial de builds", @"subtitle": @"Abre fb.me/builds, endereço encontrado no fluxo de pré-produção da IPA 567.", @"action": @"gold_builds" },
             @{ @"kind": @"action", @"title": @"Diagnosticar superfícies internas", @"subtitle": @"Lista classes nativas RN, FFDB, Dogfooding Assistant, Gold e MobileConfig realmente carregadas.", @"action": @"native_surfaces_diag" },
             @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
+            @{ @"kind": @"action", @"title": @"Sobre — Internal Settings nativo", @"subtitle": @"FBAboutInternalSettingsViewController.initWithSession:", @"action": @"menu_about" },
+            @{ @"kind": @"action", @"title": @"React OTA — Internal nativo", @"subtitle": @"FBInternalSettingsReactOTAViewController.initWithSession:", @"action": @"menu_react_ota" },
+            @{ @"kind": @"action", @"title": @"Download on Demand — nativo", @"subtitle": @"FBInternalSettingsDownloadOnDemandViewController.initWithSession:", @"action": @"menu_on_demand" },
+            @{ @"kind": @"action", @"title": @"Push sem login — Internal nativo", @"subtitle": @"FBLoggedOutPushInternalSettingsViewController.initWithSession:", @"action": @"menu_loggedout_push" },
+            @{ @"kind": @"action", @"title": @"Reliable Media — Internal nativo", @"subtitle": @"FBReliableMediaInternalSettingsViewController.initWithSession:", @"action": @"menu_reliable_media" },
+            @{ @"kind": @"action", @"title": @"Clash Management — Internal nativo", @"subtitle": @"FBClashManagementInternalSettingsTableViewController.initWithSession:", @"action": @"menu_clash" },
+            @{ @"kind": @"action", @"title": @"Lifecycle — Internal nativo", @"subtitle": @"FBLifecycleInternalSettingsViewController (sem init especializado no metadata).", @"action": @"menu_lifecycle" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
@@ -313,6 +321,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             keys(@[FBTKeyMasterEnabled, FBTKeyOpenThreeFingerDoubleTap]),
             @[
                 @{@"kind": @"submenu", @"title": @"Employee e Internal", @"subtitle": @"Identidade local, Test User e menus internos", @"group": @"employee", @"symbol": @"person.crop.circle.badge.checkmark"},
+                @{@"kind": @"submenu", @"title": @"Controladores internos nativos", @"subtitle": @"FFDB, React OTA, Download, About, Push, Media, Clash e Lifecycle", @"group": @"native_controllers", @"symbol": @"square.stack.3d.up.fill"},
                 @{@"kind": @"submenu", @"title": @"Dogfood e Gold", @"subtitle": @"Nag nativo, managedPhoneFlag, builds e Assistant", @"group": @"dogfood", @"symbol": @"pawprint"},
                 @{@"kind": @"submenu", @"title": @"React Native", @"subtitle": @"Internal Settings RN e Developer Menu", @"group": @"react", @"symbol": @"square.stack.3d.up"},
                 @{@"kind": @"submenu", @"title": @"MobileConfig e QE", @"subtitle": @"Sessioned, sessionless, overrides e nomes", @"group": @"mobileconfig", @"symbol": @"slider.horizontal.3"},
@@ -333,6 +342,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
                          FBTKeyMobileLabEnabled, FBTKeyInternalCImportsEnabled,
                          FBTKeyEasyGatingInternalEnabled, FBTKeyInternalDebugSweepEnabled]);
         native = actions(@[@"native", @"employee_internal", @"whitehat", @"ffdb_internal"]);
+        tools = actions(@[@"native_surfaces_diag"]);
+    } else if ([self.menuGroup isEqualToString:@"native_controllers"]) {
+        native = actions(@[@"ffdb_internal", @"menu_about", @"menu_react_ota",
+                           @"menu_on_demand", @"menu_loggedout_push",
+                           @"menu_reliable_media", @"menu_clash", @"menu_lifecycle"]);
         tools = actions(@[@"native_surfaces_diag"]);
     } else if ([self.menuGroup isEqualToString:@"dogfood"]) {
         toggles = keys(@[@"FBDogFood-managedPhoneFlag", FBTKeyKnownDogfoodEnabled,
@@ -666,25 +680,45 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
                                    title:@"React Native Dev Menu"];
                 }
             }];
-        } else if ([action isEqualToString:@"dogfood_assistant"] ||
-                   [action isEqualToString:@"ffdb_internal"] ||
-                   [action isEqualToString:@"mc_debug_native"] ||
-                   [action isEqualToString:@"employee_internal"]) {
-            // Open the real Internal Settings controller with its original
-            // session and ask its own search provider for the requested plugin.
-            // No guessed initWithSession: or unverified plugin constructor.
-            NSDictionary *nativeTerms = @{
-                @"dogfood_assistant": @"Dogfooding",
-                @"ffdb_internal": @"FFDB",
-                @"mc_debug_native": @"MobileConfig",
-                @"employee_internal": @"Employee"
-            };
-            NSString *query = nativeTerms[action];
+        } else if ([action isEqualToString:@"mc_debug_native"]) {
             [self dismissViewControllerAnimated:YES completion:^{
                 [[NSNotificationCenter defaultCenter]
                     postNotificationName:@"FBTRequestOpenNativeInternalSettings"
                                 object:nil
-                              userInfo:@{@"pluginSearch": query ?: @""}];
+                              userInfo:@{@"nativePlugin": @"MobileConfig"}];
+            }];
+        } else if ([action isEqualToString:@"dogfood_assistant"]) {
+            [self dismissViewControllerAnimated:YES completion:^{
+                NSString *reason = nil;
+                if (!FBTNativeOpenDogfoodingAssistant(&reason))
+                    [FBTUtils showMessage:reason ?: @"Coordinator RageShake indisponível."
+                                   title:@"Dogfooding Assistant nativo"];
+            }];
+        } else if ([action isEqualToString:@"employee_internal"]) {
+            [self dismissViewControllerAnimated:YES completion:^{
+                NSString *reason = nil;
+                if (!FBTNativeOpenEmployeeUserOption(&reason))
+                    [FBTUtils showMessage:reason ?: @"Employee Settings indisponível."
+                                   title:@"Employee Settings nativo"];
+            }];
+        } else if ([action isEqualToString:@"ffdb_internal"] ||
+                   [action hasPrefix:@"menu_"]) {
+            NSDictionary<NSString *, NSString *> *menuMap = @{
+                @"ffdb_internal": @"ffdb",
+                @"menu_about": @"about",
+                @"menu_react_ota": @"react_ota",
+                @"menu_on_demand": @"on_demand",
+                @"menu_loggedout_push": @"loggedout_push",
+                @"menu_reliable_media": @"reliable_media",
+                @"menu_clash": @"clash",
+                @"menu_lifecycle": @"lifecycle"
+            };
+            NSString *menuID = menuMap[action];
+            [self dismissViewControllerAnimated:YES completion:^{
+                NSString *reason = nil;
+                if (!FBTNativeOpenController(menuID, &reason))
+                    [FBTUtils showMessage:reason ?: @"Controlador nativo indisponível."
+                                   title:item[@"title"] ?: @"Internal Settings"];
             }];
         } else if ([action isEqualToString:@"gold_status"]) {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
