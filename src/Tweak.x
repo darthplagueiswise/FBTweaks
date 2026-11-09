@@ -115,10 +115,16 @@ static void FBTInstallEnabledKnownFamilies(void) {
 %end
 %end
 
-%ctor {
+static void FBTBootstrapAfterDyld(void) {
+    // Run after the dyld initializer stack has unwound, on the main queue.
+    // This is not called from a +load, a constructor or a helper thread.
+    if (![NSThread isMainThread]) return;
+    static BOOL didBootstrap = NO;
+    if (didBootstrap) return;
+    didBootstrap = YES;
     @autoreleasepool {
         [FBTDefaults registerDefaultsOnce];
-        FBTConfigureMobileLabEnvironment(); // before FBTweak hooks
+        FBTConfigureMobileLabEnvironment(); // early after dyld; before installing FBTweak hooks
         // Ring buffer initialized on demand after the host UI appears.
         // Migrate away from the duplicate employee sweep before loading hooks.
         // Only sweep:employee entries are removed; manual overrides remain.
@@ -176,4 +182,19 @@ static void FBTInstallEnabledKnownFamilies(void) {
         FBTLog(@"ctor done (master=%d)",
                [[NSUserDefaults standardUserDefaults] boolForKey:FBTKeyMasterEnabled]);
     }
+}
+
+
+// dyld-safe bootstrap: do not message ObjC classes, instantiate Foundation,
+// install Logos/fishhook hooks, read NSUserDefaults, or scan runtime classes
+// from %ctor. All of those operations can reenter libobjc/dyld before the
+// process initialization barrier, resulting in SIGABRT during cold launch.
+//
+// Scheduling a block on the main queue does not execute it inside the dyld
+// initializer; execution begins after dyld has handed control to the process.
+// Keep the constructor deliberately free of Objective-C activity.
+%ctor {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        FBTBootstrapAfterDyld();
+    });
 }
