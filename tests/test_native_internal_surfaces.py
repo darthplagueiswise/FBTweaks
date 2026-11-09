@@ -41,6 +41,24 @@ class NativeInternalSurfacesContracts(unittest.TestCase):
         self.assertNotIn('Authorization:', text)
         self.assertNotIn('access_token', text)
 
+    def test_report_probes_native_prerequisites_without_instantiation(self):
+        report = (ROOT / "src/Runtime/FBTNativeInternalSurfaces.m").read_text(
+            encoding="utf-8"
+        )
+        for name in (
+            "FBUserSession active:",
+            "FFDB Web init methods:",
+            "MobileConfig Debug init methods:",
+            "FBBugReportInitialCoordinator",
+            "FBNavigationCoordinatorImpl",
+            "Employee option init:",
+            "RCTDevMenu show:",
+        ):
+            self.assertIn(name, report)
+        self.assertIn("class_copyMethodList", report)
+        self.assertNotIn("class_createInstance", report)
+        self.assertNotIn("FBBugReportInitialCoordinator alloc", report)
+
     def test_unverified_plugins_are_not_instantiated_without_native_providers(self):
         text = UI.read_text(encoding="utf-8")
         for name in (
