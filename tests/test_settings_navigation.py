@@ -13,9 +13,9 @@ NATIVE = (ROOT / "src/Features/Dogfood/FBTDogfood.m").read_text(encoding="utf-8"
 
 
 class SettingsNavigationContracts(unittest.TestCase):
-    def test_root_is_compact_and_six_submenus_have_click_routes(self):
-        for group in ("employee", "dogfood", "react", "mobileconfig",
-                      "diagnostics", "appearance"):
+    def test_root_is_compact_and_all_submenus_have_click_routes(self):
+        for group in ("employee", "native_controllers", "dogfood", "react",
+                      "mobileconfig", "diagnostics", "appearance"):
             self.assertIn(f'@"group": @"{group}"', UI)
             self.assertIn(f'[self.menuGroup isEqualToString:@"{group}"]', UI)
         self.assertIn('[kind isEqualToString:@"submenu"]', UI)
@@ -42,9 +42,16 @@ class SettingsNavigationContracts(unittest.TestCase):
         for target in ("dogfood_assistant", "ffdb_internal", "mc_debug_native",
                        "employee_internal"):
             self.assertIn(f'[action isEqualToString:@"{target}"]', UI)
-        self.assertIn('@"pluginSearch": query ?: @""', UI)
-        self.assertIn('UISearchController *search = vc.navigationItem.searchController', NATIVE)
-        self.assertIn('updateSearchResultsForSearchController', NATIVE)
+        native_menus = (ROOT / "src/Runtime/FBTNativeInternalMenus.m").read_text(encoding="utf-8")
+        self.assertNotIn('@"pluginSearch"', UI)
+        self.assertNotIn('UISearchController *search = vc.navigationItem.searchController', NATIVE)
+        self.assertIn('FBTNativeOpenController(menuID, &reason)', UI)
+        self.assertIn('FBTNativeOpenDogfoodingAssistant(&reason)', UI)
+        self.assertIn('FBTNativeOpenEmployeeUserOption(&reason)', UI)
+        self.assertIn('@"nativePlugin": @"MobileConfig"', UI)
+        self.assertIn('FBTSelectNativeInternalPlugin', NATIVE)
+        self.assertIn('tableView:didSelectRowAtIndexPath:', NATIVE)
+        self.assertIn('FFDBInternalSettingsViewController', native_menus)
         self.assertNotIn('[FFDBInternalSettingsViewController alloc]', UI)
 
 
