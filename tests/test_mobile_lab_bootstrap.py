@@ -13,9 +13,16 @@ class MobileLabBootstrapTests(unittest.TestCase):
         self.assertIn("FBTKeyMobileLabEnabled:                 @(YES)", prefs)
     def test_startup_before_hooks(self):
         src = load("src/Tweak.x")
+        # The preferences-based LAB_IS_ACTIVE setting cannot safely run in
+        # dyld's initializer. Verify its order within the main-queue bootstrap.
+        bootstrap = src.split("static void FBTBootstrapAfterDyld(void) {", 1)[1].split(
+            "static void FBTBootstrapMainQueue(void *context)", 1
+        )[0]
+        self.assertLess(bootstrap.index("[FBTDefaults registerDefaultsOnce];"), bootstrap.index("FBTConfigureMobileLabEnvironment();"))
+        self.assertLess(bootstrap.index("FBTConfigureMobileLabEnvironment();"), bootstrap.index("%init(FBTHost);"))
         ctor = src.split("%ctor {", 1)[1]
-        self.assertLess(ctor.index("[FBTDefaults registerDefaultsOnce];"), ctor.index("FBTConfigureMobileLabEnvironment();"))
-        self.assertLess(ctor.index("FBTConfigureMobileLabEnvironment();"), ctor.index("%init(FBTHost);"))
+        self.assertIn("dispatch_async_f(dispatch_get_main_queue(), NULL, FBTBootstrapMainQueue)", ctor)
+        self.assertNotIn("FBTConfigureMobileLabEnvironment()", ctor)
         fn = src.split("static void FBTConfigureMobileLabEnvironment(void) {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("FBTKeyMobileLabEnabled", fn)
         self.assertIn('setenv("LAB_IS_ACTIVE", "1", 0)', fn)
