@@ -193,8 +193,12 @@ static void FBTBootstrapAfterDyld(void) {
 // Scheduling a block on the main queue does not execute it inside the dyld
 // initializer; execution begins after dyld has handed control to the process.
 // Keep the constructor deliberately free of Objective-C activity.
+static void FBTBootstrapMainQueue(void *context) {
+    (void)context;
+    FBTBootstrapAfterDyld();
+}
+
 %ctor {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        FBTBootstrapAfterDyld();
-    });
+    // C-only scheduling: no block allocation/copy or ObjC message during dyld.
+    dispatch_async_f(dispatch_get_main_queue(), NULL, FBTBootstrapMainQueue);
 }
