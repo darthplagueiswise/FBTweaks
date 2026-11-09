@@ -204,7 +204,19 @@ BOOL FBTNativeOpenController(NSString *identifier, NSString **failure) {
     BOOL needsSession = [entry[1] isEqualToString:@"initWithSession:"];
     BOOL needsStyle = [entry[1] isEqualToString:@"initWithStyle:"];
     SEL initializer = NSSelectorFromString(entry[1]);
-    if (!FBTNativeCheckInitializer(cls, initializer, (needsSession || needsStyle) ? 3 : 2, needsSession)) {
+    if (needsStyle && ![cls isSubclassOfClass:[UITableViewController class]]) {
+        if (failure) *failure = @"initWithStyle: é exclusivo de UITableViewController nativo.";
+        return NO;
+    }
+    BOOL abiValid = FBTNativeCheckInitializer(cls, initializer,
+                                                (needsSession || needsStyle) ? 3 : 2, needsSession);
+    if (abiValid && needsStyle) {
+        Method method = class_getInstanceMethod(cls, initializer);
+        char *style = method_copyArgumentType(method, 2);
+        abiValid = style && (style[0] == 'q' || style[0] == 'i');
+        if (style) free(style);
+    }
+    if (!abiValid) {
         if (failure) *failure = [NSString stringWithFormat:
             @"ABI do inicializador %@.%@ divergente da IPA 567.", entry[0],entry[1]];
         return NO;
@@ -275,7 +287,18 @@ BOOL FBTNativeOpenEmployeeUserOption(NSString **failure) {
     if (!FBTNativeRequireClass(@"FBEmployeeSettingsUserOption", &cls, failure)) return NO;
     SEL initializer = NSSelectorFromString(@"initWithSession:tabID:navigationCoordinator:");
     Method method = class_getInstanceMethod(cls,initializer);
-    if (!method || method_getNumberOfArguments(method) != 5) {
+    BOOL employeeABI = method && method_getNumberOfArguments(method) == 5;
+    if (employeeABI) {
+        char *returnType = method_copyReturnType(method);
+        employeeABI = returnType && returnType[0] == '@';
+        if (returnType) free(returnType);
+        for (unsigned index = 2; index <= 4 && employeeABI; ++index) {
+            char *argument = method_copyArgumentType(method, index);
+            employeeABI = argument && argument[0] == '@';
+            if (argument) free(argument);
+        }
+    }
+    if (!employeeABI) {
         if (failure) *failure = @"Assinatura de Employee Settings diferente da IPA 567.";
         return NO;
     }
