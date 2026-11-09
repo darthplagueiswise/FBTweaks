@@ -296,6 +296,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"action", @"title": @"Reliable Media — Internal nativo", @"subtitle": @"FBReliableMediaInternalSettingsViewController.initWithSession:", @"action": @"menu_reliable_media" },
             @{ @"kind": @"action", @"title": @"Clash Management — Internal nativo", @"subtitle": @"FBClashManagementInternalSettingsTableViewController.initWithSession:", @"action": @"menu_clash" },
             @{ @"kind": @"action", @"title": @"Lifecycle — Internal nativo", @"subtitle": @"FBLifecycleInternalSettingsViewController (sem init especializado no metadata).", @"action": @"menu_lifecycle" },
+            @{ @"kind": @"action", @"title": @"Autofill Tokenization — interno", @"subtitle": @"Abre controlador Swift nativo de AutofillTokenizationInternalSettingsPlugin.", @"action": @"menu_autofill_tokenization" },
+            @{ @"kind": @"action", @"title": @"Messaging Thread View — interno", @"subtitle": @"Abre controlador Swift nativo de FBCameraFramework.", @"action": @"menu_messaging_thread" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
@@ -321,7 +323,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             keys(@[FBTKeyMasterEnabled, FBTKeyOpenThreeFingerDoubleTap]),
             @[
                 @{@"kind": @"submenu", @"title": @"Employee e Internal", @"subtitle": @"Identidade local, Test User e menus internos", @"group": @"employee", @"symbol": @"person.crop.circle.badge.checkmark"},
-                @{@"kind": @"submenu", @"title": @"Controladores internos nativos", @"subtitle": @"FFDB, React OTA, Download, About, Push, Media, Clash e Lifecycle", @"group": @"native_controllers", @"symbol": @"square.stack.3d.up.fill"},
+                @{@"kind": @"submenu", @"title": @"Controladores internos nativos", @"subtitle": @"FFDB, React OTA, Download, About, Push, Media, Clash e outros", @"group": @"native_controllers", @"symbol": @"square.stack.3d.up.fill"},
                 @{@"kind": @"submenu", @"title": @"Dogfood e Gold", @"subtitle": @"Nag nativo, managedPhoneFlag, builds e Assistant", @"group": @"dogfood", @"symbol": @"pawprint"},
                 @{@"kind": @"submenu", @"title": @"React Native", @"subtitle": @"Internal Settings RN e Developer Menu", @"group": @"react", @"symbol": @"square.stack.3d.up"},
                 @{@"kind": @"submenu", @"title": @"MobileConfig e QE", @"subtitle": @"Sessioned, sessionless, overrides e nomes", @"group": @"mobileconfig", @"symbol": @"slider.horizontal.3"},
@@ -346,7 +348,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     } else if ([self.menuGroup isEqualToString:@"native_controllers"]) {
         native = actions(@[@"ffdb_internal", @"menu_about", @"menu_react_ota",
                            @"menu_on_demand", @"menu_loggedout_push",
-                           @"menu_reliable_media", @"menu_clash", @"menu_lifecycle"]);
+                           @"menu_reliable_media", @"menu_clash", @"menu_lifecycle",
+                           @"menu_autofill_tokenization", @"menu_messaging_thread"]);
         tools = actions(@[@"native_surfaces_diag"]);
     } else if ([self.menuGroup isEqualToString:@"dogfood"]) {
         toggles = keys(@[@"FBDogFood-managedPhoneFlag", FBTKeyKnownDogfoodEnabled,
@@ -711,7 +714,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
                 @"menu_loggedout_push": @"loggedout_push",
                 @"menu_reliable_media": @"reliable_media",
                 @"menu_clash": @"clash",
-                @"menu_lifecycle": @"lifecycle"
+                @"menu_lifecycle": @"lifecycle",
+                @"menu_autofill_tokenization": @"autofill_tokenization",
+                @"menu_messaging_thread": @"messaging_thread"
             };
             NSString *menuID = menuMap[action];
             [self dismissViewControllerAnimated:YES completion:^{
