@@ -44,6 +44,9 @@ class DyldBootstrapContract(unittest.TestCase):
         self.assertIn("static fbt_mc_probe::OneShot &sRequestExperiment(void)", source)
         self.assertIn("static fbt_mc_probe::OneShot instance;", source)
         self.assertNotIn("static fbt_mc_probe::OneShot sRequestExperiment;", source)
+        self.assertIn("static std::mutex &sAuthReadMutex(void)", source)
+        self.assertIn("static std::mutex mutex;", source)
+        self.assertNotIn("static std::mutex sAuthReadMutex;", source)
 
     def test_post_dyld_bootstrap_is_main_only(self):
         self.assertIn("if (![NSThread isMainThread]) return;", SOURCE)
