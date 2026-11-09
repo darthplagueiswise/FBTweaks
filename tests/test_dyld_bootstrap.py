@@ -38,6 +38,13 @@ class DyldBootstrapContract(unittest.TestCase):
         ):
             self.assertIn(expected, bootstrap)
 
+    def test_qe_oneshot_mutex_is_lazy_not_a_global_initializer(self):
+        source = (Path(__file__).resolve().parents[1] /
+                  "src/Runtime/FBTMobileConfigFetcherCapture.mm").read_text(encoding="utf-8")
+        self.assertIn("static fbt_mc_probe::OneShot &sRequestExperiment(void)", source)
+        self.assertIn("static fbt_mc_probe::OneShot instance;", source)
+        self.assertNotIn("static fbt_mc_probe::OneShot sRequestExperiment;", source)
+
     def test_post_dyld_bootstrap_is_main_only(self):
         self.assertIn("if (![NSThread isMainThread]) return;", SOURCE)
         self.assertIn("static BOOL didBootstrap = NO;", SOURCE)
