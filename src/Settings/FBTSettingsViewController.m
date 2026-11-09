@@ -19,6 +19,8 @@
 #import "../Runtime/FBTMobileConfigDebugUIHooks.h"
 #import "../Features/Employee/FBTInternalImports.h"
 #import "../Runtime/FBTDogFoodNative.h"
+#import "../Runtime/FBTNativeInternalSurfaces.h"
+#import "../Features/ReactNative/FBTReactNativeInternal.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <math.h>
@@ -202,7 +204,16 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
+            @{ @"kind": @"action", @"title": @"Abrir Internal Settings RN", @"subtitle": @"Usa a rota React Native fb://rninternalsettings existente na IPA 567.", @"action": @"rn_internal" },
+            @{ @"kind": @"action", @"title": @"Mostrar React Native Dev Menu", @"subtitle": @"Procura o RCTDevMenu da bridge ativa e chama o método nativo -show; não cria bridge nova.", @"action": @"rn_dev" },
+            @{ @"kind": @"action", @"title": @"Dogfooding Assistant / RageShake", @"subtitle": @"Diagnóstico e acesso pelo fluxo nativo de bugreport; exige sessão/provedor ativo.", @"action": @"dogfood_assistant" },
+            @{ @"kind": @"action", @"title": @"FFDB Internal Settings", @"subtitle": @"Acessa pela árvore de plugins do Internal Settings; evita construtor privado não validado.", @"action": @"ffdb_internal" },
+            @{ @"kind": @"action", @"title": @"MobileConfig Debug nativo", @"subtitle": @"Acessa o plugin do Internal Settings; usa seus managers sessioned e sessionless nativos.", @"action": @"mc_debug_native" },
+            @{ @"kind": @"action", @"title": @"Employee Settings nativo", @"subtitle": @"Abre o menu raiz para localizar FBEmployeeSettingsUserOption, se registrado.", @"action": @"employee_internal" },
             @{ @"kind": @"action", @"title": @"Abrir DogFood / Gold nativo", @"subtitle": @"Abre o nag sheet Swift do Facebook. Ativar grava managedPhoneFlag e liga o toggle Employee/Internal existente; Depois registra snooze.", @"action": @"dogfood_nag" },
+            @{ @"kind": @"action", @"title": @"DogFood / Gold — estado local", @"subtitle": @"Mostra managedPhoneFlag e o estado Employee; não afirma elegibilidade MDM ou Gold remoto.", @"action": @"gold_status" },
+            @{ @"kind": @"action", @"title": @"Gold — página oficial de builds", @"subtitle": @"Abre fb.me/builds, endereço encontrado no fluxo de pré-produção da IPA 567.", @"action": @"gold_builds" },
+            @{ @"kind": @"action", @"title": @"Diagnosticar superfícies internas", @"subtitle": @"Lista classes nativas RN, FFDB, Dogfooding Assistant, Gold e MobileConfig realmente carregadas.", @"action": @"native_surfaces_diag" },
             @{ @"kind": @"action", @"title": @"Abrir Whitehat nativo", @"subtitle": @"Abre a tela de diagnóstico de rede do aplicativo.", @"action": @"whitehat" },
             @{ @"kind": @"action", @"title": @"Criar mc_overrides.json nativo", @"subtitle": @"Usa o path nativo capturado por getOverridesTablePath; abre o menu nativo antes se aparecer unknown.", @"action": @"ensure_mc_file" },
             @{ @"kind": @"action", @"title": @"A/B QE-info: isolar refresh/hash", @"subtitle": @"Desliga uma flag suspeita por teste, registra o estado do arquivo e permite restaurar o estado anterior.", @"action": @"qe_ab" },
@@ -455,6 +466,78 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         NSString *action = item[@"action"];
         if ([action isEqualToString:@"native"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
+        } else if ([action isEqualToString:@"rn_internal"]) {
+            [self dismissViewControllerAnimated:YES completion:^{
+                FBTOpenReactNativeInternalSettings();
+            }];
+        } else if ([action isEqualToString:@"rn_dev"]) {
+            [self dismissViewControllerAnimated:YES completion:^{
+                NSString *failure = nil;
+                if (!FBTNativeShowReactDevMenu([FBTUtils topMostController], &failure)) {
+                    [FBTUtils showMessage:failure ?: @"RCTDevMenu indisponível na sessão atual."
+                                   title:@"React Native Dev Menu"];
+                }
+            }];
+        } else if ([action isEqualToString:@"dogfood_assistant"] ||
+                   [action isEqualToString:@"ffdb_internal"] ||
+                   [action isEqualToString:@"mc_debug_native"] ||
+                   [action isEqualToString:@"employee_internal"]) {
+            NSDictionary *descriptions = @{
+                @"dogfood_assistant": @"Dogfooding Assistant faz parte do Bug Reporter/RageShake; o controlador está na IPA, mas a entrada direta depende do coordinator e da sessão. Não é seguro criar uma instância vazia.",
+                @"ffdb_internal": @"FFDB é um plugin de Internal Settings. A classe existe na IPA 567; sem o provider e initializer corretos não é seguro apresentá-la isoladamente.",
+                @"mc_debug_native": @"O MobileConfig Debug utiliza context managers sessioned/sessionless obtidos pelo menu nativo. Abrir a raiz preserva esses managers.",
+                @"employee_internal": @"FBEmployeeSettingsUserOption é uma opção do menu interno, não um controller raiz independente confirmado."
+            };
+            NSString *description = descriptions[action] ?: @"Requer um provider nativo.";
+            UIAlertController *info = [UIAlertController
+                alertControllerWithTitle:item[@"title"]
+                message:[description stringByAppendingString:@"\n\nDeseja abrir Internal Settings?"]
+                preferredStyle:UIAlertControllerStyleAlert];
+            [info addAction:[UIAlertAction
+                actionWithTitle:@"Abrir Internal Settings"
+                style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *choice) {
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
+                }]];
+            [info addAction:[UIAlertAction
+                actionWithTitle:@"Diagnóstico"
+                style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *choice) {
+                    [self showInfoTitle:@"Superfícies internas"
+                               message:FBTNativeInternalSurfacesReport()];
+                }]];
+            [info addAction:[UIAlertAction actionWithTitle:@"Cancelar"
+                                                    style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:info animated:YES completion:nil];
+        } else if ([action isEqualToString:@"gold_status"]) {
+            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+            NSString *status = [NSString stringWithFormat:
+                @"managedPhoneFlag: %@\nEmployee / Internal: %@\nSnooze switch: %@\nSnooze dismiss: %@\n\nOs valores são locais. Não comprovam MDM, Gold instalado ou autorização remota.",
+                [defaults boolForKey:@"FBDogFood-managedPhoneFlag"] ? @"YES" : @"NO",
+                [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF",
+                [defaults objectForKey:@"FBDogFood-lastSnoozedOnSwitchDate"] ?: @"não definido",
+                [defaults objectForKey:@"FBDogFood-lastSnoozedOnDismissDate"] ?: @"não definido"];
+            [self showInfoTitle:@"DogFood / Gold" message:status];
+        } else if ([action isEqualToString:@"gold_builds"]) {
+            NSURL *url = [NSURL URLWithString:@"https://fb.me/builds"];
+            [[UIApplication sharedApplication] openURL:url options:@{}
+                completionHandler:^(BOOL success) {
+                    if (!success) [FBTUtils showMessage:@"Não foi possível abrir a página de builds."
+                                                  title:@"Gold / builds"];
+                }];
+        } else if ([action isEqualToString:@"native_surfaces_diag"]) {
+            NSString *report = FBTNativeInternalSurfacesReport();
+            UIAlertController *info = [UIAlertController
+                alertControllerWithTitle:@"Diagnóstico de menus nativos"
+                message:report preferredStyle:UIAlertControllerStyleAlert];
+            [info addAction:[UIAlertAction actionWithTitle:@"Copiar"
+                   style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *choice) {
+                       UIPasteboard.generalPasteboard.string = report;
+                   }]];
+            [info addAction:[UIAlertAction actionWithTitle:@"Fechar"
+                   style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:info animated:YES completion:nil];
         } else if ([action isEqualToString:@"dogfood_nag"]) {
             NSString *reason = nil;
             if (!FBTDogFoodPresentNativeNag(self, &reason)) {
