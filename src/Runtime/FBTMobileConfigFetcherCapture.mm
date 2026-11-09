@@ -60,7 +60,10 @@ using FBTMCStartupBoolFn = bool (*)(id, SEL, FBTMCBoolParam, bool);
 static FBTMCStartupBoolFn sOriginalStartupBool;
 static BOOL sAuthReadHookInstalled;
 static NSString *sAuthReadHookFailure;
-static std::mutex sAuthReadMutex;
+static std::mutex &sAuthReadMutex(void) {
+    static std::mutex mutex;
+    return mutex;
+}
 struct FBTMCAuthRead { unsigned long long count = 0; bool value = false; };
 static FBTMCAuthRead sSessionAuthRead, sLoggedOutAuthRead;
 
@@ -74,7 +77,7 @@ static uintptr_t FBTMCSharedRVA(const void *address) {
 
 static void FBTMCObserveAuthRead(uint64_t specifier, uintptr_t callerRVA, bool result) {
     if (specifier != 0x00810cc7000042acULL) return;
-    std::lock_guard<std::mutex> guard(sAuthReadMutex);
+    std::lock_guard<std::mutex> guard(sAuthReadMutex());
     // Exact return sites: session constructor and logged-out constructor.
     // A UI inspection of the same flag is NOT evidence of consumption here.
     FBTMCAuthRead *read = callerRVA == 0x53cc5c ? &sSessionAuthRead :
@@ -95,7 +98,7 @@ static bool FBTMCStartupBool(id object, SEL command, FBTMCBoolParam param, bool 
 }
 
 static NSDictionary *FBTMCAuthReadSnapshot(void) {
-    std::lock_guard<std::mutex> guard(sAuthReadMutex);
+    std::lock_guard<std::mutex> guard(sAuthReadMutex());
     NSMutableDictionary *state = [@{@"hook_installed": @(sAuthReadHookInstalled),
         @"scope": @"process_constructor_reads_not_request_identity",
         @"session_read_count": @(sSessionAuthRead.count),
