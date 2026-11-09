@@ -33,7 +33,9 @@ class NativeInternalSurfacesContracts(unittest.TestCase):
     def test_gold_callbacks_do_not_force_obsolete_slots_or_modify_tokens(self):
         text = GOLD.read_text(encoding="utf-8")
         self.assertIn('getNagSheetWithSession:title:message:switchButtonText:', text)
-        self.assertIn('FBTKeyEmployeeEnabled', text)
+        # Gold/managed-phone is intentionally independent of Employee.
+        self.assertNotIn('FBTKeyEmployeeEnabled', text)
+        self.assertIn('FBTDogFoodSetManagedPhoneFlag(YES)', text)
         self.assertIn('FBDogFood-managedPhoneFlag', text)
         self.assertNotIn('FBGRDogFoodApplyMCOverrides', text)
         self.assertNotIn('Authorization:', text)
