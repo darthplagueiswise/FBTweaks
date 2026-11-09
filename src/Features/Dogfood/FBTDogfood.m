@@ -54,7 +54,7 @@ void FBTOpenNativeWhitehatSettings(void) {
 typedef UIViewController *(*FBTInternalSettingsFn)(id session);
 extern void FBTInstallKnownGateRuntimeHooks(void);
 
-static void fbt_openNativeInternalSettings(void) {
+static void fbt_openNativeInternalSettings(NSString *targetSearch) {
     // Register the late native-UI bootstrap before creating the Internal
     // Settings surface. Context/readers are warmed when the actual
     // FBMobileConfigDebugViewController enters, avoiding the old one-shot scan
@@ -112,7 +112,26 @@ static void fbt_openNativeInternalSettings(void) {
             vc.navigationItem.rightBarButtonItem = close;
         }
 
-        [presenter presentViewController:nav animated:YES completion:nil];
+        [presenter presentViewController:nav animated:YES completion:^{
+            if (!targetSearch.length) return;
+            // Search through the app's real provider/UITableView. We do not
+            // manufacture plugin VCs or guess initializer arguments.
+            UISearchController *search = vc.navigationItem.searchController;
+            if (!search) {
+                FBTLog(@"Internal Settings native search unavailable for %@", targetSearch);
+                [FBTUtils showMessage:
+                    [NSString stringWithFormat:@"A busca não está disponível nesta instância do Internal Settings. Procure o plugin %@ manualmente.", targetSearch]
+                    title:@"Plugin nativo"];
+                return;
+            }
+            search.active = YES;
+            search.searchBar.text = targetSearch;
+            id<UISearchResultsUpdating> updater = search.searchResultsUpdater;
+            if (updater && [updater respondsToSelector:@selector(updateSearchResultsForSearchController:)]) {
+                [updater updateSearchResultsForSearchController:search];
+            }
+            FBTLog(@"Internal Settings native search applied: %@", targetSearch);
+        }];
     });
 }
 
@@ -130,8 +149,10 @@ void FBTInstallDogfoodObserver(void) {
         addObserverForName:FBTNotifOpenNativeInternalSettings
                     object:nil
                      queue:[NSOperationQueue mainQueue]
-                usingBlock:^(__unused NSNotification *note) {
-                    fbt_openNativeInternalSettings();
+                usingBlock:^(NSNotification *note) {
+                    NSString *target = [note.userInfo[@"pluginSearch"] isKindOfClass:[NSString class]]
+                        ? note.userInfo[@"pluginSearch"] : nil;
+                    fbt_openNativeInternalSettings(target);
                 }];
     });
 }
