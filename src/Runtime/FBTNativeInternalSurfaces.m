@@ -153,6 +153,35 @@ BOOL FBTNativeShowReactDevMenu(UIViewController *presenter, NSString **error) {
     }
 }
 
+// Metadata-only inspection. Never instantiate plugin controllers or read
+// sensitive session fields while generating the diagnostic.
+static NSString *FBTNSInitializerInventory(Class cls) {
+    if (!cls) return @"class missing";
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    NSMutableArray<NSString *> *entries = [NSMutableArray array];
+    for (unsigned int i = 0; methods && i < count && entries.count < 16; ++i) {
+        SEL selector = method_getName(methods[i]);
+        NSString *name = NSStringFromSelector(selector);
+        if (![name hasPrefix:@"init"] && ![name hasPrefix:@"getNagSheet"]) continue;
+        const char *type = method_getTypeEncoding(methods[i]);
+        [entries addObject:[NSString stringWithFormat:@"%@ (%s)",
+                            name, type ?: "?"]];
+    }
+    if (methods) free(methods);
+    return entries.count ? [entries componentsJoinedByString:@"; "]
+                         : @"no class-owned initializer; inherited/runtime provider required";
+}
+
+static NSString *FBTNSMethodAvailability(Class cls, NSString *name) {
+    if (!cls) return @"class missing";
+    SEL selector = NSSelectorFromString(name);
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method) return @"selector missing";
+    return [NSString stringWithFormat:@"present (%s)",
+            method_getTypeEncoding(method) ?: "?"];
+}
+
 NSString *FBTNativeInternalSurfacesReport(void) {
     NSArray<NSArray<NSString *> *> *items = @[
         @[@"DogFood/Gold", @"_TtC11FBDogFoodUI17DogFoodController"],
@@ -173,6 +202,44 @@ NSString *FBTNativeInternalSurfacesReport(void) {
             item[0], cls ? @"class registered" : @"class not loaded",
             cls ? [NSString stringWithFormat:@" (%@)", NSStringFromClass(cls)] : @""]];
     }
+    [lines addObject:@"\n--- Prerequisites / assinatura nativa ---"];
+    id session = [FBTUtils storedSession];
+    [lines addObject:[NSString stringWithFormat:@"FBUserSession active: %@",
+        session ? NSStringFromClass([session class]) : @"not available"]];
+    UIViewController *top = [FBTUtils topMostController];
+    UIViewController *root = [FBTUtils activeKeyWindow].rootViewController;
+    [lines addObject:[NSString stringWithFormat:@"Top controller: %@; root: %@",
+        top ? NSStringFromClass([top class]) : @"none",
+        root ? NSStringFromClass([root class]) : @"none"]];
+    for (NSString *name in @[@"FBBugReportInitialCoordinator",
+                              @"FBEmployeeSettingsUserOption",
+                              @"FBNavigationCoordinatorImpl"]) {
+        Class cls = NSClassFromString(name);
+        [lines addObject:[NSString stringWithFormat:@"%@: %@",
+            name, cls ? @"class registered (live instance not checked)"
+                      : @"class not loaded"]];
+    }
+    Class ffdb = NSClassFromString(@"FFDBInternalSettingsViewController");
+    [lines addObject:[NSString stringWithFormat:@"FFDB UIViewController subclass: %@; init: %@",
+        ffdb && [ffdb isSubclassOfClass:[UIViewController class]] ? @"yes" : @"no",
+        FBTNSMethodAvailability(ffdb, @"init")]];
+    Class ffdbWeb = NSClassFromString(@"FFDBInternalSettingsWebViewController");
+    [lines addObject:[NSString stringWithFormat:@"FFDB Web init methods: %@",
+        FBTNSInitializerInventory(ffdbWeb)]];
+    Class debug = NSClassFromString(@"FBMobileConfigDebugViewController");
+    [lines addObject:[NSString stringWithFormat:@"MobileConfig Debug init methods: %@",
+        FBTNSInitializerInventory(debug)]];
+    Class employee = NSClassFromString(@"FBEmployeeSettingsUserOption");
+    [lines addObject:[NSString stringWithFormat:@"Employee option init: %@; action: %@",
+        FBTNSMethodAvailability(employee, @"initWithSession:tabID:navigationCoordinator:"),
+        FBTNSMethodAvailability(employee, @"performUserOptionAction")]];
+    Class bugCoordinator = NSClassFromString(@"FBBugReportInitialCoordinator");
+    [lines addObject:[NSString stringWithFormat:@"Dogfooding coordinator openBugReportForm: %@",
+        FBTNSMethodAvailability(bugCoordinator, @"openBugReportForm")]];
+    Class devMenu = NSClassFromString(@"RCTDevMenu");
+    [lines addObject:[NSString stringWithFormat:@"RCTDevMenu show: %@ (live bridge not confirmed)",
+        FBTNSMethodAvailability(devMenu, @"show")]];
+    [lines addObject:@"\nA class registered result does not establish a live coordinator, active React bridge, native manager provider, Gold/MDM enrollment or server Employee authorization."];
     [lines addObject:@"\nPresença da classe não comprova factory inicializado, provider ou elegibilidade."];
     [lines addObject:[NSString stringWithFormat:@"Employee toggle: %@",
         [FBTDefaults boolForKey:FBTKeyEmployeeEnabled] ? @"ON" : @"OFF"]];
