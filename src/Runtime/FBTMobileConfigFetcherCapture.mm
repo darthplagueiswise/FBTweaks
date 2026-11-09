@@ -31,18 +31,24 @@ static FBTMCAsyncFetchFn sOriginalFetch;
 static BOOL sFetcherInstalled;
 static NSString *sFetcherFailure;
 static std::atomic<unsigned long long> sRequests(0), sResponses(0), sFailures(0);
-static fbt_mc_probe::OneShot sRequestExperiment;
+// Do not construct std::mutex/std::string in a Mach-O __init_offsets entry.
+// The QE request experiment is instantiated only after the user actually
+// opens/uses QE diagnostics, following dyld startup.
+static fbt_mc_probe::OneShot &sRequestExperiment(void) {
+    static fbt_mc_probe::OneShot instance;
+    return instance;
+}
 void FBTMobileConfigArmEmployeeExperiment(BOOL addEmployeeField) {
     if (![FBTDefaults boolForKey:FBTKeyMobileConfigFetchDiagnosticsEnabled]) return;
     NSString *identifier = NSUUID.UUID.UUIDString;
-    sRequestExperiment.arm(addEmployeeField, identifier.UTF8String, CACurrentMediaTime());
+    sRequestExperiment().arm(addEmployeeField, identifier.UTF8String, CACurrentMediaTime());
     FBTMobileConfigFetchDiagnosticsRecord(@"qe_experiment_armed", @{
         @"experiment_id": identifier, @"experiment_profile": addEmployeeField ? @"B_is_employee_true" : @"A_native",
         @"experiment_state": @"armed_next_QE_only", @"capture_window_seconds": @120});
 }
-void FBTMobileConfigCancelEmployeeExperiment(void) { sRequestExperiment.cancel(); }
+void FBTMobileConfigCancelEmployeeExperiment(void) { sRequestExperiment().cancel(); }
 NSDictionary *FBTMobileConfigEmployeeExperimentStatus(void) {
-    auto pending = sRequestExperiment.pending(CACurrentMediaTime());
+    auto pending = sRequestExperiment().pending(CACurrentMediaTime());
     return @{@"armed": @(pending.mode >= 0), @"profile": pending.mode < 0 ? @"native" : pending.mode ? @"B_is_employee_true" : @"A_native"};
 }
 
@@ -191,8 +197,8 @@ static void FBTMCAsyncFetch(const void *fetcher, const std::string &method,
     }
     // Session-only diagnostics are strictly observational; the legacy LAB
     // request-field A/B experiment is never applied through this toggle.
-    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();
-    auto selected = sRequestExperiment.consume(method, purpose, CACurrentMediaTime());
+    if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment().cancel();
+    auto selected = sRequestExperiment().consume(method, purpose, CACurrentMediaTime());
     auto outgoing = std::make_shared<FBTMCRequestPairs>(params);
     BOOL added = selected.mode == 1 && fbt_mc_probe::append(*outgoing);
     unsigned long long requestID = ++sRequests;
