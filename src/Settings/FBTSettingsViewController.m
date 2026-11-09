@@ -56,11 +56,7 @@ static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
     if (!vc.navigationController) return;
     UINavigationBar *bar = vc.navigationController.navigationBar;
     if (@available(iOS 26.0, *)) {
-        // iOS 26 renders the native navigation-bar Liquid Glass automatically.
-        // Opaque/blurred custom appearances suppress that effect.
-        bar.standardAppearance = nil;
-        bar.scrollEdgeAppearance = nil;
-        bar.compactAppearance = nil;
+        // Use the system default Glass. Do NOT set any custom appearance on iOS26.
     } else {
         UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
         [appearance configureWithDefaultBackground];
@@ -439,10 +435,9 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if (symbol.length) {
         UIImage *image = [UIImage systemImageNamed:symbol];
         if (image) {
-            UIListContentConfiguration *configured = [cell.contentConfiguration copy];
-            configured.image = image;
-            configured.imageProperties.tintColor = [UIColor secondaryLabelColor];
-            cell.contentConfiguration = configured;
+            cfg.image = image;
+            cfg.imageProperties.tintColor = [UIColor secondaryLabelColor];
+            cell.contentConfiguration = cfg;
         }
     }
     NSString *identifier = item[@"group"] ?: item[@"action"] ?: item[@"dest"] ?: item[@"key"];
