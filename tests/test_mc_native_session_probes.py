@@ -46,7 +46,7 @@ class MCNativeSessionProbes(unittest.TestCase):
     def test_opt_in_observation_does_not_mutate_server_requests_or_store_bodies(self):
         fetch = src("src/Runtime/FBTMobileConfigFetcherCapture.mm")
         tig = src("src/Runtime/FBTMobileConfigTigonCapture.mm")
-        self.assertIn("if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment.cancel();",fetch)
+        self.assertIn("if (!FBTQEInvasiveHooksAllowed()) sRequestExperiment().cancel();",fetch)
         self.assertIn("if (FBTQEInvasiveHooksAllowed() && success",fetch)
         self.assertIn("} else if (FBTQEInvasiveHooksAllowed()) {",tig)
         self.assertIn('@"tigon_native_response_metadata"',tig)
