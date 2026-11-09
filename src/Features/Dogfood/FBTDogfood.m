@@ -54,7 +54,75 @@ void FBTOpenNativeWhitehatSettings(void) {
 typedef UIViewController *(*FBTInternalSettingsFn)(id session);
 extern void FBTInstallKnownGateRuntimeHooks(void);
 
-static void fbt_openNativeInternalSettings(NSString *targetSearch) {
+// Navigate the actual plugin row of the Facebook Internal Settings provider.
+// This is NOT a textual search or a synthetic controller: a real table row
+// is selected through the original UITableViewDelegate callback.
+static NSString *FBTNativePluginCellTitle(UITableViewCell *cell) {
+    if (!cell) return @"";
+    id configuration = cell.contentConfiguration;
+    NSString *text = nil;
+    if ([configuration isKindOfClass:[UIListContentConfiguration class]])
+        text = ((UIListContentConfiguration *)configuration).text;
+    if (!text.length) text = cell.textLabel.text;
+    if (!text.length) text = cell.accessibilityLabel;
+    return text ?: @"";
+}
+
+static BOOL FBTSelectNativeInternalPlugin(UIViewController *root, NSString *plugin,
+                                          NSString **failure) {
+    if (!plugin.length) return YES;
+    UITableViewController *tableController =
+        [root isKindOfClass:[UITableViewController class]] ? (id)root : nil;
+    if (!tableController && [root isKindOfClass:[UINavigationController class]]) {
+        UIViewController *top = [(UINavigationController *)root topViewController];
+        if ([top isKindOfClass:[UITableViewController class]]) tableController = (id)top;
+    }
+    UITableView *table = tableController.tableView;
+    if (!table || !table.dataSource || !table.delegate ||
+        ![table.delegate respondsToSelector:@selector(tableView:didSelectRowAtIndexPath:)]) {
+        if (failure) *failure = @"A raiz de Internal Settings não expôs UITableView/DataSource/Delegate nativos.";
+        return NO;
+    }
+    [table reloadData];
+    NSInteger sections = MIN(40, [table numberOfSections]);
+    NSUInteger visited = 0;
+    NSString *needle = plugin.lowercaseString;
+    NSIndexPath *found = nil;
+    for (NSInteger section = 0; section < sections && !found && visited < 2000; section++) {
+        NSInteger rows = MIN(250, [table numberOfRowsInSection:section]);
+        for (NSInteger row = 0; row < rows && visited++ < 2000; row++) {
+            NSIndexPath *idx = [NSIndexPath indexPathForRow:row inSection:section];
+            UITableViewCell *cell = nil;
+            @try { cell = [table.dataSource tableView:table cellForRowAtIndexPath:idx]; }
+            @catch (__unused NSException *exception) { continue; }
+            NSString *title = FBTNativePluginCellTitle(cell).lowercaseString;
+            // Prefer exact plugin matches, do not select arbitrary substrings.
+            BOOL match = [title isEqualToString:needle] ||
+                [title hasPrefix:[needle stringByAppendingString:@" "]] ||
+                [title hasPrefix:[needle stringByAppendingString:@" —"]] ||
+                [title hasPrefix:[needle stringByAppendingString:@" /"]];
+            if (match) { found = idx; break; }
+        }
+    }
+    if (!found) {
+        if (failure) *failure = [NSString stringWithFormat:
+            @"O provider de Internal Settings não registrou uma row para %@ nesta sessão (%lu rows verificadas). Não houve busca nem menu falso.",
+            plugin, (unsigned long)visited];
+        return NO;
+    }
+    @try {
+        [table.delegate tableView:table didSelectRowAtIndexPath:found];
+        FBTLog(@"Native Internal Settings plugin selected: %@ at %@", plugin, found);
+        return YES;
+    } @catch (NSException *exception) {
+        if (failure) *failure = [NSString stringWithFormat:
+            @"O plugin %@ lançou exceção ao selecionar sua row original: %@",
+            plugin, exception.reason ?: exception.name];
+        return NO;
+    }
+}
+
+static void fbt_openNativeInternalSettings(NSString *targetPlugin) {
     // Register the late native-UI bootstrap before creating the Internal
     // Settings surface. Context/readers are warmed when the actual
     // FBMobileConfigDebugViewController enters, avoiding the old one-shot scan
@@ -113,24 +181,12 @@ static void fbt_openNativeInternalSettings(NSString *targetSearch) {
         }
 
         [presenter presentViewController:nav animated:YES completion:^{
-            if (!targetSearch.length) return;
-            // Search through the app's real provider/UITableView. We do not
-            // manufacture plugin VCs or guess initializer arguments.
-            UISearchController *search = vc.navigationItem.searchController;
-            if (!search) {
-                FBTLog(@"Internal Settings native search unavailable for %@", targetSearch);
-                [FBTUtils showMessage:
-                    [NSString stringWithFormat:@"A busca não está disponível nesta instância do Internal Settings. Procure o plugin %@ manualmente.", targetSearch]
-                    title:@"Plugin nativo"];
-                return;
+            if (!targetPlugin.length) return;
+            NSString *failure = nil;
+            if (!FBTSelectNativeInternalPlugin(vc, targetPlugin, &failure)) {
+                [FBTUtils showMessage:failure ?: @"Plugin nativo indisponível."
+                               title:[NSString stringWithFormat:@"%@ — Internal", targetPlugin]];
             }
-            search.active = YES;
-            search.searchBar.text = targetSearch;
-            id<UISearchResultsUpdating> updater = search.searchResultsUpdater;
-            if (updater && [updater respondsToSelector:@selector(updateSearchResultsForSearchController:)]) {
-                [updater updateSearchResultsForSearchController:search];
-            }
-            FBTLog(@"Internal Settings native search applied: %@", targetSearch);
         }];
     });
 }
@@ -150,8 +206,8 @@ void FBTInstallDogfoodObserver(void) {
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification *note) {
-                    NSString *target = [note.userInfo[@"pluginSearch"] isKindOfClass:[NSString class]]
-                        ? note.userInfo[@"pluginSearch"] : nil;
+                    NSString *target = [note.userInfo[@"nativePlugin"] isKindOfClass:[NSString class]]
+                        ? note.userInfo[@"nativePlugin"] : nil;
                     fbt_openNativeInternalSettings(target);
                 }];
     });
