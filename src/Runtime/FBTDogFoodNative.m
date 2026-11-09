@@ -8,7 +8,6 @@
 
 #import "FBTDogFoodNative.h"
 #import "../FBTUtils.h"
-#import "../FBTDefaults.h"
 #import "../FBTPrefix.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -19,6 +18,26 @@ static NSString *const kFBTManagedPhone = @"FBDogFood-managedPhoneFlag";
 static NSString *const kFBTSnoozedOnDismiss = @"FBDogFood-lastSnoozedOnDismissDate";
 static NSString *const kFBTSnoozedOnSwitch = @"FBDogFood-lastSnoozedOnSwitchDate";
 static NSString *const kFBTDismissCount = @"FBDogFood-dismissClickCount";
+
+BOOL FBTDogFoodManagedPhoneFlag(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kFBTManagedPhone];
+}
+
+void FBTDogFoodSetManagedPhoneFlag(BOOL enabled) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:enabled forKey:kFBTManagedPhone];
+    if (enabled) {
+        [defaults removeObjectForKey:kFBTSnoozedOnDismiss];
+        [defaults removeObjectForKey:kFBTSnoozedOnSwitch];
+        [defaults setInteger:0 forKey:kFBTDismissCount];
+    }
+    // Explicit readback and notification to observers in this process.
+    BOOL actual = [defaults boolForKey:kFBTManagedPhone];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+    FBTLog(@"Dogfood managedPhoneFlag requested=%d readback=%d (local only)", enabled, actual);
+}
+
 
 static BOOL FBTDogFoodIsUserSession(id candidate, Class sessionClass) {
     if (!candidate) return NO;
@@ -185,26 +204,9 @@ BOOL FBTDogFoodPresentNativeNag(UIViewController *presenter, NSString **error) {
 
     void (^onSwitch)(void) = ^{
         dispatch_async(dispatch_get_main_queue(), ^{
-            // Native, known consumer in Facebook 567. No Employee, MDM or
-            // MobileConfig override is manufactured by this UI action.
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            [defaults setBool:YES forKey:kFBTManagedPhone];
-            [defaults removeObjectForKey:kFBTSnoozedOnDismiss];
-            [defaults removeObjectForKey:kFBTSnoozedOnSwitch];
-            [defaults setInteger:0 forKey:kFBTDismissCount];
-
-            // A user-selected DogFood activation also opts into the existing
-            // Employee/Internal family; it is not a remote auth mutation.
-            // FBTDefaults notifies the installed preference observer, which
-            // installs/reloads FBTEmployee and known gate hooks as needed.
-            if (![FBTDefaults boolForKey:FBTKeyEmployeeEnabled]) {
-                [FBTDefaults setBool:YES forKey:FBTKeyEmployeeEnabled];
-            }
-            [[NSNotificationCenter defaultCenter]
-                postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
-            FBTLog(@"DogFood switch: managedPhoneFlag=%d employeeToggle=%d nativeEmployeePersistedOnGetter=deferred",
-                   [defaults boolForKey:kFBTManagedPhone],
-                   [FBTDefaults boolForKey:FBTKeyEmployeeEnabled]);
+            // Caller-provided callback, not the native Gold/MDM enrollment.
+            // Keep this identical to the dedicated Dogfood settings switch.
+            FBTDogFoodSetManagedPhoneFlag(YES);
         });
     };
     void (^onSnooze)(void) = ^{
@@ -221,8 +223,8 @@ BOOL FBTDogFoodPresentNativeNag(UIViewController *presenter, NSString **error) {
         id result = ((NagFactory)objc_msgSend)(
             controller, selector, session,
             @"Facebook DogFood",
-            @"Configurar o estado DogFood local deste dispositivo usando a interface nativa.",
-            @"Ativar", @"Depois", YES, [onSwitch copy], [onSnooze copy]);
+            @"Demonstração do aviso nativo. Ativar configura somente o indicador Dogfood local; não instala o Facebook Gold nem inscreve o aparelho no MDM.",
+            @"Ativar localmente", @"Depois", YES, [onSwitch copy], [onSnooze copy]);
         if ([result isKindOfClass:[UIViewController class]]) sheet = (UIViewController *)result;
     } @catch (NSException *exception) {
         if (error) *error = [NSString stringWithFormat:
