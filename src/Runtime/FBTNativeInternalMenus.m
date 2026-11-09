@@ -21,6 +21,14 @@ static BOOL FBTNativeRequireClass(NSString *name, Class *outClass, NSString **fa
         NSBundle *bundle = [NSBundle bundleWithPath:bundlePath];
         if (bundle && !bundle.isLoaded) [bundle loadAndReturnError:&loadingError];
         cls = NSClassFromString(name);
+        if (!cls) {
+            // The Messaging Thread View internal plugin lives in FBCameraFramework.
+            NSString *cameraPath = [[[NSBundle mainBundle] privateFrameworksPath]
+                stringByAppendingPathComponent:@"FBCameraFramework.framework"];
+            NSBundle *camera = [NSBundle bundleWithPath:cameraPath];
+            if (camera && !camera.isLoaded) [camera loadAndReturnError:nil];
+            cls = NSClassFromString(name);
+        }
         if (!cls && loadingError) {
             FBTLog(@"Native internal bundle load error: %@", loadingError.localizedDescription);
         }
@@ -95,7 +103,8 @@ static id FBTNativeFindRelatedObject(Class target) {
         @"rageShakeCoordinator", @"rageshakeCoordinator",
         @"bugReporter", @"shakeHandler", @"coordinator",
         @"navigationCoordinator", @"fbNavigationCoordinator",
-        @"navigationContext", @"delegate", @"session",
+        @"navigationContext", @"selectedViewController", @"visibleViewController",
+        @"topViewController", @"currentViewController", @"delegate", @"session",
         @"userSession", @"tabBarController"
     ];
     for (NSUInteger index = 0; index < queue.count && index < 96; ++index) {
@@ -176,7 +185,9 @@ BOOL FBTNativeOpenController(NSString *identifier, NSString **failure) {
         @"loggedout_push": @[@"FBLoggedOutPushInternalSettingsViewController", @"initWithSession:"],
         @"reliable_media": @[@"FBReliableMediaInternalSettingsViewController", @"initWithSession:"],
         @"clash": @[@"FBClashManagementInternalSettingsTableViewController", @"initWithSession:"],
-        @"lifecycle": @[@"FBLifecycleInternalSettingsViewController", @"init"]
+        @"lifecycle": @[@"FBLifecycleInternalSettingsViewController", @"init"],
+        @"autofill_tokenization": @[@"_TtC42AutofillTokenizationInternalSettingsPlugin52FBAutofillTokenizationInternalSettingsViewController", @"initWithStyle:"],
+        @"messaging_thread": @[@"_TtC43FBMessagingThreadViewInternalSettingsPlugin51FBMessagingThreadViewInternalSettingsViewController", @"initWithStyle:"]
     };
     NSArray<NSString *> *entry = catalog[identifier ?: @""];
     if (!entry) {
@@ -191,8 +202,9 @@ BOOL FBTNativeOpenController(NSString *identifier, NSString **failure) {
     }
 
     BOOL needsSession = [entry[1] isEqualToString:@"initWithSession:"];
+    BOOL needsStyle = [entry[1] isEqualToString:@"initWithStyle:"];
     SEL initializer = NSSelectorFromString(entry[1]);
-    if (!FBTNativeCheckInitializer(cls, initializer, needsSession ? 3 : 2, needsSession)) {
+    if (!FBTNativeCheckInitializer(cls, initializer, (needsSession || needsStyle) ? 3 : 2, needsSession)) {
         if (failure) *failure = [NSString stringWithFormat:
             @"ABI do inicializador %@.%@ divergente da IPA 567.", entry[0],entry[1]];
         return NO;
@@ -211,6 +223,8 @@ BOOL FBTNativeOpenController(NSString *identifier, NSString **failure) {
         id allocated = [cls alloc];
         vc = needsSession
             ? ((id (*)(id, SEL, id))objc_msgSend)(allocated, initializer, session)
+            : needsStyle
+            ? ((id (*)(id, SEL, NSInteger))objc_msgSend)(allocated, initializer, UITableViewStyleInsetGrouped)
             : ((id (*)(id, SEL))objc_msgSend)(allocated, initializer);
     } @catch (NSException *exception) {
         if (failure) *failure = [NSString stringWithFormat:
@@ -268,7 +282,7 @@ BOOL FBTNativeOpenEmployeeUserOption(NSString **failure) {
     id session = [FBTUtils storedSession];
     id root = [FBTUtils activeKeyWindow].rootViewController;
     id navigationCoordinator = nil;
-    Class coordinatorClass = NSClassFromString(@"FBNavigationCoordinator");
+    Class coordinatorClass = NSClassFromString(@"FBNavigationCoordinatorImpl");
     if (coordinatorClass) navigationCoordinator = FBTNativeFindRelatedObject(coordinatorClass);
     if (!navigationCoordinator) navigationCoordinator = FBTNativeGetter(root,@"navigationCoordinator");
 
