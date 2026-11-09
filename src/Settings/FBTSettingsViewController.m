@@ -281,10 +281,10 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings nativo", @"subtitle": @"Chama FBInternalSettingsViewControllerFromSession(session).", @"action": @"native" },
             @{ @"kind": @"action", @"title": @"Abrir Internal Settings RN", @"subtitle": @"Usa a rota React Native fb://rninternalsettings existente na IPA 567.", @"action": @"rn_internal" },
             @{ @"kind": @"action", @"title": @"Mostrar React Native Dev Menu", @"subtitle": @"Procura o RCTDevMenu da bridge ativa e chama o método nativo -show; não cria bridge nova.", @"action": @"rn_dev" },
-            @{ @"kind": @"action", @"title": @"Dogfooding Assistant / RageShake", @"subtitle": @"Diagnóstico e acesso pelo fluxo nativo de bugreport; exige sessão/provedor ativo.", @"action": @"dogfood_assistant" },
-            @{ @"kind": @"action", @"title": @"FFDB Internal Settings", @"subtitle": @"Acessa pela árvore de plugins do Internal Settings; evita construtor privado não validado.", @"action": @"ffdb_internal" },
-            @{ @"kind": @"action", @"title": @"MobileConfig Debug nativo", @"subtitle": @"Acessa o plugin do Internal Settings; usa seus managers sessioned e sessionless nativos.", @"action": @"mc_debug_native" },
-            @{ @"kind": @"action", @"title": @"Employee Settings nativo", @"subtitle": @"Abre o menu raiz para localizar FBEmployeeSettingsUserOption, se registrado.", @"action": @"employee_internal" },
+            @{ @"kind": @"action", @"title": @"Dogfooding Assistant — buscar no nativo", @"subtitle": @"Abre Internal Settings e procura Dogfooding no catálogo nativo; disponível só se o provider existir.", @"action": @"dogfood_assistant" },
+            @{ @"kind": @"action", @"title": @"FFDB — buscar plugin nativo", @"subtitle": @"Usa o buscador do menu nativo; depende do plugin FFDB registrado.", @"action": @"ffdb_internal" },
+            @{ @"kind": @"action", @"title": @"MobileConfig Debug — buscar nativo", @"subtitle": @"Usa busca nativa preservando os context managers sessioned e sessionless.", @"action": @"mc_debug_native" },
+            @{ @"kind": @"action", @"title": @"Employee Settings — buscar nativo", @"subtitle": @"Procura Employee no Internal Settings original, conforme plugins disponíveis.", @"action": @"employee_internal" },
             @{ @"kind": @"action", @"title": @"Aviso DogFood / Gold — painel nativo", @"subtitle": @"Abre o painel Swift com callback LOCAL. Não equivale à adesão Gold/MDM.", @"action": @"dogfood_nag" },
             @{ @"kind": @"action", @"title": @"DogFood / Gold — estado local", @"subtitle": @"Mostra managedPhoneFlag e o estado Employee; não afirma elegibilidade MDM ou Gold remoto.", @"action": @"gold_status" },
             @{ @"kind": @"action", @"title": @"Gold — página oficial de builds", @"subtitle": @"Abre fb.me/builds, endereço encontrado no fluxo de pré-produção da IPA 567.", @"action": @"gold_builds" },
@@ -672,34 +672,22 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
                    [action isEqualToString:@"ffdb_internal"] ||
                    [action isEqualToString:@"mc_debug_native"] ||
                    [action isEqualToString:@"employee_internal"]) {
-            NSDictionary *descriptions = @{
-                @"dogfood_assistant": @"Dogfooding Assistant faz parte do Bug Reporter/RageShake; o controlador está na IPA, mas a entrada direta depende do coordinator e da sessão. Não é seguro criar uma instância vazia.",
-                @"ffdb_internal": @"FFDB é um plugin de Internal Settings. A classe existe na IPA 567; sem o provider e initializer corretos não é seguro apresentá-la isoladamente.",
-                @"mc_debug_native": @"O MobileConfig Debug utiliza context managers sessioned/sessionless obtidos pelo menu nativo. Abrir a raiz preserva esses managers.",
-                @"employee_internal": @"FBEmployeeSettingsUserOption é uma opção do menu interno, não um controller raiz independente confirmado."
+            // Open the real Internal Settings controller with its original
+            // session and ask its own search provider for the requested plugin.
+            // No guessed initWithSession: or unverified plugin constructor.
+            NSDictionary *nativeTerms = @{
+                @"dogfood_assistant": @"Dogfooding",
+                @"ffdb_internal": @"FFDB",
+                @"mc_debug_native": @"MobileConfig",
+                @"employee_internal": @"Employee"
             };
-            NSString *description = descriptions[action] ?: @"Requer um provider nativo.";
-            UIAlertController *info = [UIAlertController
-                alertControllerWithTitle:item[@"title"]
-                message:[description stringByAppendingString:@"\n\nDeseja abrir Internal Settings?"]
-                preferredStyle:UIAlertControllerStyleAlert];
-            [info addAction:[UIAlertAction
-                actionWithTitle:@"Abrir Internal Settings"
-                style:UIAlertActionStyleDefault
-                handler:^(__unused UIAlertAction *choice) {
-                    [[NSNotificationCenter defaultCenter]
-                        postNotificationName:@"FBTRequestOpenNativeInternalSettings" object:nil];
-                }]];
-            [info addAction:[UIAlertAction
-                actionWithTitle:@"Diagnóstico"
-                style:UIAlertActionStyleDefault
-                handler:^(__unused UIAlertAction *choice) {
-                    [self showInfoTitle:@"Superfícies internas"
-                               message:FBTNativeInternalSurfacesReport()];
-                }]];
-            [info addAction:[UIAlertAction actionWithTitle:@"Cancelar"
-                                                    style:UIAlertActionStyleCancel handler:nil]];
-            [self presentViewController:info animated:YES completion:nil];
+            NSString *query = nativeTerms[action];
+            [self dismissViewControllerAnimated:YES completion:^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:@"FBTRequestOpenNativeInternalSettings"
+                                object:nil
+                              userInfo:@{@"pluginSearch": query ?: @""}];
+            }];
         } else if ([action isEqualToString:@"gold_status"]) {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
             NSString *status = [NSString stringWithFormat:
