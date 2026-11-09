@@ -8,4 +8,8 @@
 // Returns NO with a diagnostic when the native class/ABI/session is unavailable.
 FOUNDATION_EXPORT BOOL FBTDogFoodPresentNativeNag(UIViewController *presenter, NSString **error);
 
+// The local flag that Facebook 567 reads. This is NOT Gold/MDM enrollment.
+FOUNDATION_EXPORT BOOL FBTDogFoodManagedPhoneFlag(void);
+FOUNDATION_EXPORT void FBTDogFoodSetManagedPhoneFlag(BOOL enabled);
+
 #endif /* FBT_DOGFOOD_NATIVE_H */
