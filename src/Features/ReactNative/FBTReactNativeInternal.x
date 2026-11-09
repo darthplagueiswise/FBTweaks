@@ -2,6 +2,7 @@
 #import "FacebookHeaders.h"
 #import "FBTDefaults.h"
 #import "FBTReactNativeInternal.h"
+#import "../../FBTUtils.h"
 #include "../../../modules/fishhook/fishhook.h"
 
 // FBReactNativeProductsFramework families mapped in the current build:
@@ -218,6 +219,11 @@ void FBTOpenReactNativeInternalSettings(void) {
             options:@{}
             completionHandler:^(BOOL success) {
                 FBTLog(@"RN Internal Settings route opened=%d", success);
+                if (!success) {
+                    [FBTUtils showMessage:
+                        @"O Facebook não aceitou a rota fb://rninternalsettings nesta sessão. A URL foi chamada pelo aplicativo, mas a superfície não ficou disponível."
+                        title:@"Internal Settings RN"];
+                }
             }];
     });
 }
