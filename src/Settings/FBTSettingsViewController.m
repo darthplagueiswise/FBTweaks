@@ -54,12 +54,73 @@ static long long FBTParseLongLongString(NSString *string) {
 
 static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
     if (!vc.navigationController) return;
-    UINavigationBarAppearance *nav = [UINavigationBarAppearance new];
-    [nav configureWithDefaultBackground];
-    vc.navigationController.navigationBar.standardAppearance = nav;
-    vc.navigationController.navigationBar.scrollEdgeAppearance = nav;
-    vc.navigationController.navigationBar.compactAppearance = nav;
-    vc.navigationController.navigationBar.prefersLargeTitles = NO;
+    UINavigationBar *bar = vc.navigationController.navigationBar;
+    if (@available(iOS 26.0, *)) {
+        // iOS 26 renders the native navigation-bar Liquid Glass automatically.
+        // Opaque/blurred custom appearances suppress that effect.
+        bar.standardAppearance = nil;
+        bar.scrollEdgeAppearance = nil;
+        bar.compactAppearance = nil;
+    } else {
+        UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
+        [appearance configureWithDefaultBackground];
+        bar.standardAppearance = appearance;
+        bar.scrollEdgeAppearance = appearance;
+        bar.compactAppearance = appearance;
+    }
+    bar.prefersLargeTitles = YES;
+}
+
+// A single native glass hero is sufficient. System rows, switches, and the
+// navigation bar get their appearance from UIKit. Avoid glass on every cell.
+static UIView *FBTGlassOverviewHeader(CGFloat width) {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 134)];
+    container.backgroundColor = [UIColor clearColor];
+    UIVisualEffect *effect = nil;
+    if (@available(iOS 26.0, *)) effect = [UIGlassEffect new];
+    else effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+    UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:effect];
+    glass.frame = CGRectMake(16, 12, MAX(0, width - 32), 108);
+    glass.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    glass.layer.cornerRadius = 24;
+    glass.clipsToBounds = YES;
+    [container addSubview:glass];
+
+    UILabel *heading = [UILabel new];
+    heading.text = @"FBTweak";
+    heading.textColor = [UIColor labelColor];
+    heading.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
+    heading.adjustsFontForContentSizeCategory = YES;
+    UILabel *caption = [UILabel new];
+    caption.text = @"Acessos nativos, flags locais e diagnósticos organizados por área.";
+    caption.textColor = [UIColor secondaryLabelColor];
+    caption.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    caption.adjustsFontForContentSizeCategory = YES;
+    caption.numberOfLines = 0;
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[heading, caption]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 6;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [glass.contentView addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.leadingAnchor constraintEqualToAnchor:glass.contentView.leadingAnchor constant:18],
+        [stack.trailingAnchor constraintEqualToAnchor:glass.contentView.trailingAnchor constant:-18],
+        [stack.centerYAnchor constraintEqualToAnchor:glass.contentView.centerYAnchor]
+    ]];
+    return container;
+}
+
+static NSArray<NSDictionary *> *FBTMenuRows(NSArray<NSArray<NSDictionary *> *> *catalog,
+                                            NSString *field, NSArray<NSString *> *values) {
+    NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
+    for (NSString *value in values) {
+        for (NSArray<NSDictionary *> *section in catalog) {
+            for (NSDictionary *row in section) {
+                if ([row[field] isEqualToString:value]) [matches addObject:row];
+            }
+        }
+    }
+    return matches;
 }
 
 static UILabel *FBTSecondaryLabel(NSString *text) {
@@ -101,6 +162,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
 @interface FBTSettingsViewController : UITableViewController
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property (nonatomic, copy) NSString *menuGroup;
+@property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @end
 
 @interface FBTMobileConfigViewController : UITableViewController <UISearchResultsUpdating>
@@ -133,11 +196,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     FBTSettingsViewController *root = [[FBTSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
-    [appearance configureWithDefaultBackground];
-    nav.navigationBar.standardAppearance = appearance;
-    nav.navigationBar.scrollEdgeAppearance = appearance;
-    nav.navigationBar.compactAppearance = appearance;
+    // Do not override the system Liquid Glass navigation appearance on iOS 26.
+    nav.navigationBar.prefersLargeTitles = YES;
     return nav;
 }
 @end
@@ -146,8 +206,18 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"FBTweak";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeTapped)];
+    BOOL isRoot = self.menuGroup.length == 0;
+    if (isRoot) self.title = @"FBTweak";
+    self.navigationItem.largeTitleDisplayMode = isRoot
+        ? UINavigationItemLargeTitleDisplayModeAlways
+        : UINavigationItemLargeTitleDisplayModeNever;
+    if (isRoot) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+            initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                target:self action:@selector(closeTapped)];
+        self.tableView.tableHeaderView = FBTGlassOverviewHeader(self.tableView.bounds.size.width);
+    }
+    self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTSwitchCellID];
     [self rebuildSections];
@@ -169,6 +239,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"switch", @"title": @"Employee / Internal", @"subtitle": @"Getters conhecidos via Logos/MSHookMessageEx.", @"key": FBTKeyEmployeeEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Test User (local)", @"subtitle": @"Gates específicos de contas de teste; não concede permissões remotas.", @"key": FBTKeyTestUserEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Dogfood — gates conhecidos", @"subtitle": @"Ativa os hooks locais verificados, separado de Employee.", @"key": FBTKeyKnownDogfoodEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Aparelho gerenciado — preferência local", @"subtitle": @"Controla FBDogFood-managedPhoneFlag na IPA. NÃO comprova MDM ou Gold instalado.", @"key": @"FBDogFood-managedPhoneFlag" },
+            @{ @"kind": @"switch", @"title": @"Internal React Native", @"subtitle": @"RCTDevMenu e dev settings da bridge ativa.", @"key": FBTKeyReactNativeInternalEnabled, @"restart": @YES },
+            @{ @"kind": @"switch", @"title": @"Simular build Beta (local)", @"subtitle": @"METAOSBuildIsBeta import; não altera distribuição do aplicativo.", @"key": FBTKeyBetaBuildEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Mobile Lab (LAB_IS_ACTIVE)", @"subtitle": @"Ativado por padrao. Define a variavel no inicio do processo; exige encerrar totalmente e reiniciar o Facebook. Nao concede permissao Employee no servidor.", @"key": FBTKeyMobileLabEnabled, @"restart": @YES },
             @{ @"kind": @"switch", @"title": @"Dogfood sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais contendo dogfood/dogfooding/dogfooder.", @"key": FBTKeyDogfoodSweepEnabled },
             @{ @"kind": @"switch", @"title": @"Internal/debug sweep runtime", @"subtitle": @"Instala em runtime selectors BOOL reais de internal settings/debug menu/developer.", @"key": FBTKeyInternalDebugSweepEnabled },
@@ -210,7 +285,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"action", @"title": @"FFDB Internal Settings", @"subtitle": @"Acessa pela árvore de plugins do Internal Settings; evita construtor privado não validado.", @"action": @"ffdb_internal" },
             @{ @"kind": @"action", @"title": @"MobileConfig Debug nativo", @"subtitle": @"Acessa o plugin do Internal Settings; usa seus managers sessioned e sessionless nativos.", @"action": @"mc_debug_native" },
             @{ @"kind": @"action", @"title": @"Employee Settings nativo", @"subtitle": @"Abre o menu raiz para localizar FBEmployeeSettingsUserOption, se registrado.", @"action": @"employee_internal" },
-            @{ @"kind": @"action", @"title": @"Abrir DogFood / Gold nativo", @"subtitle": @"Abre o nag sheet Swift do Facebook. Ativar grava managedPhoneFlag e liga o toggle Employee/Internal existente; Depois registra snooze.", @"action": @"dogfood_nag" },
+            @{ @"kind": @"action", @"title": @"Aviso DogFood / Gold — painel nativo", @"subtitle": @"Abre o painel Swift com callback LOCAL. Não equivale à adesão Gold/MDM.", @"action": @"dogfood_nag" },
             @{ @"kind": @"action", @"title": @"DogFood / Gold — estado local", @"subtitle": @"Mostra managedPhoneFlag e o estado Employee; não afirma elegibilidade MDM ou Gold remoto.", @"action": @"gold_status" },
             @{ @"kind": @"action", @"title": @"Gold — página oficial de builds", @"subtitle": @"Abre fb.me/builds, endereço encontrado no fluxo de pré-produção da IPA 567.", @"action": @"gold_builds" },
             @{ @"kind": @"action", @"title": @"Diagnosticar superfícies internas", @"subtitle": @"Lista classes nativas RN, FFDB, Dogfooding Assistant, Gold e MobileConfig realmente carregadas.", @"action": @"native_surfaces_diag" },
@@ -220,9 +295,88 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
             @{ @"kind": @"action", @"title": @"Limpar overrides runtime", @"subtitle": @"Remove MobileConfig + ObjC BOOL overrides persistidos.", @"action": @"clear" },
         ],
     ];
+
+    // Keep all existing controls/actions as the canonical catalog, but never
+    // show the huge flat catalog on the root page. Reuse their existing action
+    // dispatch in focused submenus so behavior cannot drift.
+    NSArray<NSArray<NSDictionary *> *> *catalog = self.sections;
+    NSArray<NSDictionary *> *(^keys)(NSArray<NSString *> *) = ^NSArray *(NSArray *v) {
+        return FBTMenuRows(catalog, @"key", v);
+    };
+    NSArray<NSDictionary *> *(^actions)(NSArray<NSString *> *) = ^NSArray *(NSArray *v) {
+        return FBTMenuRows(catalog, @"action", v);
+    };
+    NSArray<NSDictionary *> *(^destinations)(NSArray<NSString *> *) = ^NSArray *(NSArray *v) {
+        return FBTMenuRows(catalog, @"dest", v);
+    };
+
+    if (!self.menuGroup.length) {
+        self.sections = @[
+            keys(@[FBTKeyMasterEnabled, FBTKeyOpenThreeFingerDoubleTap]),
+            @[
+                @{@"kind": @"submenu", @"title": @"Employee e Internal", @"subtitle": @"Identidade local, Test User e menus internos", @"group": @"employee", @"symbol": @"person.crop.circle.badge.checkmark"},
+                @{@"kind": @"submenu", @"title": @"Dogfood e Gold", @"subtitle": @"Nag nativo, managedPhoneFlag, builds e Assistant", @"group": @"dogfood", @"symbol": @"pawprint"},
+                @{@"kind": @"submenu", @"title": @"React Native", @"subtitle": @"Internal Settings RN e Developer Menu", @"group": @"react", @"symbol": @"square.stack.3d.up"},
+                @{@"kind": @"submenu", @"title": @"MobileConfig e QE", @"subtitle": @"Sessioned, sessionless, overrides e nomes", @"group": @"mobileconfig", @"symbol": @"slider.horizontal.3"},
+                @{@"kind": @"submenu", @"title": @"Diagnóstico e ferramentas", @"subtitle": @"Rede, trace, browsers e símbolos", @"group": @"diagnostics", @"symbol": @"waveform.path.ecg"},
+                @{@"kind": @"submenu", @"title": @"Aparência e recursos", @"subtitle": @"Liquid Glass, tab bar, Dating e build Beta", @"group": @"appearance", @"symbol": @"circle.hexagongrid"}
+            ],
+            actions(@[@"native", @"dogfood_nag", @"rn_internal"])
+        ];
+        self.sectionTitles = @[@"Geral", @"Áreas", @"Acesso rápido"];
+        return;
+    }
+
+    NSArray *toggles = @[];
+    NSArray *native = @[];
+    NSArray *tools = @[];
+    if ([self.menuGroup isEqualToString:@"employee"]) {
+        toggles = keys(@[FBTKeyEmployeeEnabled, FBTKeyTestUserEnabled,
+                         FBTKeyMobileLabEnabled, FBTKeyInternalCImportsEnabled,
+                         FBTKeyEasyGatingInternalEnabled, FBTKeyInternalDebugSweepEnabled]);
+        native = actions(@[@"native", @"employee_internal", @"whitehat", @"ffdb_internal"]);
+        tools = actions(@[@"native_surfaces_diag"]);
+    } else if ([self.menuGroup isEqualToString:@"dogfood"]) {
+        toggles = keys(@[@"FBDogFood-managedPhoneFlag", FBTKeyKnownDogfoodEnabled,
+                         FBTKeyDogfoodSweepEnabled]);
+        native = actions(@[@"dogfood_nag", @"dogfood_assistant", @"gold_builds"]);
+        tools = actions(@[@"gold_status", @"native_surfaces_diag"]);
+    } else if ([self.menuGroup isEqualToString:@"react"]) {
+        toggles = keys(@[FBTKeyReactNativeInternalEnabled]);
+        native = actions(@[@"rn_internal", @"rn_dev"]);
+        tools = actions(@[@"native_surfaces_diag"]);
+    } else if ([self.menuGroup isEqualToString:@"mobileconfig"]) {
+        toggles = keys(@[FBTKeyMobileConfigRuntimeEnabled, FBTKeyMobileConfigCaptureEnabled,
+                         FBTKeyMobileConfigOverridesEnabled, FBTKeyMobileConfigFetchDiagnosticsEnabled,
+                         FBTMCNativeProbeTigonKey, FBTMCNativeProbeFetcherKey]);
+        native = actions(@[@"mc_debug_native", @"ensure_mc_file", @"qe_ab"]);
+        tools = destinations(@[@"localconfig", @"namesdiagnostic", @"mobileconfig"]);
+    } else if ([self.menuGroup isEqualToString:@"diagnostics"]) {
+        toggles = keys(@[FBTKeyRuntimeBoolBrowserEnabled]);
+        native = destinations(@[@"networkinspector", @"bool", @"boollive",
+                                @"livetrace", @"headline", @"flags", @"queries"]);
+        tools = actions(@[@"native_surfaces_diag", @"clear"]);
+    } else if ([self.menuGroup isEqualToString:@"appearance"]) {
+        toggles = keys(@[FBTKeyLiquidGlassEnabled, FBTKeyFloatingTabBarEnabled,
+                         FBTKeyDatingEnabled, FBTKeyBetaBuildEnabled]);
+        native = destinations(@[@"feat:LiquidGlass", @"feat:FloatingTab", @"feat:DatingGemstone"]);
+    }
+
+    NSMutableArray *grouped = [NSMutableArray array];
+    NSMutableArray *headers = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 3; ++i) {
+        NSArray *rows = i == 0 ? toggles : (i == 1 ? native : tools);
+        if (!rows.count) continue;
+        [grouped addObject:rows];
+        [headers addObject:i == 0 ? @"Controles" : (i == 1 ? @"Menus e recursos" : @"Ferramentas")];
+    }
+    self.sections = grouped;
+    self.sectionTitles = headers;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section >= 0 && (NSUInteger)section < self.sectionTitles.count)
+        return self.sectionTitles[(NSUInteger)section];
     switch (section) {
         case 0: return @"Geral";
         case 1: return @"Hooks conhecidos";
@@ -234,6 +388,13 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (self.menuGroup.length) {
+        if ([self.menuGroup isEqualToString:@"dogfood"] && section == 0)
+            return @"managedPhoneFlag é uma preferência local — não autentica Employee nem inscreve em MDM. O painel Gold usa callbacks fornecidos pelo chamador.";
+        if ([self.menuGroup isEqualToString:@"employee"] && section == 0)
+            return @"Os gates locais permitem interfaces, mas cada plugin ainda pode exigir sessão, provider e autorização remota.";
+        return nil;
+    }
     if (section == 2) return @"Ativar a instrumentação ou o log não confirma que o fetch funcionou. Confira os hooks disponíveis, leituras observadas e respostas no diagnóstico.";
     if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
     return nil;
@@ -269,9 +430,24 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if ([kind isEqualToString:@"nav"]) {
+    } else if ([kind isEqualToString:@"nav"] ||
+               [kind isEqualToString:@"submenu"] ||
+               [kind isEqualToString:@"action"]) {
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
+    NSString *symbol = item[@"symbol"];
+    if (symbol.length) {
+        UIImage *image = [UIImage systemImageNamed:symbol];
+        if (image) {
+            UIListContentConfiguration *configured = [cell.contentConfiguration copy];
+            configured.image = image;
+            configured.imageProperties.tintColor = [UIColor secondaryLabelColor];
+            cell.contentConfiguration = configured;
+        }
+    }
+    NSString *identifier = item[@"group"] ?: item[@"action"] ?: item[@"dest"] ?: item[@"key"];
+    if (identifier.length) cell.accessibilityIdentifier =
+        [@"fbt.settings." stringByAppendingString:identifier];
     return cell;
 }
 
@@ -282,6 +458,12 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 }
 
 - (void)switchChanged:(FBTSettingsSwitch *)sender {
+    if ([sender.prefKey isEqualToString:@"FBDogFood-managedPhoneFlag"]) {
+        FBTDogFoodSetManagedPhoneFlag(sender.isOn);
+        sender.on = FBTDogFoodManagedPhoneFlag();
+        [self.tableView reloadData];
+        return;
+    }
     if (FBTMCNativeProbeIsKey(sender.prefKey)) {
         NSString *reason = nil;
         BOOL ok = FBTMCNativeProbeSetEnabled(sender.prefKey, sender.isOn, &reason);
@@ -447,6 +629,14 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
     NSString *kind = item[@"kind"];
+    if ([kind isEqualToString:@"submenu"]) {
+        FBTSettingsViewController *controller = [[FBTSettingsViewController alloc]
+            initWithStyle:UITableViewStyleInsetGrouped];
+        controller.menuGroup = item[@"group"];
+        controller.title = item[@"title"];
+        [self.navigationController pushViewController:controller animated:YES];
+        return;
+    }
     if ([kind isEqualToString:@"nav"]) {
         NSString *dest = item[@"dest"];
         UIViewController *vc = nil;
