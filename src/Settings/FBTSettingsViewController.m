@@ -27,6 +27,7 @@
 
 extern void FBTInstallLiquidGlassHooks(void);
 extern void FBTOpenNativeWhitehatSettings(void);
+extern void FBTSettingsGateDidSwitch(NSString *key, BOOL enabled);
 
 static NSString * const FBTCellID = @"FBTCell";
 static NSString * const FBTSwitchCellID = @"FBTSwitchCell";
@@ -254,6 +255,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         ],
         @[
             @{ @"kind": @"switch", @"title": @"MobileConfig runtime", @"subtitle": @"Controla registros e fallback dos readers. Live e Aquecer também ativam a sessão; desligar pausa os readers, mantendo os hooks instalados.", @"key": FBTKeyMobileConfigRuntimeEnabled },
+            @{ @"kind": @"switch", @"title": @"Aquecer MobileConfig nativo", @"subtitle": @"Prepara o UI nativo e o contexto de sessão; depende da classe carregada.", @"key": FBTKeyMobileConfigNativeUIWarmupEnabled },
             @{ @"kind": @"switch", @"title": @"Capturar leituras MobileConfig", @"subtitle": @"Registra chave, tipo, default, resultado e contador dos readers interceptados. Leituras com override continuam registradas quando desligado.", @"key": FBTKeyMobileConfigCaptureEnabled },
             @{ @"kind": @"switch", @"title": @"Log QE-info (seguro)", @"subtitle": @"Registra seleções e alertas QE da interface nativa, sem interceptação global. Ative antes dos probes nativos.", @"key": FBTKeyMobileConfigFetchDiagnosticsEnabled },
             @{ @"kind": @"switch", @"title": @"Probe Tigon nativo (sessão / experimental)", @"subtitle": @"Captura status e callback TigonSimpleCallbacks com slots+UUID verificados. Não intercepta NSURLSession ou __TEXT. Desativa ao reiniciar.", @"key": FBTMCNativeProbeTigonKey },
@@ -342,7 +344,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         native = actions(@[@"rn_internal", @"rn_dev"]);
         tools = actions(@[@"native_surfaces_diag"]);
     } else if ([self.menuGroup isEqualToString:@"mobileconfig"]) {
-        toggles = keys(@[FBTKeyMobileConfigRuntimeEnabled, FBTKeyMobileConfigCaptureEnabled,
+        toggles = keys(@[FBTKeyMobileConfigRuntimeEnabled, FBTKeyMobileConfigNativeUIWarmupEnabled, FBTKeyMobileConfigCaptureEnabled,
                          FBTKeyMobileConfigOverridesEnabled, FBTKeyMobileConfigFetchDiagnosticsEnabled,
                          FBTMCNativeProbeTigonKey, FBTMCNativeProbeFetcherKey]);
         native = actions(@[@"mc_debug_native", @"ensure_mc_file", @"qe_ab"]);
@@ -474,6 +476,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         FBTMobileConfigFetchDiagnosticsRecord(@"capture_paused", @{});
     }
     [FBTDefaults setBool:sender.isOn forKey:sender.prefKey];
+    FBTSettingsGateDidSwitch(sender.prefKey, sender.isOn);
     if ([sender.prefKey isEqualToString:FBTKeyMobileConfigRuntimeEnabled]) {
         FBTMobileConfigSetSessionActive(sender.isOn);
         if (sender.isOn) {
