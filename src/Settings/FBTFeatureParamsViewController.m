@@ -35,8 +35,20 @@ static const void *kCfg = &kCfg, *kIdx = &kIdx, *kName = &kName;
     NSString *cfg = objc_getAssociatedObject(s, kCfg);
     NSInteger idx = [objc_getAssociatedObject(s, kIdx) integerValue];
     NSString *name = objc_getAssociatedObject(s, kName);
-    [FBTMCOverridesFile setState:(FBTMCState)s.selectedSegmentIndex forConfig:cfg paramIdx:idx name:name];
-    [FBTUtils showToastForDuration:1.3 title:@"Override salvo no mc_overrides.json" subtitle:@"Aplica no próximo launch do Facebook"];
+    FBTMCState requested = (FBTMCState)s.selectedSegmentIndex;
+    NSError *error = nil;
+    BOOL saved = [FBTMCOverridesFile setState:requested forConfig:cfg paramIdx:idx name:name error:&error];
+    FBTMCState persisted = [FBTMCOverridesFile stateForConfig:cfg paramIdx:idx];
+    s.selectedSegmentIndex = (NSInteger)persisted;
+    if (!saved) {
+        [FBTUtils showToastForDuration:2.8 title:@"Alteração não gravada" subtitle:error.localizedDescription ?: @"Não foi possível gravar o arquivo de overrides."];
+        return;
+    }
+    if (persisted != requested) {
+        [FBTUtils showToastForDuration:2.8 title:@"Gravação não confirmada" subtitle:@"O estado relido do arquivo difere da seleção. Atualize e tente novamente."];
+        return;
+    }
+    [FBTUtils showToastForDuration:1.3 title:@"Override salvo no mc_overrides.json" subtitle:@"Arquivo conferido; reabra o Facebook para recarregar."];
 }
 
 - (void)rebuild {

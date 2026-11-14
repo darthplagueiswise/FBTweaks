@@ -77,6 +77,11 @@ static NSDictionary *FBTNIEncodedBody(NSData *bytes, NSUInteger maxSize) {
     if (preview) result[@"utf8_preview"] = preview;
     return result;
 }
+static NSNumber *FBTNIHTTPStatus(id value) {
+    if (![value isKindOfClass:NSNumber.class]) return nil;
+    NSInteger status = [value integerValue];
+    return status >= 100 && status <= 599 ? value : nil;
+}
 static void FBTNIPrune(void) {
     NSArray<NSString *> *names = [NSFileManager.defaultManager contentsOfDirectoryAtPath:FBTNIRoot() error:nil] ?: @[];
     NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
@@ -220,7 +225,9 @@ void FBTNetworkInspectorRecordTigon(NSDictionary *context, NSData *body) {
     FBTNIUpdate(rid, ^(NSMutableDictionary *record) {
         if (!record[@"purpose"]) record[@"purpose"] = copy[@"capture_reason"] ?: @"tigon_unclassified";
         if (!record[@"stage"]) record[@"stage"] = @"tigon_response_received";
-        record[@"tigon_http_status"] = copy[@"http_status"] ?: @0;
+        NSNumber *status = FBTNIHTTPStatus(copy[@"http_status"]);
+        if (status) record[@"tigon_http_status"] = status;
+        else [record removeObjectForKey:@"tigon_http_status"];
         record[@"tigon_status_source"] = copy[@"http_status_source"] ?: @"not_observed";
         for (NSString *field in @[@"request_host", @"request_path", @"request_method", @"authorization_state",
                                    @"authorization_scheme", @"authorization_credential_present", @"payload_provenance"]) {
@@ -241,14 +248,24 @@ void FBTNetworkInspectorRecordCompletion(NSDictionary *completion, NSData *body)
     if (!FBTNetworkInspectorIsCapturing()) return;
     NSDictionary *copy = [completion copy];
     NSDictionary *encoded = FBTNIEncodedBody(body, kMaxResponseBytes);
+    NSNumber *reportedLength = [copy[@"response_bytes"] isKindOfClass:NSNumber.class]
+        ? copy[@"response_bytes"] : nil;
+    if (!body && [reportedLength longLongValue] > (long long)kMaxResponseBytes)
+        encoded = @{@"capture_status": @"over_capture_limit", @"length": reportedLength};
     FBTNIUpdate(copy[@"request_id"], ^(NSMutableDictionary *record) {
         record[@"stage"] = @"native_completion";
-        record[@"native_transport_success"] = copy[@"native_transport_success"] ?: @NO;
-        record[@"native_completion_status"] = copy[@"http_status"] ?: @0;
+        if ([copy[@"native_transport_success"] isKindOfClass:NSNumber.class])
+            record[@"native_transport_success"] = copy[@"native_transport_success"];
+        else [record removeObjectForKey:@"native_transport_success"];
+        NSNumber *status = FBTNIHTTPStatus(copy[@"http_status"]);
+        if (status) record[@"native_completion_status"] = status;
+        else [record removeObjectForKey:@"native_completion_status"];
         record[@"native_completion_status_source"] = copy[@"http_status_source"] ?: @"not_observed";
-        record[@"duration_ms"] = copy[@"duration_ms"] ?: @0;
+        if ([copy[@"duration_ms"] isKindOfClass:NSNumber.class])
+            record[@"duration_ms"] = copy[@"duration_ms"];
+        else [record removeObjectForKey:@"duration_ms"];
         record[@"native_completion_body"] = encoded;
-        record[@"native_body_source"] = copy[@"payload_provenance"] ?: @"native_decoded_completion";
+        record[@"native_body_source"] = copy[@"payload_provenance"] ?: @"not_observed";
         record[@"note"] = @"HTTP body, when observed, comes from TigonSimpleCallbacks; native error text is a separate field.";
     });
 }
@@ -263,13 +280,20 @@ NSArray<NSDictionary *> *FBTNetworkInspectorSummaries(void) {
             NSData *data = [NSData dataWithContentsOfFile:[FBTNIRoot() stringByAppendingPathComponent:name]];
             NSDictionary *record = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
             if (![record isKindOfClass:NSDictionary.class]) continue;
-            [items addObject:@{@"record_id": record[@"record_id"] ?: @"",
+            NSNumber *status = FBTNIHTTPStatus(record[@"tigon_http_status"]);
+            NSString *statusSource = status ? record[@"tigon_status_source"] : nil;
+            if (!status) {
+                status = FBTNIHTTPStatus(record[@"native_completion_status"]);
+                if (status) statusSource = record[@"native_completion_status_source"];
+            }
+            NSMutableDictionary *summary = [@{@"record_id": record[@"record_id"] ?: @"",
                 @"created_at": record[@"created_at"] ?: @"",
                 @"purpose": record[@"purpose"] ?: @"unknown",
-                @"http_status": [record[@"tigon_http_status"] integerValue] >= 100
-                    ? record[@"tigon_http_status"] : (record[@"native_completion_status"] ?: @0),
+                @"http_status_source": statusSource ?: @"not_observed",
                 @"stage": record[@"stage"] ?: @"unknown",
-                @"request_id": record[@"request_id"] ?: @0}];
+                @"request_id": record[@"request_id"] ?: @0} mutableCopy];
+            if (status) summary[@"http_status"] = status;
+            [items addObject:summary];
         }
         [items sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
             return [b[@"created_at"] compare:a[@"created_at"]];

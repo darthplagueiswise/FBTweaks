@@ -11,6 +11,11 @@ static NSString *FBTNIJSON(NSDictionary *record) {
         options:(NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys) error:nil];
     return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
 }
+static id FBTNIVisibleHTTPStatus(id value) {
+    if ([value isKindOfClass:NSNumber.class] && [value integerValue] >= 100 && [value integerValue] <= 599)
+        return value;
+    return @"not_observed";
+}
 
 @interface FBTNetworkInspectorDetailController : UIViewController
 @property (nonatomic, copy) NSString *recordID;
@@ -67,15 +72,16 @@ static NSString *FBTNIJSON(NSDictionary *record) {
                             @"request_diagnostics": record[@"request_diagnostics"] ?: @{},
                             @"capture_state": record[@"request_parameter_capture"] ?: @"not_observed"};
                 break;
-        case 2: visible = @{@"http_status": record[@"tigon_http_status"] ?: @0,
+        case 2: visible = @{@"http_status": FBTNIVisibleHTTPStatus(record[@"tigon_http_status"]),
                             @"source": record[@"http_response_source"] ?: @"not_observed",
                             @"status_source": record[@"tigon_status_source"] ?: @"not_observed",
                             @"body": record[@"http_response_body"] ?: @{}};
                 break;
-        case 3: visible = @{@"success": record[@"native_transport_success"] ?: @NO,
-                            @"status": record[@"native_completion_status"] ?: @0,
+        case 3: visible = @{@"success": record[@"native_transport_success"] ?: @"not_observed",
+                            @"status": FBTNIVisibleHTTPStatus(record[@"native_completion_status"]),
+                            @"status_source": record[@"native_completion_status_source"] ?: @"not_observed",
                             @"body_source": record[@"native_body_source"] ?: @"not_observed",
-                            @"duration_ms": record[@"duration_ms"] ?: @0,
+                            @"duration_ms": record[@"duration_ms"] ?: @"not_observed",
                             @"body": record[@"native_completion_body"] ?: @{}};
                 break;
         default: break;
@@ -153,7 +159,7 @@ static NSString *FBTNIJSON(NSDictionary *record) {
         [NSString stringWithFormat:@"Capturas (%lu)", (unsigned long)self.captures.count];
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"O probe usa os slots Tigon e asyncFetch originais, validados por UUID. Sem CA, VPN, proxy ou computador. Dados completos ficam apenas no sandbox do Facebook com proteção de arquivo iOS; a captura não reinicia automaticamente.";
+    if (section == 0) return @"A captura observa os callbacks Fetcher/Tigon disponíveis nesta sessão. A espera e o resultado de alto nível do Search, a conclusão final de nomes e a gravação do mapa ficam sem observação por estes hooks. Os dados ficam no sandbox do Facebook com proteção de arquivo iOS; a captura não reinicia automaticamente.";
     return @"Corpos recebidos no Tigon ficam separados do retorno convertido pelo aplicativo. O corpo e os parâmetros podem conter credenciais privadas: use Exportar conscientemente.";
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -165,14 +171,14 @@ static NSString *FBTNIJSON(NSDictionary *record) {
     if (indexPath.section == 0) {
         BOOL armed = FBTNetworkInspectorIsCapturing();
         NSArray *titles = @[
-            armed ? @"Parar captura" : @"Iniciar captura completa (local)",
+            armed ? @"Parar captura" : @"Iniciar captura local",
             @"Estado dos hooks Tigon / fetcher",
             @"Abrir diagnóstico MobileConfig existente",
             @"Apagar todas as capturas locais"
         ];
         NSArray *subtitles = @[
             armed ? @"Ativa nesta sessão. Toque para parar; os arquivos persistem até apagar." :
-                    @"Arma hooks com validação de UUID e grava dados de requisição/resposta.",
+                    @"Arma os hooks disponíveis e grava os dados observados de requisição/resposta.",
             FBTNIJSON(FBTMCNativeProbeStatus()),
             @"Visualizar os eventos de fetch, QE-info e callbacks já instrumentados.",
             @"Apaga definitivamente os JSONs protegidos neste sandbox."
@@ -181,12 +187,15 @@ static NSString *FBTNIJSON(NSDictionary *record) {
         cell.detailTextLabel.text = subtitles[indexPath.row];
     } else {
         NSDictionary *record = self.captures[indexPath.row];
-        NSNumber *status = record[@"http_status"] ?: @0;
-        cell.textLabel.text = [NSString stringWithFormat:@"%@ · HTTP %@",
-                               record[@"purpose"] ?: @"unknown", status];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"#%@ · %@ · %@",
+        id status = FBTNIVisibleHTTPStatus(record[@"http_status"]);
+        NSString *http = [status isKindOfClass:NSNumber.class]
+            ? [NSString stringWithFormat:@"HTTP %@", status] : @"HTTP não observado";
+        cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@",
+                               record[@"purpose"] ?: @"unknown", http];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"#%@ · %@ · %@\nOrigem do HTTP: %@",
                                      record[@"request_id"] ?: @0,
-                                     record[@"created_at"] ?: @"", record[@"stage"] ?: @""];
+                                     record[@"created_at"] ?: @"", record[@"stage"] ?: @"",
+                                     record[@"http_status_source"] ?: @"not_observed"];
     }
     return cell;
 }
@@ -197,7 +206,7 @@ static NSString *FBTNIJSON(NSDictionary *record) {
 }
 - (void)startCapture {
     [FBTDefaults setBool:YES forKey:FBTKeyMobileConfigFetchDiagnosticsEnabled];
-    // Both hooks are session-only and installed via UUID/slot checks, not __TEXT patches.
+    // Both hooks are session-only and use their existing symbol/RTTI validation.
     NSString *tigonError = nil, *fetchError = nil;
     BOOL tigon = FBTMCNativeProbeSetEnabled(FBTMCNativeProbeTigonKey, YES, &tigonError);
     BOOL fetcher = FBTMCNativeProbeSetEnabled(FBTMCNativeProbeFetcherKey, YES, &fetchError);
@@ -212,11 +221,11 @@ static NSString *FBTNIJSON(NSDictionary *record) {
         return;
     }
     FBTNetworkInspectorSetCapturing(YES);
-    NSString *mode = fetcher && tigon ? @"Completo (fetcher + Tigon)" :
+    NSString *mode = fetcher && tigon ? @"Fetcher + Tigon" :
         tigon ? @"Tigon somente (respostas HTTP; correlação nativa parcial)" :
                 @"Fetcher somente (parâmetros e callback; sem corpo HTTP Tigon)";
     [self alert:[NSString stringWithFormat:@"Network Inspector: %@", mode]
-        message:@"A captura utiliza os símbolos/RTTI da imagem carregada, com fallback por UUID quando aplicável. Requisições e respostas disponíveis serão armazenadas no iPhone sem alterar o comportamento da rede."];
+        message:@"Os dados entregues aos hooks instalados serão armazenados no iPhone. A espera e o resultado de alto nível do Search, a conclusão final de nomes e a gravação do mapa ficam sem observação por estes hooks."];
     [self reloadCaptures];
 }
 - (void)toggleCapture {

@@ -1,0 +1,41 @@
+name: MobileConfig override and diagnostic regressions
+
+on:
+  pull_request:
+    branches: [flags, main]
+    paths:
+      - 'src/Runtime/FBTMCOverrides*'
+      - 'src/Runtime/FBTNativeMobileConfigOverrides.*'
+      - 'src/Runtime/FBTMobileConfigValueReader.*'
+      - 'src/Runtime/FBTNetworkInspectorStore.*'
+      - 'src/Settings/FBTFeatureParamsViewController.m'
+      - 'src/Settings/FBTNetworkInspectorViewController.m'
+      - 'tests/**'
+      - '.github/workflows/mobileconfig-regressions.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-regressions:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native owner paths and real filesystem selection
+        run: python3 -m unittest discover -s tests -p 'test_mc_override_path.py' -v
+      - name: Override persistence, aliases and failed writes
+        run: |
+          clang -fobjc-arc -framework Foundation tests/MCOverridesFileTests.m src/Runtime/FBTMCOverridesFile.m -o "$RUNNER_TEMP/mc-overrides-tests"
+          "$RUNNER_TEMP/mc-overrides-tests"
+      - name: Inspector absence, provenance and body limits
+        run: |
+          clang -std=c11 -fobjc-arc -framework Foundation tests/NetworkInspectorStoreTests.m src/Runtime/FBTNetworkInspectorStore.m -o "$RUNNER_TEMP/network-inspector-tests"
+          "$RUNNER_TEMP/network-inspector-tests"
+      - name: Native value reader and override path inspection
+        run: |
+          clang -fobjc-arc -Wno-incomplete-implementation -Wl,-export_dynamic -framework Foundation tests/MobileConfigValueReaderTests.m src/Runtime/FBTMobileConfigValueReader.m -o "$RUNNER_TEMP/mobileconfig-value-tests"
+          "$RUNNER_TEMP/mobileconfig-value-tests"
