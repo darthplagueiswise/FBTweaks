@@ -5,7 +5,8 @@ typedef NS_ENUM(NSInteger, FBTMCState) { FBTMCStateSys = 0, FBTMCStateOff = 1, F
 @interface FBTMCOverridesFile : NSObject
 + (nullable NSString *)path;                 // path resolvido do mc_overrides.json (AppGroups/getOverridesTablePath)
 + (FBTMCState)stateForConfig:(nonnull NSString *)configKey paramIdx:(NSInteger)idx;
-+ (void)setState:(FBTMCState)state forConfig:(nonnull NSString *)configKey paramIdx:(NSInteger)idx name:(nonnull NSString *)name;
++ (BOOL)setState:(FBTMCState)state forConfig:(nonnull NSString *)configKey paramIdx:(NSInteger)idx name:(nonnull NSString *)name;
++ (BOOL)setState:(FBTMCState)state forConfig:(nonnull NSString *)configKey paramIdx:(NSInteger)idx name:(nonnull NSString *)name error:(NSError **)error;
 + (BOOL)fileExists;
 + (NSMutableDictionary *)loadOverrides;
 + (NSString *)valueTextForConfigID:(NSInteger)configID paramIdx:(NSInteger)idx;
