@@ -184,17 +184,19 @@ jobs:
           "$RUNNER_TEMP/fbt-feature-catalog-tests"
 
       - name: Reproduce previous UIKit navigation and selection regressions
+        id: uikit_baseline
         run: |
           cd main
           python3 scripts/test-uikit-simulator.py --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
 
       - name: Test UIKit navigation, cell selection and accessible header
+        id: uikit_fixed
         run: |
           cd main
           python3 scripts/test-uikit-simulator.py --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
 
       - name: Upload UIKit regression evidence
-        if: always()
+        if: always() && (steps.uikit_baseline.outcome == 'success' || steps.uikit_baseline.outcome == 'failure' || steps.uikit_fixed.outcome == 'success' || steps.uikit_fixed.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: UIKit-regressions-${{ github.run_number }}
