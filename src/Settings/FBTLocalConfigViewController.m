@@ -3,6 +3,7 @@
 #import "../Runtime/FBTLocalConfigCatalog.h"
 #import "../Runtime/FBTMCOverridesFile.h"
 #import "../Runtime/FBTMobileConfigValueReader.h"
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
@@ -26,9 +27,18 @@
     if (self) _initialQuery = [query copy] ?: @"";
     return self;
 }
+- (instancetype)initWithConfiguration:(NSDictionary *)configuration {
+    self = [self initWithSearchQuery:@""];
+    if (self) _configuration = [configuration copy];
+    return self;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.configuration ? self.configuration[@"name"] : @"MobileConfig local";
+    FBTUIKit26ConfigureViewController(self);
+    FBTUIKit26ConfigureScrollView(self.tableView);
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    NSString *name = self.configuration[@"name"];
+    self.title = self.configuration ? (name.length ? name : [self.configuration[@"id"] description]) : @"MobileConfig local";
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
@@ -59,6 +69,7 @@
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    FBTConfigureNavigationChromeForGlass(self);
     if (self.configuration) [self refreshEffectiveValues];
 }
 - (void)viewDidDisappear:(BOOL)animated {
@@ -138,7 +149,7 @@
             @"reading": self.readings[pid] ?: @{@"available": @NO, @"reason": @"Leitura ainda não executada"}}];
     }
     NSDictionary *report = @{@"schema_version": @2, @"configuration_id": self.configuration[@"id"],
-        @"configuration": self.configuration[@"name"], @"scope": self.configuration[@"scope"],
+        @"configuration": self.configuration[@"name"] ?: NSNull.null, @"scope": self.configuration[@"scope"],
         @"map": self.configuration[@"source"], @"exported_at": @([NSDate date].timeIntervalSince1970), @"parameters": parameters};
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&error];
@@ -203,8 +214,10 @@
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"local"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];
+    FBTUIKit26ConfigureTableCell(cell);
     NSDictionary *row = self.rows[indexPath.row];
-    cell.textLabel.text = [NSString stringWithFormat:@"%@: %@", row[@"id"], row[@"name"]];
+    NSString *name = row[@"name"];
+    cell.textLabel.text = name.length ? [NSString stringWithFormat:@"%@: %@", row[@"id"], name] : [row[@"id"] description];
     cell.textLabel.numberOfLines = 0;
     cell.detailTextLabel.numberOfLines = 0;
     if (self.configuration) {
@@ -229,11 +242,21 @@
     BOOL ok = [FBTMCOverridesFile setValueText:value forConfigID:[self.configuration[@"id"] integerValue]
         paramIdx:[parameter[@"id"] integerValue] configName:self.configuration[@"name"] paramName:parameter[@"name"] error:&error];
     if (!ok) { [self message:error.localizedDescription ?: @"Não foi possível gravar o arquivo." title:@"Alteração não gravada"]; return; }
+    NSString *persisted = [FBTMCOverridesFile valueTextForConfigID:[self.configuration[@"id"] integerValue]
+        paramIdx:[parameter[@"id"] integerValue]];
+    if (!((!value && !persisted) || [persisted isEqualToString:value])) {
+        [self reloadValues];
+        [self.tableView reloadData];
+        [self message:@"O valor relido do arquivo difere da alteração solicitada. Atualize e confira o arquivo."
+            title:@"Gravação não confirmada"];
+        return;
+    }
     [self refreshEffectiveValues];
     [self message:[NSString stringWithFormat:@"%@\n\nEncerre e reabra o Facebook para reimportar os overrides.", [FBTMCOverridesFile path]] title:@"Override gravado"];
 }
 - (void)edit:(NSDictionary *)parameter {
     NSString *type = parameter[@"type"];
+    if (![@[@"int64", @"string", @"double"] containsObject:type ?: @""]) return;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:parameter[@"name"] message:type preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.text = self.values[[parameter[@"id"] stringValue]];
@@ -260,8 +283,7 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *row = self.rows[indexPath.row];
     if (!self.configuration) {
-        FBTLocalConfigViewController *child = [[FBTLocalConfigViewController alloc] initWithSearchQuery:@""];
-        child.configuration = row;
+        FBTLocalConfigViewController *child = [[FBTLocalConfigViewController alloc] initWithConfiguration:row];
         [self.navigationController pushViewController:child animated:YES];
         return;
     }
@@ -273,7 +295,8 @@
     }]];
     if ([row[@"type"] isEqualToString:@"bool"]) {
         for (NSString *value in @[@"true", @"false"]) [alert addAction:[UIAlertAction actionWithTitle:[@"Gravar " stringByAppendingString:value] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self save:value parameter:row]; }]];
-    } else [alert addAction:[UIAlertAction actionWithTitle:@"Editar valor…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self edit:row]; }]];
+    } else if ([@[@"int64", @"string", @"double"] containsObject:row[@"type"] ?: @""])
+        [alert addAction:[UIAlertAction actionWithTitle:@"Editar valor…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self edit:row]; }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Restaurar SYS" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) { [self save:nil parameter:row]; }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];

@@ -34,29 +34,48 @@
     return [scanner scanInteger:&index] && scanner.isAtEnd && index >= 0 ? index : -1;
 }
 
++ (NSInteger)configIDOfKey:(NSString *)configKey {
+    NSRange separator = [configKey rangeOfString:@":"];
+    if (separator.location == NSNotFound) return -1;
+    NSScanner *scanner = [NSScanner scannerWithString:[configKey substringToIndex:separator.location]];
+    NSInteger configID;
+    return [scanner scanInteger:&configID] && scanner.isAtEnd && configID >= 0 ? configID : -1;
+}
+
 + (FBTMCState)stateForConfig:(NSString *)configKey paramIdx:(NSInteger)idx {
+    NSInteger configID = [self configIDOfKey:configKey];
+    if (configID < 0 || idx < 0) return FBTMCStateSys;
     NSDictionary *all = [self loadOverrides];
-    NSArray *arr = all[configKey];
-    if (![arr isKindOfClass:NSArray.class]) return FBTMCStateSys;
-    for (NSString *e in arr) {
-        if (![e isKindOfClass:NSString.class]) continue;
-        if ([self idxOfEntry:e] != idx) continue;
-        NSString *low = e.lowercaseString;
-        if ([low hasSuffix:@" true"] || [low hasSuffix:@":true"]) return FBTMCStateOn;
-        if ([low hasSuffix:@" false"] || [low hasSuffix:@":false"]) return FBTMCStateOff;
-        return FBTMCStateOn; // valor não-bool presente => considerado ativo
+    NSString *prefix = [NSString stringWithFormat:@"%ld:", (long)configID];
+    for (NSString *key in all) {
+        if (![key hasPrefix:prefix] || ![all[key] isKindOfClass:NSArray.class]) continue;
+        for (NSString *e in all[key]) {
+            if (![e isKindOfClass:NSString.class]) continue;
+            if ([self idxOfEntry:e] != idx) continue;
+            NSString *low = e.lowercaseString;
+            if ([low hasSuffix:@" true"] || [low hasSuffix:@":true"]) return FBTMCStateOn;
+            if ([low hasSuffix:@" false"] || [low hasSuffix:@":false"]) return FBTMCStateOff;
+            return FBTMCStateOn; // valor não-bool presente => considerado ativo
+        }
     }
     return FBTMCStateSys;
 }
 
-+ (void)setState:(FBTMCState)state forConfig:(NSString *)configKey paramIdx:(NSInteger)idx name:(NSString *)name {
++ (BOOL)setState:(FBTMCState)state forConfig:(NSString *)configKey paramIdx:(NSInteger)idx name:(NSString *)name {
+    return [self setState:state forConfig:configKey paramIdx:idx name:name error:NULL];
+}
+
++ (BOOL)setState:(FBTMCState)state forConfig:(NSString *)configKey paramIdx:(NSInteger)idx name:(NSString *)name error:(NSError **)error {
+    if (error) *error = nil;
+    NSInteger configID = [self configIDOfKey:configKey];
+    if (configID < 0) {
+        if (error) *error = [NSError errorWithDomain:@"FBTLocalConfig" code:4
+            userInfo:@{NSLocalizedDescriptionKey: @"A configuração não contém um ID numérico válido. Nenhum valor foi gravado."}];
+        return NO;
+    }
     NSRange separator = [configKey rangeOfString:@":"];
-    if (separator.location == NSNotFound) return;
-    NSString *idText = [configKey substringToIndex:separator.location];
-    NSScanner *scanner = [NSScanner scannerWithString:idText]; NSInteger configID;
-    if (![scanner scanInteger:&configID] || !scanner.isAtEnd || configID < 0) return;
-    [self setValueText:state == FBTMCStateSys ? nil : (state == FBTMCStateOn ? @"true" : @"false")
-        forConfigID:configID paramIdx:idx configName:[configKey substringFromIndex:separator.location + 1] paramName:name error:nil];
+    return [self setValueText:state == FBTMCStateSys ? nil : (state == FBTMCStateOn ? @"true" : @"false")
+        forConfigID:configID paramIdx:idx configName:[configKey substringFromIndex:separator.location + 1] paramName:name error:error];
 }
 
 + (NSString *)valueTextForConfigID:(NSInteger)configID paramIdx:(NSInteger)idx {

@@ -38,6 +38,8 @@ int main(void) { @autoreleasepool {
         UTF8(@"None domain: FBHTTPErrorDomain code: 400 detail: "));
     NSArray *list = FBTNetworkInspectorSummaries();
     Assert(list.count == 1, @"all queued events processed");
+    Assert([list.firstObject[@"http_status_source"] isEqual:@"verified_tigon_response_status"],
+           @"summary preserves observed Tigon status provenance");
     NSString *identifier = list.firstObject[@"record_id"];
     NSDictionary *entry = FBTNetworkInspectorRecordWithID(identifier);
     Assert([entry[@"purpose"] isEqual:@"mobileconfig_qe_info"], @"purpose preserved");
@@ -53,7 +55,8 @@ int main(void) { @autoreleasepool {
         @"request_method": @"POST"}, @[]);
     FBTNetworkInspectorRecordTigon(@{@"request_id": @5, @"http_status": @0}, nil);
     FBTNetworkInspectorRecordCompletion(@{@"request_id": @5,
-        @"http_status": @400, @"native_transport_success": @NO}, UTF8(@"error"));
+        @"http_status": @400, @"http_status_source": @"native_formatted_transport_error",
+        @"native_transport_success": @NO}, UTF8(@"error"));
     NSArray *records = FBTNetworkInspectorSummaries();
     Assert(records.count == 2, @"second request captured");
     NSDictionary *secondSummary = nil;
@@ -66,6 +69,8 @@ int main(void) { @autoreleasepool {
            @"missing Tigon body not mistaken for an empty HTTP response");
     Assert([secondSummary[@"http_status"] integerValue] == 400,
            @"missing Tigon status falls back to native status");
+    Assert([secondSummary[@"http_status_source"] isEqual:@"native_formatted_transport_error"],
+           @"native fallback keeps its distinct status provenance");
     FBTNetworkInspectorSetCapturing(NO);
     FBTNetworkInspectorRecordRequest(@{@"request_id": @6}, @[]);
     Assert(FBTNetworkInspectorSummaries().count == 2, @"disarmed ignores later requests");
@@ -86,6 +91,46 @@ int main(void) { @autoreleasepool {
     Assert([diag[@"query_parameter_index_count"] integerValue] == 3, @"counts parameter indices");
     Assert([diag[@"device_id_state"] isEqual:@"literal_parameter_name"], @"labels prebuilder placeholder");
     Assert([diag[@"query_parse_status"] isEqual:@"complete_numeric_list"], @"validates query schema");
+
+    FBTNetworkInspectorClear();
+    FBTNetworkInspectorRecordRequest(@{@"request_id": @8,
+        @"capture_reason": @"mobileconfig_qe_info"}, @[]);
+    NSDictionary *pendingSummary = FBTNetworkInspectorSummaries().firstObject;
+    NSDictionary *pending = FBTNetworkInspectorRecordWithID(pendingSummary[@"record_id"]);
+    Assert(pendingSummary[@"http_status"] == nil, @"pending request has no invented HTTP status");
+    Assert([pendingSummary[@"http_status_source"] isEqual:@"not_observed"],
+           @"pending request marks HTTP provenance unobserved");
+    Assert(pending[@"native_transport_success"] == nil, @"pending request is not a native failure");
+
+    FBTNetworkInspectorRecordCompletion(@{@"request_id": @8}, nil);
+    NSDictionary *unobserved = FBTNetworkInspectorRecordWithID(pendingSummary[@"record_id"]);
+    Assert(unobserved[@"native_transport_success"] == nil, @"missing callback result stays absent");
+    Assert(unobserved[@"native_completion_status"] == nil, @"missing callback HTTP status stays absent");
+    Assert(unobserved[@"duration_ms"] == nil, @"missing callback duration stays absent");
+    Assert([unobserved[@"native_body_source"] isEqual:@"not_observed"],
+           @"missing callback provenance is not labeled decoded");
+
+    FBTNetworkInspectorRecordCompletion(@{@"request_id": @8,
+        @"native_transport_success": @NO, @"http_status": @0, @"duration_ms": @0}, nil);
+    NSDictionary *failed = FBTNetworkInspectorRecordWithID(pendingSummary[@"record_id"]);
+    Assert([failed[@"native_transport_success"] isEqual:@NO], @"observed false remains a native failure");
+    Assert([failed[@"duration_ms"] isEqual:@0], @"observed zero duration is retained");
+    Assert(failed[@"native_completion_status"] == nil, @"HTTP zero is not a received HTTP status");
+
+    FBTNetworkInspectorRecordCompletion(@{@"request_id": @9,
+        @"native_transport_success": @YES, @"response_bytes": @2097153,
+        @"payload_provenance": @"native_decoded_completion"}, nil);
+    NSDictionary *oversized = nil;
+    for (NSDictionary *candidate in FBTNetworkInspectorSummaries()) {
+        if ([candidate[@"request_id"] integerValue] == 9)
+            oversized = FBTNetworkInspectorRecordWithID(candidate[@"record_id"]);
+    }
+    Assert(oversized != nil, @"oversized native completion has a record");
+    NSDictionary *omittedBody = oversized[@"native_completion_body"];
+    Assert([omittedBody[@"capture_status"] isEqual:@"over_capture_limit"],
+           @"known oversized body is not mislabeled unobserved");
+    Assert([omittedBody[@"length"] isEqual:@2097153], @"omitted body keeps its reported byte length");
+    Assert(omittedBody[@"base64"] == nil, @"omitted oversized body adds no captured bytes");
     FBTNetworkInspectorSetCapturing(NO);
     FBTNetworkInspectorClear();
     NSLog(@"PASS: %d Network Inspector checks", checks);

@@ -1,4 +1,5 @@
 #import "FBTNativeMobileConfigOverrides.h"
+#import "FBTMCOverridesPath.h"
 #import "FBTMobileConfigRuntime.h"
 #import "FBTEmployeeDiagnostics.h"
 #import "../FBTPrefix.h"
@@ -202,9 +203,11 @@ NSString *FBTNativeMobileConfigOverridesFilePath(void) {
     for (id obj in FBTNativeOverrideObjectsSnapshot()) {
         if (![obj respondsToSelector:pathSel]) continue;
         @try {
-            NSString *(*msg)(id, SEL) = (NSString *(*)(id, SEL))objc_msgSend;
-            id path = msg(obj, pathSel);
-            if ([path isKindOfClass:[NSString class]] && [path length]) return path;
+            NSMethodSignature *signature = [obj methodSignatureForSelector:pathSel];
+            if (signature.numberOfArguments != 2 || signature.methodReturnType[0] != '@') continue;
+            id location = ((id (*)(id, SEL))objc_msgSend)(obj, pathSel);
+            NSString *path = FBTMCOverridesPathForNativeLocation(location);
+            if (path.length) return path;
         } @catch (__unused NSException *e) {
         }
     }

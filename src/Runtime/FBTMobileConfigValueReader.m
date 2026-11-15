@@ -1,4 +1,5 @@
 #import "FBTMobileConfigValueReader.h"
+#import "FBTMCOverridesPath.h"
 #import "FBTLocalConfigCatalog.h"
 #import "FBTNativeMobileConfigOverrides.h"
 #import "FBTMobileConfigRuntime.h"
@@ -89,9 +90,7 @@ static NSString *FBTNativeOverridesFileForContext(id context) {
     // overridesFilename (0x15d34c), i.e. mc_overrides.json, to that directory.
     if (!FBTNoArgMethod(context, @"getOverridesTablePath", '@')) return nil;
     id location = ((id (*)(id, SEL))objc_msgSend)(context, NSSelectorFromString(@"getOverridesTablePath"));
-    NSString *directory = [location isKindOfClass:NSURL.class] && [location isFileURL] ? [location path] :
-        ([location isKindOfClass:NSString.class] ? location : nil);
-    return directory.length ? [directory stringByAppendingPathComponent:@"mc_overrides.json"] : nil;
+    return FBTMCOverridesPathForNativeLocation(location);
 }
 
 static NSDictionary *FBTInspectParameterImpl(NSDictionary *configuration, NSDictionary *parameter, BOOL reload) {

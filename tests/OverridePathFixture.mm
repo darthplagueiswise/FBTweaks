@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import "../src/Runtime/FBTMCOverridesPath.h"
 
 static NSFileManager *realManager;
 static NSDictionary<NSString *, NSURL *> *containers;
@@ -26,11 +27,18 @@ static NSUInteger checks;
 @end
 
 @interface ObservedOverrides : NSObject
-@property(nonatomic, copy) NSString *path;
-- (NSString *)getOverridesTablePath;
+@property(nonatomic, copy) id path;
+- (id)getOverridesTablePath;
 @end
 @implementation ObservedOverrides
-- (NSString *)getOverridesTablePath { return self.path; }
+- (id)getOverridesTablePath { return self.path; }
+@end
+
+@interface ScalarOverrides : NSObject
+- (NSUInteger)getOverridesTablePath;
+@end
+@implementation ScalarOverrides
+- (NSUInteger)getOverridesTablePath { return 1; }
 @end
 
 static NSArray *FBTNativeOverrideObjectsSnapshot(void) { return observedObjects ?: @[]; }
@@ -81,6 +89,20 @@ int main(void) { @autoreleasepool {
         owner.path = [base stringByAppendingPathComponent:@"actual-owner/mc_overrides.json"];
         observedObjects = @[owner];
         Expect(FBTNativeMobileConfigOverridesFilePath(), owner.path, "observed owner wins");
+        NSString *ownerDirectory = [base stringByAppendingPathComponent:@"actual-owner"];
+        NSString *ownerFile = [ownerDirectory stringByAppendingPathComponent:@"mc_overrides.json"];
+        owner.path = [NSURL fileURLWithPath:ownerDirectory isDirectory:YES];
+        Expect(FBTNativeMobileConfigOverridesFilePath(), ownerFile, "native directory NSURL wins without an existing file");
+        owner.path = ownerDirectory;
+        Expect(FBTNativeMobileConfigOverridesFilePath(), ownerFile, "directory NSString appends filename");
+        owner.path = [NSURL fileURLWithPath:ownerFile];
+        Expect(FBTNativeMobileConfigOverridesFilePath(), ownerFile, "complete file NSURL is not appended twice");
+        owner.path = [NSURL URLWithString:@"https://example.invalid/mobileconfig"];
+        Expect(FBTNativeMobileConfigOverridesFilePath(), nil, "remote URL is not a filesystem path");
+        owner.path = @"relative/mobileconfig";
+        Expect(FBTNativeMobileConfigOverridesFilePath(), nil, "relative path is rejected");
+        observedObjects = @[[ScalarOverrides new]];
+        Expect(FBTNativeMobileConfigOverridesFilePath(), nil, "non-object getter ABI is rejected");
         observedObjects = @[];
 
         Write(docsPath);

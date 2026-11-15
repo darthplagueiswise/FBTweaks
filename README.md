@@ -2,6 +2,8 @@
 
 Tweak Theos/rootless para o Facebook iOS, arm64, SDK iPhoneOS 26.2 / min iOS 16.3. Abra pelo ícone **FBTweak** na tela nativa de Configurações. Fallback: **dois toques com três dedos** na tela.
 
+[Correção do caminho nativo de overrides e do diagnóstico](docs/mobileconfig-override-path-and-diagnostics.md): suporta `NSURL`, confirma a gravação pelo readback e diferencia callback não observado de falha observada. Inclui evidências estáticas da IPA 587 e regressões de persistência.
+
 ## Correções de `flags` — Facebook 583
 
 A instrumentação, os controles Runtime/Aquecer/Log, os acessos nativos e as assinaturas foram revistos contra o payload com LIEF e Capstone. O diagnóstico informa a cobertura disponível e o retorno observado. O funcionamento remoto de Page ID, nomes e parâmetros precisa ser confirmado no aparelho.

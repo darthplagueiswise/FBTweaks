@@ -73,15 +73,11 @@ static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 	return self;
 }
 
-- (void)viewDidLayoutSubviews {
-	[super viewDidLayoutSubviews];
-}
-
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
 	FBTUIKit26ConfigureViewController(self);
-	FBTUIKit26InstallNavigationTitleBubble(self);
+	self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
@@ -114,7 +110,6 @@ static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
 	FBTConfigureNavigationChromeForGlass(self);
-	FBTUIKit26RefreshNavigationTitleBubble(self);
 }
 
 #pragma mark - Helpers
@@ -147,8 +142,10 @@ static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 	cfg.secondaryText = row.dynamicSubtitle ? row.dynamicSubtitle() : row.subtitle;
 	cfg.textProperties.color = row.titleColor ?: (row.style == FBTBaseSettingsRowStyleDestructive ? UIColor.systemRedColor : UIColor.labelColor);
 	cfg.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+	cfg.textProperties.numberOfLines = 0;
 	cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
 	cfg.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+	cfg.secondaryTextProperties.numberOfLines = 0;
 	cfg.textToSecondaryTextVerticalPadding = 3.5;
 	cfg.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
 
