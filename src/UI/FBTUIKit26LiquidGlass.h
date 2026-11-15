@@ -9,11 +9,11 @@ UIColor *FBTUIKit26BaseSurfaceColor(void);
 UIColor *FBTUIKit26PanelFillColor(void);
 UIColor *FBTUIKit26SeparatorColor(void);
 
-void FBTUIKit26ApplyContainerBackgroundToViewController(UIViewController *vc);
 void FBTUIKit26ConfigureViewController(UIViewController *vc);
 void FBTConfigureNavigationChromeForGlass(UIViewController *vc);
-void FBTUIKit26InstallNavigationTitleBubble(UIViewController *vc);
-void FBTUIKit26RefreshNavigationTitleBubble(UIViewController *vc);
+UIView *FBTUIKit26CreateOverviewHeader(CGFloat width);
+// Call after table layout and content-size-category changes.
+void FBTUIKit26UpdateTableHeaderLayout(UITableView *tableView);
 void FBTUIKit26ConfigureScrollView(UIScrollView *scrollView);
 void FBTUIKit26ConfigureTableView(UITableView *tableView);
 void FBTUIKit26ConfigureCollectionView(UICollectionView *collectionView);
@@ -25,7 +25,6 @@ void FBTUIKit26ConfigureButton(UIButton *button);
 void FBTUIKit26ConfigureSearchBar(UISearchBar *searchBar);
 void FBTUIKit26ConfigureSearchNavigationItem(UINavigationItem *navigationItem);
 void FBTUIKit26ConfigureSegmentedControl(UISegmentedControl *control);
-void FBTUIKit26ConfigureTabBar(UITabBar *tabBar);
 void FBTStyleControlForGlass(UIControl *control);
 
 @interface FBTUIKit26GlassPanelView : UIVisualEffectView

@@ -177,6 +177,32 @@ jobs:
           clang -fobjc-arc -Wno-incomplete-implementation -Wl,-export_dynamic -framework Foundation tests/LocalConfigDescriptorTests.m src/Runtime/FBTLocalConfigCatalog.m -lz -o /tmp/fbt-descriptor-tests
           /tmp/fbt-descriptor-tests
 
+      - name: Test complete typed visual feature catalog
+        run: |
+          cd main
+          clang -fobjc-arc -framework Foundation tests/FeatureCatalogCoverageTests.m src/Settings/FBTFeatureCatalog.m -o "$RUNNER_TEMP/fbt-feature-catalog-tests"
+          "$RUNNER_TEMP/fbt-feature-catalog-tests"
+
+      - name: Reproduce previous UIKit navigation and selection regressions
+        run: |
+          cd main
+          python3 scripts/test-uikit-simulator.py --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
+
+      - name: Test UIKit navigation, cell selection and accessible header
+        run: |
+          cd main
+          python3 scripts/test-uikit-simulator.py --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
+
+      - name: Upload UIKit regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: UIKit-regressions-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/fbt-uikit-baseline
+            ${{ runner.temp }}/fbt-uikit-fixed
+          if-no-files-found: error
+
       - name: Validate safe dynamic hooking architecture
         run: |
           cd main

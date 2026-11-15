@@ -5,6 +5,7 @@
 #import "FBTNativeTraceViewController.h"
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
+#import "../UI/FBTUIKit26LiquidGlass.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "FBTSymbolsBrowserViewController.h"
@@ -55,57 +56,7 @@ static long long FBTParseLongLongString(NSString *string) {
 }
 
 static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
-    if (!vc.navigationController) return;
-    UINavigationBar *bar = vc.navigationController.navigationBar;
-    if (@available(iOS 26.0, *)) {
-        // Use the system default Glass. Do NOT set any custom appearance on iOS26.
-    } else {
-        UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
-        [appearance configureWithDefaultBackground];
-        bar.standardAppearance = appearance;
-        bar.scrollEdgeAppearance = appearance;
-        bar.compactAppearance = appearance;
-    }
-    bar.prefersLargeTitles = YES;
-}
-
-// A single native glass hero is sufficient. System rows, switches, and the
-// navigation bar get their appearance from UIKit. Avoid glass on every cell.
-static UIView *FBTGlassOverviewHeader(CGFloat width) {
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 134)];
-    container.backgroundColor = [UIColor clearColor];
-    UIVisualEffect *effect = nil;
-    if (@available(iOS 26.0, *)) effect = [UIGlassEffect new];
-    else effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
-    UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:effect];
-    glass.frame = CGRectMake(16, 12, MAX(0, width - 32), 108);
-    glass.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    glass.layer.cornerRadius = 24;
-    glass.clipsToBounds = YES;
-    [container addSubview:glass];
-
-    UILabel *heading = [UILabel new];
-    heading.text = @"FBTweak";
-    heading.textColor = [UIColor labelColor];
-    heading.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
-    heading.adjustsFontForContentSizeCategory = YES;
-    UILabel *caption = [UILabel new];
-    caption.text = @"Acessos nativos, flags locais e diagnósticos organizados por área.";
-    caption.textColor = [UIColor secondaryLabelColor];
-    caption.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
-    caption.adjustsFontForContentSizeCategory = YES;
-    caption.numberOfLines = 0;
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[heading, caption]];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 6;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [glass.contentView addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:glass.contentView.leadingAnchor constant:18],
-        [stack.trailingAnchor constraintEqualToAnchor:glass.contentView.trailingAnchor constant:-18],
-        [stack.centerYAnchor constraintEqualToAnchor:glass.contentView.centerYAnchor]
-    ]];
-    return container;
+    FBTConfigureNavigationChromeForGlass(vc);
 }
 
 static NSArray<NSDictionary *> *FBTMenuRows(NSArray<NSArray<NSDictionary *> *> *catalog,
@@ -213,9 +164,11 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
         self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
             initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                 target:self action:@selector(closeTapped)];
-        self.tableView.tableHeaderView = FBTGlassOverviewHeader(self.tableView.bounds.size.width);
+        self.tableView.tableHeaderView = FBTUIKit26CreateOverviewHeader(self.tableView.bounds.size.width);
     }
     self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 60.0;
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTSwitchCellID];
     [self rebuildSections];
@@ -225,6 +178,18 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     [super viewWillAppear:animated];
     FBTConfigureDefaultLiquidGlass(self);
     [self.tableView reloadData];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    FBTUIKit26UpdateTableHeaderLayout(self.tableView);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (self.isViewLoaded && ![self.traitCollection.preferredContentSizeCategory isEqualToString:previousTraitCollection.preferredContentSizeCategory]) {
+        FBTUIKit26UpdateTableHeaderLayout(self.tableView);
+    }
 }
 
 - (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -431,6 +396,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
 
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = item[@"title"];
+    cfg.textProperties.numberOfLines = 0;
     cfg.secondaryText = item[@"subtitle"];
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
     cfg.secondaryTextProperties.numberOfLines = 0;
@@ -1083,6 +1049,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
         cfg.text = @"Nenhuma leitura capturada ainda";
+        cfg.textProperties.numberOfLines = 0;
         cfg.secondaryText = [NSString stringWithFormat:@"Deixa MobileConfig runtime + captura ligados, reabre o Facebook se necessário, e navega nas telas que tu quer investigar. %@", FBTNativeMobileConfigStatus() ?: @""];
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
@@ -1095,6 +1062,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSString *forced = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@"  FORCE %@=%@", e[@"forcedType"] ?: @"", e[@"forcedValue"] ?: @""] : @"";
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = name;
+    cfg.textProperties.numberOfLines = 0;
     cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@ · count %@ · result %@%@\n%@", config, e[@"type"] ?: @"?", e[@"count"] ?: @0, e[@"result"] ?: @"", forced, e[@"nativeStatus"] ?: FBTNativeMobileConfigStatus() ?: @""];
     cfg.secondaryTextProperties.numberOfLines = 3;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
@@ -1200,6 +1168,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
         cfg.text = @"Nenhum getter BOOL encontrado";
+        cfg.textProperties.numberOfLines = 0;
         cfg.secondaryText = @"Busca por termos como dogfood, internal, employee, debug, RCT, React, FBShared ou main-exec. A busca aceita múltiplas palavras e roda só pós-launch.";
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
@@ -1209,6 +1178,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *e = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = [NSString stringWithFormat:@"%@%@", [e[@"classMethod"] boolValue] ? @"+" : @"-", e[@"selector"] ?: @""];
+    cfg.textProperties.numberOfLines = 0;
     NSString *force = [e[@"forced"] boolValue] ? [NSString stringWithFormat:@" · FORCE %@", FBTBoolText([e[@"force"] boolValue])] : ([e[@"observing"] boolValue] ? @" · OBSERVE" : @"");
     NSString *hookState = e[@"installState"] ?: @"unknown";
     id original = e[@"observedOriginal"];
@@ -1273,6 +1243,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSDictionary *f = self.filtered[indexPath.row];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = f[@"p"] ?: @"";
+    cfg.textProperties.numberOfLines = 0;
     cfg.secondaryText = [NSString stringWithFormat:@"%@ · %@ · default %@ · sid %@", f[@"c"] ?: @"", f[@"t"] ?: @"?", f[@"d"] ?: @"—", f[@"sid"] ?: @0];
     cfg.secondaryTextProperties.numberOfLines = 3;
     cfg.secondaryTextProperties.color = [UIColor secondaryLabelColor];
@@ -1312,6 +1283,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if (!self.filtered.count) {
         UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
         cfg.text = @"Nenhum QueryConfig empacotado";
+        cfg.textProperties.numberOfLines = 0;
         cfg.secondaryText = @"Os JSONs enviados devem estar em FBTweak.bundle/QueryConfigs/.";
         cfg.secondaryTextProperties.numberOfLines = 0;
         cell.contentConfiguration = cfg;
@@ -1321,6 +1293,7 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSArray *vars = [item[@"variables"] isKindOfClass:[NSArray class]] ? item[@"variables"] : @[];
     UIListContentConfiguration *cfg = [cell defaultContentConfiguration];
     cfg.text = item[@"name"] ?: @"";
+    cfg.textProperties.numberOfLines = 0;
     NSString *varsText = vars.count ? [vars componentsJoinedByString:@", "] : (item[@"value"] ?: @"—");
     cfg.secondaryText = [NSString stringWithFormat:@"id %@ · %@\nvars/value: %@", item[@"id"] ?: @"—", item[@"file"] ?: @"", varsText];
     cfg.secondaryTextProperties.numberOfLines = 4;

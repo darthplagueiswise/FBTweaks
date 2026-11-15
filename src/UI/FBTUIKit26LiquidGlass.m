@@ -1,6 +1,7 @@
 #import "FBTUIKit26LiquidGlass.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
+#include <math.h>
 
 static UIColor *FBTUIKit26TintColor(void) { return [UIColor colorWithRed:0.0 green:0.478 blue:1.0 alpha:1.0]; }
 
@@ -9,76 +10,6 @@ static NSInteger const kFBTUIKit26GlassBackgroundTag = 0x51C126;
 static UIColor *FBTUIKit26BorderColor(void);
 static UIVisualEffectView *FBTUIKit26EnsureGlassBackground(UIView *view, CGFloat radius, BOOL interactive, BOOL clearStyle, UIColor *tintColor);
 
-static NSInteger const kFBTUIKit26TitleBubbleTag = 0x51C260;
-
-@interface FBTUIKit26TitleBubbleView : UIVisualEffectView
-@property (nonatomic, strong) UILabel *label;
-- (void)configureWithTitle:(NSString *)title;
-@end
-
-@implementation FBTUIKit26TitleBubbleView
-
-- (instancetype)initWithTitle:(NSString *)title {
-    self = [super initWithEffect:FBTUIKit26GlassEffect(NO, YES, nil)];
-    if (self) {
-        self.tag = kFBTUIKit26TitleBubbleTag;
-        self.backgroundColor = UIColor.clearColor;
-        self.contentView.backgroundColor = FBTUIKit26PanelFillColor();
-        self.layer.cornerRadius = 20.0;
-        if ([self.layer respondsToSelector:@selector(setCornerCurve:)]) self.layer.cornerCurve = kCACornerCurveContinuous;
-        self.layer.masksToBounds = YES;
-        self.clipsToBounds = YES;
-        self.userInteractionEnabled = NO;
-        self.translatesAutoresizingMaskIntoConstraints = NO;
-        [self setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-        [self setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-
-        _label = [UILabel new];
-        _label.translatesAutoresizingMaskIntoConstraints = NO;
-        _label.textAlignment = NSTextAlignmentCenter;
-        _label.textColor = UIColor.labelColor;
-        _label.adjustsFontForContentSizeCategory = YES;
-        _label.font = [UIFontMetrics.defaultMetrics scaledFontForFont:[UIFont systemFontOfSize:20.0 weight:UIFontWeightBold]];
-        _label.lineBreakMode = NSLineBreakByTruncatingMiddle;
-        _label.numberOfLines = 1;
-        [self.contentView addSubview:_label];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [_label.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6.5],
-            [_label.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:18.0],
-            [_label.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-18.0],
-            [_label.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6.5],
-            [self.heightAnchor constraintGreaterThanOrEqualToConstant:39.0],
-        ]];
-        [self configureWithTitle:title];
-    }
-    return self;
-}
-
-- (CGSize)intrinsicContentSize {
-    NSString *title = self.label.text ?: @"";
-    CGSize textSize = [title sizeWithAttributes:@{ NSFontAttributeName: self.label.font ?: [UIFont boldSystemFontOfSize:20.0] }];
-    CGFloat maxWidth = MIN(UIScreen.mainScreen.bounds.size.width - 150.0, 300.0);
-    CGFloat width = MIN(MAX(78.0, ceil(textSize.width) + 38.0), MAX(120.0, maxWidth));
-    return CGSizeMake(width, 40.0);
-}
-
-- (CGSize)sizeThatFits:(CGSize)size { return self.intrinsicContentSize; }
-
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
-    [super traitCollectionDidChange:previousTraitCollection];
-    self.effect = FBTUIKit26GlassEffect(NO, YES, nil);
-    self.contentView.backgroundColor = FBTUIKit26PanelFillColor();
-}
-
-- (void)configureWithTitle:(NSString *)title {
-    self.label.text = title ?: @"";
-    [self invalidateIntrinsicContentSize];
-    [self setNeedsLayout];
-}
-
-@end
-
 BOOL FBTUIKit26IsAvailable(void) {
     if (@available(iOS 26.0, *)) return YES;
     return NO;
@@ -86,20 +17,10 @@ BOOL FBTUIKit26IsAvailable(void) {
 
 UIVisualEffect *FBTUIKit26GlassEffect(BOOL clearStyle, BOOL interactive, UIColor *tintColor) {
     if (@available(iOS 26.0, *)) {
-        Class glassClass = NSClassFromString(@"UIGlassEffect");
-        SEL factory = NSSelectorFromString(@"effectWithStyle:");
-        if (glassClass && [glassClass respondsToSelector:factory]) {
-            id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, factory, clearStyle ? 1 : 0);
-            SEL setInteractive = NSSelectorFromString(@"setInteractive:");
-            if (effect && [effect respondsToSelector:setInteractive]) {
-                ((void (*)(id, SEL, BOOL))objc_msgSend)(effect, setInteractive, interactive);
-            }
-            SEL setTintColor = NSSelectorFromString(@"setTintColor:");
-            if (effect && tintColor && [effect respondsToSelector:setTintColor]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(effect, setTintColor, tintColor);
-            }
-            if ([effect isKindOfClass:UIVisualEffect.class]) return (UIVisualEffect *)effect;
-        }
+        UIGlassEffect *effect = [UIGlassEffect effectWithStyle:clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
+        effect.interactive = interactive;
+        effect.tintColor = tintColor;
+        return effect;
     }
 
     if (@available(iOS 13.0, *)) {
@@ -159,118 +80,116 @@ static UIColor *FBTUIKit26BorderColor(void) {
     }];
 }
 
-void FBTUIKit26ApplyContainerBackgroundToViewController(UIViewController *vc) {
-    if (!vc || !FBTUIKit26IsAvailable()) return;
-    NSInteger glassStyle = 1; // UIContainerBackgroundStyleGlass in the iOS 26 SDK.
-    SEL preferred = NSSelectorFromString(@"setPreferredContainerBackgroundStyle:");
-    SEL direct = NSSelectorFromString(@"setContainerBackgroundStyle:");
-    if ([vc respondsToSelector:preferred]) {
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(vc, preferred, glassStyle);
-    } else if ([vc respondsToSelector:direct]) {
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(vc, direct, glassStyle);
-    }
-}
-
-void FBTUIKit26InstallNavigationTitleBubble(UIViewController *vc) {
-    if (!vc || !FBTUIKit26IsAvailable()) return;
-    NSString *title = vc.title ?: vc.navigationItem.title;
-    if (!title.length) return;
-
-    FBTUIKit26TitleBubbleView *bubble = nil;
-    if ([vc.navigationItem.titleView isKindOfClass:FBTUIKit26TitleBubbleView.class]) {
-        bubble = (FBTUIKit26TitleBubbleView *)vc.navigationItem.titleView;
-    } else {
-        bubble = [[FBTUIKit26TitleBubbleView alloc] initWithTitle:title];
-        vc.navigationItem.titleView = bubble;
-    }
-    [bubble configureWithTitle:title];
-}
-
-void FBTUIKit26RefreshNavigationTitleBubble(UIViewController *vc) {
-    if (!vc || !FBTUIKit26IsAvailable()) return;
-    NSString *title = vc.title ?: vc.navigationItem.title;
-    if (!title.length) return;
-    if ([vc.navigationItem.titleView isKindOfClass:FBTUIKit26TitleBubbleView.class]) {
-        [(FBTUIKit26TitleBubbleView *)vc.navigationItem.titleView configureWithTitle:title];
-    } else {
-        FBTUIKit26InstallNavigationTitleBubble(vc);
-    }
-}
-
 void FBTConfigureNavigationChromeForGlass(UIViewController *vc) {
     if (!vc) return;
-    FBTUIKit26InstallNavigationTitleBubble(vc);
-
-    UINavigationBar *bar = vc.navigationController.navigationBar;
-    if (bar) {
-        bar.translucent = YES;
-        bar.backgroundColor = UIColor.clearColor;
-        bar.prefersLargeTitles = NO;
-        if (@available(iOS 13.0, *)) {
-            UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
-            [appearance configureWithTransparentBackground];
-            appearance.backgroundColor = UIColor.clearColor;
-            appearance.backgroundEffect = FBTUIKit26GlassEffect(NO, NO, nil);
-            appearance.shadowColor = UIColor.clearColor;
-            NSDictionary *titleAttrs = @{
-                NSForegroundColorAttributeName: UIColor.labelColor,
-                NSFontAttributeName: [UIFont systemFontOfSize:19.0 weight:UIFontWeightBold]
-            };
-            appearance.titleTextAttributes = titleAttrs;
-            appearance.buttonAppearance.normal.titleTextAttributes = titleAttrs;
-            bar.titleTextAttributes = titleAttrs;
-            bar.standardAppearance = appearance;
-            bar.scrollEdgeAppearance = appearance;
-            bar.compactAppearance = appearance;
-            if (@available(iOS 15.0, *)) bar.compactScrollEdgeAppearance = appearance;
-        }
+    if (@available(iOS 13.0, *)) {
+        // Scope the system appearance to this item; the host owns the shared bars.
+        UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
+        [appearance configureWithDefaultBackground];
+        UINavigationItem *item = vc.navigationItem;
+        item.standardAppearance = appearance;
+        item.scrollEdgeAppearance = appearance;
+        item.compactAppearance = appearance;
+        if (@available(iOS 15.0, *)) item.compactScrollEdgeAppearance = appearance;
     }
-
-    UIToolbar *toolbar = vc.navigationController.toolbar;
-    if (toolbar && @available(iOS 13.0, *)) {
-        UIToolbarAppearance *appearance = [UIToolbarAppearance new];
-        [appearance configureWithTransparentBackground];
-        appearance.backgroundColor = UIColor.clearColor;
-        appearance.backgroundEffect = FBTUIKit26GlassEffect(NO, NO, nil);
-        appearance.shadowColor = UIColor.clearColor;
-        toolbar.standardAppearance = appearance;
-        if (@available(iOS 15.0, *)) toolbar.scrollEdgeAppearance = appearance;
-        toolbar.translucent = YES;
-        toolbar.backgroundColor = UIColor.clearColor;
-    }
-
-    if (vc.tabBarController.tabBar) FBTUIKit26ConfigureTabBar(vc.tabBarController.tabBar);
 }
 
 void FBTUIKit26ConfigureViewController(UIViewController *vc) {
     if (!vc) return;
-    FBTUIKit26ApplyContainerBackgroundToViewController(vc);
     if (vc.isViewLoaded) {
-        vc.view.backgroundColor = FBTUIKit26BaseSurfaceColor();
+        vc.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
         vc.view.opaque = YES;
-        vc.view.layer.backgroundColor = [FBTUIKit26BaseSurfaceColor() resolvedColorWithTraitCollection:vc.view.traitCollection].CGColor;
     }
     FBTConfigureNavigationChromeForGlass(vc);
-    __weak UIViewController *weakVC = vc;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *strongVC = weakVC;
-        if (strongVC) FBTUIKit26RefreshNavigationTitleBubble(strongVC);
-    });
 }
 
-static void FBTUIKit26ConfigureScrollEdgeEffect(id edgeEffect, NSInteger style, BOOL hidden) {
-    if (!edgeEffect) return;
-    SEL setStyle = NSSelectorFromString(@"setStyle:");
-    if ([edgeEffect respondsToSelector:setStyle]) {
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(edgeEffect, setStyle, style);
+static CGFloat const kFBTOverviewHorizontalMargin = 16.0;
+static CGFloat const kFBTOverviewVerticalMargin = 12.0;
+static CGFloat const kFBTOverviewContentInset = 18.0;
+static CGFloat const kFBTOverviewTextSpacing = 6.0;
+
+@interface FBTUIKit26OverviewHeaderView : UIView
+@property (nonatomic, strong) UILabel *headingLabel;
+@property (nonatomic, strong) UILabel *captionLabel;
+@end
+
+@implementation FBTUIKit26OverviewHeaderView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        UIVisualEffectView *panel = [[UIVisualEffectView alloc] initWithEffect:FBTUIKit26GlassEffect(NO, NO, nil)];
+        panel.translatesAutoresizingMaskIntoConstraints = NO;
+        panel.layer.cornerRadius = 24.0;
+        panel.clipsToBounds = YES;
+        panel.userInteractionEnabled = NO;
+        [self addSubview:panel];
+
+        _headingLabel = [UILabel new];
+        _headingLabel.text = @"FBTweak";
+        _headingLabel.textColor = UIColor.labelColor;
+        _headingLabel.numberOfLines = 0;
+        _headingLabel.adjustsFontForContentSizeCategory = YES;
+        _captionLabel = [UILabel new];
+        _captionLabel.text = @"Acessos nativos, flags locais e diagnósticos organizados por área.";
+        _captionLabel.textColor = UIColor.secondaryLabelColor;
+        _captionLabel.numberOfLines = 0;
+        _captionLabel.adjustsFontForContentSizeCategory = YES;
+        [self updateFonts];
+
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_headingLabel, _captionLabel]];
+        stack.axis = UILayoutConstraintAxisVertical;
+        stack.spacing = kFBTOverviewTextSpacing;
+        stack.translatesAutoresizingMaskIntoConstraints = NO;
+        [panel.contentView addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [panel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:kFBTOverviewHorizontalMargin],
+            [panel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-kFBTOverviewHorizontalMargin],
+            [panel.topAnchor constraintEqualToAnchor:self.topAnchor constant:kFBTOverviewVerticalMargin],
+            [panel.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-kFBTOverviewVerticalMargin],
+            [stack.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:kFBTOverviewContentInset],
+            [stack.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-kFBTOverviewContentInset],
+            [stack.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:kFBTOverviewContentInset],
+            [stack.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-kFBTOverviewContentInset]
+        ]];
     }
-    SEL setHidden = NSSelectorFromString(@"setHidden:");
-    if ([edgeEffect respondsToSelector:setHidden]) {
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(edgeEffect, setHidden, hidden);
-    }
-    SEL igSetHidden = NSSelectorFromString(@"ig_setIsHidden:");
-    if ([edgeEffect respondsToSelector:igSetHidden]) {
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(edgeEffect, igSetHidden, hidden);
+    return self;
+}
+
+- (void)updateFonts {
+    UIFont *headingFont = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2 compatibleWithTraitCollection:self.traitCollection];
+    UIFont *captionFont = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline compatibleWithTraitCollection:self.traitCollection];
+    if (![self.headingLabel.font isEqual:headingFont]) self.headingLabel.font = headingFont;
+    if (![self.captionLabel.font isEqual:captionFont]) self.captionLabel.font = captionFont;
+}
+
+- (CGSize)sizeThatFits:(CGSize)size {
+    [self updateFonts];
+    CGFloat textWidth = MAX(1.0, size.width - 2.0 * (kFBTOverviewHorizontalMargin + kFBTOverviewContentInset));
+    CGSize textBounds = CGSizeMake(textWidth, CGFLOAT_MAX);
+    CGFloat textHeight = [self.headingLabel sizeThatFits:textBounds].height
+        + kFBTOverviewTextSpacing + [self.captionLabel sizeThatFits:textBounds].height;
+    return CGSizeMake(size.width, ceil(textHeight + 2.0 * (kFBTOverviewVerticalMargin + kFBTOverviewContentInset)));
+}
+
+@end
+
+UIView *FBTUIKit26CreateOverviewHeader(CGFloat width) {
+    FBTUIKit26OverviewHeaderView *header = [[FBTUIKit26OverviewHeaderView alloc] initWithFrame:CGRectMake(0.0, 0.0, MAX(0.0, width), 0.0)];
+    if (width > 0.0) header.frame = (CGRect){CGPointZero, [header sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)]};
+    return header;
+}
+
+void FBTUIKit26UpdateTableHeaderLayout(UITableView *tableView) {
+    UIView *header = tableView.tableHeaderView;
+    CGFloat width = tableView.bounds.size.width;
+    if (!header || width <= 0.0) return;
+    CGSize size = [header sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)];
+    CGRect frame = header.frame;
+    frame.size = CGSizeMake(width, ceil(size.height));
+    if (!CGRectEqualToRect(frame, header.frame)) {
+        header.frame = frame;
+        tableView.tableHeaderView = header;
     }
 }
 
@@ -280,30 +199,11 @@ void FBTUIKit26ConfigureScrollView(UIScrollView *scrollView) {
     scrollView.opaque = NO;
     if (@available(iOS 11.0, *)) scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 
-    if (@available(iOS 26.0, *)) {
-        SEL topSel = NSSelectorFromString(@"topEdgeEffect");
-        SEL bottomSel = NSSelectorFromString(@"bottomEdgeEffect");
-        if ([scrollView respondsToSelector:topSel]) {
-            id edge = ((id (*)(id, SEL))objc_msgSend)(scrollView, topSel);
-            FBTUIKit26ConfigureScrollEdgeEffect(edge, 0, NO);
-        }
-        if ([scrollView respondsToSelector:bottomSel]) {
-            id edge = ((id (*)(id, SEL))objc_msgSend)(scrollView, bottomSel);
-            FBTUIKit26ConfigureScrollEdgeEffect(edge, 0, NO);
-        }
-    }
-
     if ([scrollView isKindOfClass:UITableView.class]) {
         UITableView *tableView = (UITableView *)scrollView;
         tableView.backgroundView = nil;
         tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
         if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 0.0;
-        if (@available(iOS 26.0, *)) {
-            SEL setBackgroundEffect = NSSelectorFromString(@"setBackgroundEffect:");
-            if ([tableView respondsToSelector:setBackgroundEffect]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(tableView, setBackgroundEffect, FBTUIKit26GlassEffect(YES, NO, nil));
-            }
-        }
     }
 }
 
@@ -410,57 +310,44 @@ void FBTUIKit26ConfigureSegmentedControl(UISegmentedControl *control) {
     [control setTitleTextAttributes:selected forState:UIControlStateSelected];
 }
 
-void FBTUIKit26ConfigureTabBar(UITabBar *tabBar) {
-    if (!tabBar) return;
-    tabBar.translucent = YES;
-    tabBar.backgroundColor = UIColor.clearColor;
-    if (@available(iOS 13.0, *)) {
-        UITabBarAppearance *appearance = [UITabBarAppearance new];
-        [appearance configureWithTransparentBackground];
-        appearance.backgroundColor = UIColor.clearColor;
-        appearance.backgroundEffect = FBTUIKit26GlassEffect(NO, NO, nil);
-        appearance.shadowColor = UIColor.clearColor;
-        tabBar.standardAppearance = appearance;
-        if (@available(iOS 15.0, *)) tabBar.scrollEdgeAppearance = appearance;
-    }
+static UIBackgroundConfiguration *FBTUIKit26TableCellBackground(UITableViewCell *cell, UICellConfigurationState *state, BOOL selected) API_AVAILABLE(ios(14.0)) {
+    UIBackgroundConfiguration *background;
+    if (@available(iOS 16.0, *)) background = [cell defaultBackgroundConfiguration];
+    else background = [UIBackgroundConfiguration listGroupedCellConfiguration];
+    background = [background updatedConfigurationForState:state];
+    background.backgroundColor = selected || state.selected ? FBTUIKit26CellSelectedFillColor()
+        : state.highlighted ? FBTUIKit26CellPressedFillColor() : UIColor.secondarySystemGroupedBackgroundColor;
+    background.backgroundColorTransformer = nil;
+    background.visualEffect = nil;
+    return background;
 }
 
 void FBTUIKit26ConfigureTableCell(UITableViewCell *cell) {
     if (!cell) return;
-    cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
     cell.preservesSuperviewLayoutMargins = YES;
     cell.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
 
-    UIView *selected = [UIView new];
-    selected.backgroundColor = FBTUIKit26CellPressedFillColor();
-    selected.layer.cornerRadius = 12.0;
-    if ([selected.layer respondsToSelector:@selector(setCornerCurve:)]) selected.layer.cornerCurve = kCACornerCurveContinuous;
-    selected.clipsToBounds = YES;
-    cell.selectedBackgroundView = selected;
-
     if (@available(iOS 14.0, *)) {
-        UIBackgroundConfiguration *bg = [UIBackgroundConfiguration listGroupedCellConfiguration];
-        bg.backgroundColor = FBTUIKit26PanelFillColor();
-        bg.visualEffect = nil;
-        bg.strokeColor = UIColor.clearColor;
-        bg.strokeWidth = 0.0;
-        cell.backgroundConfiguration = bg;
-        cell.backgroundView = nil;
+        cell.backgroundConfiguration = FBTUIKit26TableCellBackground(cell, cell.configurationState, cell.isSelected);
+        if (@available(iOS 15.0, *)) {
+            cell.automaticallyUpdatesBackgroundConfiguration = NO;
+            cell.configurationUpdateHandler = ^(UITableViewCell *updatedCell, UICellConfigurationState *state) {
+                updatedCell.backgroundConfiguration = FBTUIKit26TableCellBackground(updatedCell, state, state.selected);
+            };
+        }
     } else {
-        FBTUIKit26EnsureGlassBackground(cell.contentView, 12.0, YES, YES, nil);
+        cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+        UIView *selected = [UIView new];
+        selected.backgroundColor = FBTUIKit26CellPressedFillColor();
+        cell.selectedBackgroundView = selected;
     }
 }
 
 void FBTUIKit26ApplyTableCellSelectionTint(UITableViewCell *cell, BOOL selected) {
     if (!cell) return;
     if (@available(iOS 14.0, *)) {
-        UIBackgroundConfiguration *bg = cell.backgroundConfiguration ?: [UIBackgroundConfiguration listGroupedCellConfiguration];
-        bg.backgroundColor = selected ? FBTUIKit26CellSelectedFillColor() : FBTUIKit26PanelFillColor();
-        bg.visualEffect = nil;
-        bg.strokeColor = UIColor.clearColor;
-        bg.strokeWidth = 0.0;
-        cell.backgroundConfiguration = bg;
+        cell.backgroundConfiguration = FBTUIKit26TableCellBackground(cell, cell.configurationState, selected);
     } else {
         cell.contentView.backgroundColor = selected ? FBTUIKit26CellSelectedFillColor() : UIColor.clearColor;
     }

@@ -22,11 +22,12 @@ class SettingsNavigationContracts(unittest.TestCase):
         self.assertIn('pushViewController:controller animated:YES', UI)
         self.assertIn('self.sectionTitles', UI)
 
-    def test_system_liquid_glass_not_overridden_with_opaque_nav_bar(self):
-        self.assertIn('UIGlassEffect', UI)
-        self.assertIn('UIVisualEffectView', UI)
-        self.assertIn('@available(iOS 26.0, *)', UI)
-        self.assertNotIn('bar.standardAppearance = nil', UI)
+    def test_root_uses_shared_native_navigation_and_resizable_header(self):
+        # This checks wiring only. UIKitRegressionHost exercises appearance
+        # isolation, automatic selection feedback and Dynamic Type at runtime.
+        self.assertIn('FBTConfigureNavigationChromeForGlass(vc)', UI)
+        self.assertIn('FBTUIKit26CreateOverviewHeader(', UI)
+        self.assertIn('FBTUIKit26UpdateTableHeaderLayout(self.tableView)', UI)
         self.assertIn('UINavigationItemLargeTitleDisplayModeAlways', UI)
 
     def test_dogfood_flag_is_separate_and_editable_from_its_submenu(self):
