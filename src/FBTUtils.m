@@ -142,7 +142,7 @@ static char kFBTSettingsPresentationKey;
     else [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
-+ (UIColor *)FBTColor_Primary { return [UIColor colorWithRed:0.0 green:0.478 blue:1.0 alpha:1.0]; }
++ (UIColor *)FBTColor_Primary { return UIColor.systemBlueColor; }
 + (void)showToastForDuration:(double)duration title:(NSString *)title {
     [self showToastForDuration:duration title:title subtitle:nil];
 }

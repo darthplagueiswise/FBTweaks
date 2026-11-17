@@ -14,6 +14,21 @@
 #error A fixed run must exercise the real overview header.
 #endif
 
+#if !FBT_UIKIT_BASELINE_MODE
+#import "FBTStyledTableViewController.h"
+
+@interface FBTStyledRegressionFixture : FBTStyledTableViewController
+@end
+@implementation FBTStyledRegressionFixture
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 1; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.textLabel.text = @"Native grouped content";
+    return cell;
+}
+@end
+#endif
+
 static id FBTValue(id value) { return value ?: NSNull.null; }
 
 static NSArray<NSNumber *> *FBTColor(UIColor *color) {
@@ -340,9 +355,118 @@ static NSDictionary *FBTHeaderMeasurement(UITableView *table) {
         NSArray *changedOnReturn = FBTDifferences(self.originalChrome, FBTSharedChrome(self.navigation, self.tabs));
         [self record:@"navigation.host_return" pass:changedOnReturn.count == 0 && self.navigation.topViewController == self.host
             details:@{@"changed_properties": changedOnReturn}];
+#if FBT_UIKIT_BASELINE_MODE
         [self prepareTable];
+#else
+        [self testContentSurfaces];
+#endif
     }];
 }
+
+#if !FBT_UIKIT_BASELINE_MODE
+- (void)testContentSurfaces {
+    FBTStyledRegressionFixture *fixture = [[FBTStyledRegressionFixture alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    fixture.title = @"Styled table";
+    UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
+    search.obscuresBackgroundDuringPresentation = NO;
+    search.searchBar.placeholder = @"Native search surface";
+    fixture.navigationItem.searchController = search;
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:fixture];
+    self.window.rootViewController = navigation;
+    [self later:^{
+        UITableView *table = fixture.tableView;
+        [table layoutIfNeeded];
+        UITableViewCell *cell = [table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+        [self record:@"screens.shared_table_lifecycle"
+            pass:fixture.definesPresentationContext && table.rowHeight == UITableViewAutomaticDimension &&
+                 fixture.navigationItem.standardAppearance != nil && cell.backgroundConfiguration != nil
+            details:@{@"search_context": @(fixture.definesPresentationContext), @"visible_cell": @(cell != nil)}];
+
+        UILabel *emptyState = [UILabel new]; emptyState.text = @"No observations yet";
+        table.backgroundView = emptyState;
+        FBTUIKit26ConfigureTableView(table);
+        FBTUIKit26ConfigureTableView(table);
+        BOOL opaque = table.opaque;
+        BOOL grouped = [FBTColor(table.backgroundColor) isEqual:FBTColor(UIColor.systemGroupedBackgroundColor)];
+        [self record:@"surfaces.grouped_table" pass:opaque && grouped
+            details:@{@"opaque": @(opaque), @"background": FBTColor(table.backgroundColor)}];
+        [self record:@"surfaces.empty_state" pass:table.backgroundView == emptyState
+            details:@{@"preserved_after_repeated_styling": @(table.backgroundView == emptyState)}];
+        table.backgroundView = nil;
+
+        UISearchBar *bar = [UISearchBar new];
+        [bar sizeToFit]; [bar layoutIfNeeded];
+        UITextField *field = bar.searchTextField;
+        UIColor *background = field.backgroundColor;
+        UIImage *image = field.background;
+        CGFloat radius = field.layer.cornerRadius;
+        UITextBorderStyle border = field.borderStyle;
+        UISearchBarStyle style = bar.searchBarStyle;
+        FBTUIKit26ConfigureSearchBar(bar);
+        FBTUIKit26ConfigureSearchBar(bar);
+        BOOL nativeSearch = [FBTColor(field.backgroundColor) isEqual:FBTColor(background)] &&
+            field.background == image && field.layer.cornerRadius == radius && field.borderStyle == border && bar.searchBarStyle == style;
+        [self record:@"search.native_surface" pass:nativeSearch
+            details:@{@"search_style": @(bar.searchBarStyle), @"border": @(field.borderStyle), @"radius": @(field.layer.cornerRadius)}];
+        [self capture:@"styled-table-search"];
+
+        UITableView *headerTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 0, 280, 500) style:UITableViewStyleInsetGrouped];
+        UIView *header = [UIView new];
+        UILabel *label = [UILabel new];
+        label.text = @"Filters must remain readable when the available width changes or the text wraps onto more lines.";
+        label.numberOfLines = 0; label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        [header addSubview:label];
+        [NSLayoutConstraint activateConstraints:@[
+            [label.topAnchor constraintEqualToAnchor:header.topAnchor constant:12],
+            [label.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-12],
+            [label.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
+            [label.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16]
+        ]];
+        headerTable.tableHeaderView = header;
+        FBTUIKit26UpdateTableHeaderLayout(headerTable);
+        [header layoutIfNeeded];
+        CGFloat narrowHeight = header.frame.size.height;
+        BOOL fitsNarrow = narrowHeight >= [label sizeThatFits:CGSizeMake(248, CGFLOAT_MAX)].height + 23;
+        headerTable.frame = CGRectMake(0, 0, 360, 500);
+        FBTUIKit26UpdateTableHeaderLayout(headerTable);
+        [header layoutIfNeeded];
+        BOOL fitsWide = header.frame.size.height >= [label sizeThatFits:CGSizeMake(328, CGFLOAT_MAX)].height + 23;
+        [self record:@"header.auto_layout_filters"
+            pass:fitsNarrow && fitsWide && header.frame.size.height <= narrowHeight && fabs(header.bounds.size.width - 360) < 1
+            details:@{@"narrow_height": @(narrowHeight), @"wide_height": @(header.frame.size.height)}];
+        [self testSearchAndThemeForFixture:fixture search:search];
+    }];
+}
+
+- (void)testSearchAndThemeForFixture:(FBTStyledRegressionFixture *)fixture search:(UISearchController *)search {
+    BOOL collapsible = fixture.navigationItem.hidesSearchBarWhenScrolling &&
+        fixture.navigationItem.preferredSearchBarPlacement == UINavigationItemSearchBarPlacementIntegratedButton;
+    [self record:@"search.collapsible_configuration" pass:collapsible details:@{@"native_integrated_button": @(collapsible)}];
+    [search setActive:YES];
+    [self later:^{
+        BOOL expanded = search.active && search.searchBar.window != nil && search.searchBar.searchTextField.bounds.size.width > 0;
+        [self capture:@"search-expanded"];
+        [search setActive:NO];
+        [self later:^{
+            [self record:@"search.native_activation" pass:expanded && !search.active
+                details:@{@"expanded": @(expanded), @"collapsed": @(!search.active)}];
+            [self capture:@"search-collapsed"];
+            UIColor *lightColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:
+                [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight]];
+            fixture.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+            [self later:^{
+                UIColor *darkColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:fixture.traitCollection];
+                BOOL dark = fixture.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark &&
+                    ![FBTColor(lightColor) isEqual:FBTColor(darkColor)];
+                [self record:@"appearance.dark_mode" pass:dark details:@{@"light": FBTColor(lightColor), @"dark": FBTColor(darkColor)}];
+                [self capture:@"styled-table-dark"];
+                [self prepareTable];
+            }];
+        }];
+    }];
+}
+#endif
 
 - (void)prepareTable {
     UIViewController *fixture = [UIViewController new]; fixture.view.backgroundColor = UIColor.whiteColor;

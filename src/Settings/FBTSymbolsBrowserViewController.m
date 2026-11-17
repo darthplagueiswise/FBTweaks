@@ -363,7 +363,7 @@ static FBTCPatchStrategy FBTCPatchStrategyFromRuntime(FBTCRuntimePatchStrategy s
 - (void)viewDidLoad {
     [super viewDidLoad];
     FBTUIKit26ConfigureViewController(self);
-    FBTConfigureNavigationChromeForGlass(self);
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshNow)],
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(copyReport)],
@@ -372,7 +372,7 @@ static FBTCPatchStrategy FBTCPatchStrategyFromRuntime(FBTCRuntimePatchStrategy s
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.backgroundColor = UIColor.clearColor;
+    FBTUIKit26ConfigureTableView(self.table);
     self.table.rowHeight = UITableViewAutomaticDimension;
     self.table.estimatedRowHeight = 56.0;
     [self.view addSubview:self.table];
@@ -385,6 +385,11 @@ static FBTCPatchStrategy FBTCPatchStrategyFromRuntime(FBTCRuntimePatchStrategy s
     [self refreshNow];
     // Auto-run once on open: DATA needs consumer readers; TEXT needs callers.
     if (self.resolvedAddr) [self runXrefScan];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    FBTConfigureNavigationChromeForGlass(self);
 }
 
 - (void)refreshNow {
@@ -682,7 +687,8 @@ static FBTCPatchStrategy FBTCPatchStrategyFromRuntime(FBTCRuntimePatchStrategy s
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
-    cell.backgroundColor = [UIColor.secondarySystemBackgroundColor colorWithAlphaComponent:0.5];
+    FBTUIKit26ConfigureTableCell(cell);
+    cell.textLabel.textColor = UIColor.labelColor;
     cell.accessoryView = nil;
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -953,7 +959,6 @@ static char kFBTCSymbolGroupPayloadKey;
     sc.obscuresBackgroundDuringPresentation = NO;
     sc.searchBar.placeholder = @"Search symbols, ABI, section…";
     self.navigationItem.searchController = sc;
-    FBTUIKit26ConfigureSearchNavigationItem(self.navigationItem);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshRuntimeSymbols)];
     [self configureUnifiedTabs];
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
@@ -993,7 +998,7 @@ static char kFBTCSymbolGroupPayloadKey;
     stack.spacing = 8.0;
     stack.layoutMargins = UIEdgeInsetsMake(8, 16, 8, 16);
     stack.layoutMarginsRelativeArrangement = YES;
-    UIView *wrap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 92)];
+    UIView *wrap = [[UIView alloc] initWithFrame:CGRectZero];
     wrap.backgroundColor = UIColor.clearColor;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     [wrap addSubview:stack];
@@ -1004,6 +1009,7 @@ static char kFBTCSymbolGroupPayloadKey;
         [stack.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor],
     ]];
     self.tableView.tableHeaderView = wrap;
+    FBTUIKit26UpdateTableHeaderLayout(self.tableView);
 }
 
 - (void)unifiedTabChanged:(__unused id)sender {

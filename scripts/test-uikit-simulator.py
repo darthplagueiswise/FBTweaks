@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and run UIKitRegressionHost against the real iOS 26+ Simulator UIKit.
 
-Only UIKitRegressionHost.m and FBTUIKit26LiquidGlass.m are compiled. A private
+The host and production UI helper/base controller are compiled. A private
 temporary Simulator device/app is created and removed; existing devices, HEAD,
 and the index are never changed. No tools, SDKs, or runtimes are installed.
 
@@ -37,6 +37,11 @@ NAVIGATION_CASES = {
 SELECTION_CASES = {
     "selection.configuration", "selection.highlight_feedback",
     "selection.selected_feedback", "selection.restores",
+}
+SURFACE_CASES = {
+    "screens.shared_table_lifecycle", "surfaces.grouped_table", "surfaces.empty_state",
+    "search.native_surface", "header.auto_layout_filters",
+    "search.collapsible_configuration", "search.native_activation", "appearance.dark_mode",
 }
 REQUIRED_CASES = {"runtime.ios26"} | NAVIGATION_CASES | SELECTION_CASES | HEADER_CASES
 # Structural configuration checks alone are insufficient to prove the old bug.
@@ -215,7 +220,9 @@ class Runner:
             f"-DFBT_UIKIT_HAS_OVERVIEW_HEADER={int(has_header)}",
             f"-DFBT_UIKIT_BASELINE_MODE={int(bool(self.args.baseline_ref))}",
             "-I", str(source_dir), str(ROOT / "tests/UIKitRegressionHost.m"),
-            str(source_dir / HELPER.name), "-framework", "UIKit", "-framework", "Foundation",
+            str(source_dir / HELPER.name),
+            *([] if self.args.baseline_ref else [str(source_dir / "FBTStyledTableViewController.m")]),
+            "-framework", "UIKit", "-framework", "Foundation",
             "-framework", "QuartzCore", "-o", str(app / "FBTUIKitRegressionHost"),
         ])
         self.command(["codesign", "--force", "--sign", "-", "--timestamp=none", str(app)])
@@ -258,8 +265,9 @@ class Runner:
         ids = [case.get("id") for case in cases]
         if not all(isinstance(name, str) for name in ids) or len(set(ids)) != len(ids):
             raise InfrastructureError("Missing or duplicate host case IDs")
-        if set(ids) != REQUIRED_CASES:
-            missing, extra = sorted(REQUIRED_CASES - set(ids)), sorted(set(ids) - REQUIRED_CASES)
+        expected_cases = REQUIRED_CASES | (set() if self.args.baseline_ref else SURFACE_CASES)
+        if set(ids) != expected_cases:
+            missing, extra = sorted(expected_cases - set(ids)), sorted(set(ids) - expected_cases)
             raise InfrastructureError(f"Host case coverage mismatch: missing={missing}, extra={extra}")
         if version_tuple(str(result.get("os_version", "0"))) < (26, 0, 0):
             raise InfrastructureError("Host did not execute on iOS 26+")

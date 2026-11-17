@@ -5,6 +5,7 @@ on:
     branches:
       - 'flags'
       - 'main'
+      - 'fix/mobileconfig-path-and-diagnostics'
   push:
     branches:
       - 'flags'

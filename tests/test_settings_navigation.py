@@ -25,9 +25,11 @@ class SettingsNavigationContracts(unittest.TestCase):
     def test_root_uses_shared_native_navigation_and_resizable_header(self):
         # This checks wiring only. UIKitRegressionHost exercises appearance
         # isolation, automatic selection feedback and Dynamic Type at runtime.
-        self.assertIn('FBTConfigureNavigationChromeForGlass(vc)', UI)
+        style = (ROOT / "src/UI/FBTStyledTableViewController.m").read_text(encoding="utf-8")
+        self.assertIn('FBTSettingsViewController : FBTStyledTableViewController', UI)
+        self.assertIn('FBTConfigureNavigationChromeForGlass(self)', style)
         self.assertIn('FBTUIKit26CreateOverviewHeader(', UI)
-        self.assertIn('FBTUIKit26UpdateTableHeaderLayout(self.tableView)', UI)
+        self.assertIn('FBTUIKit26UpdateTableHeaderLayout(self.tableView)', style)
         self.assertIn('UINavigationItemLargeTitleDisplayModeAlways', UI)
 
     def test_dogfood_flag_is_separate_and_editable_from_its_submenu(self):

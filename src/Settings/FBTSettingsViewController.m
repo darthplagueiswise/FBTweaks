@@ -7,6 +7,7 @@
 #import "../FBTUtils.h"
 #import "../UI/FBTUIKit26LiquidGlass.h"
 #import "../UI/FBTTextSearch.h"
+#import "../UI/FBTStyledTableViewController.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "FBTSymbolsBrowserViewController.h"
@@ -56,10 +57,6 @@ static long long FBTParseLongLongString(NSString *string) {
     return strtoll(cstr, &end, 0);
 }
 
-static void FBTConfigureDefaultLiquidGlass(UIViewController *vc) {
-    FBTConfigureNavigationChromeForGlass(vc);
-}
-
 static NSArray<NSDictionary *> *FBTMenuRows(NSArray<NSArray<NSDictionary *> *> *catalog,
                                             NSString *field, NSArray<NSString *> *values) {
     NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
@@ -98,32 +95,33 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
 @end
 @implementation FBTSettingsSwitch @end
 
-@interface FBTSettingsViewController : UITableViewController
+@interface FBTSettingsViewController : FBTStyledTableViewController
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
 @property (nonatomic, copy) NSString *menuGroup;
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @end
 
-@interface FBTMobileConfigViewController : UITableViewController <UISearchResultsUpdating>
+@interface FBTMobileConfigViewController : FBTStyledTableViewController <UISearchResultsUpdating>
+@property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) NSArray<NSDictionary *> *entries;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
 @property (nonatomic, strong) UISearchController *searchController;
 @end
 
-@interface FBTRuntimeBoolViewController : UITableViewController <UISearchResultsUpdating>
+@interface FBTRuntimeBoolViewController : FBTStyledTableViewController <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSDictionary *> *entries;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
 @property (nonatomic, strong) UISearchController *searchController;
 @end
 
-@interface FBTFlagDumpViewController : UITableViewController <UISearchResultsUpdating>
+@interface FBTFlagDumpViewController : FBTStyledTableViewController <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSDictionary *> *flags;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, assign) BOOL headlineOnly;
 @end
 
-@interface FBTQueryConfigViewController : UITableViewController <UISearchResultsUpdating>
+@interface FBTQueryConfigViewController : FBTStyledTableViewController <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSDictionary *> *items;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filtered;
 @property (nonatomic, strong) UISearchController *searchController;
@@ -155,7 +153,6 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
                                 target:self action:@selector(closeTapped)];
         self.tableView.tableHeaderView = FBTUIKit26CreateOverviewHeader(self.tableView.bounds.size.width);
     }
-    self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 60.0;
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
@@ -165,20 +162,7 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    FBTConfigureDefaultLiquidGlass(self);
     [self.tableView reloadData];
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    FBTUIKit26UpdateTableHeaderLayout(self.tableView);
-}
-
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
-    [super traitCollectionDidChange:previousTraitCollection];
-    if (self.isViewLoaded && ![self.traitCollection.preferredContentSizeCategory isEqualToString:previousTraitCollection.preferredContentSizeCategory]) {
-        FBTUIKit26UpdateTableHeaderLayout(self.tableView);
-    }
 }
 
 - (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -290,54 +274,55 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
         return;
     }
 
-    NSArray *toggles = @[];
-    NSArray *native = @[];
-    NSArray *tools = @[];
-    if ([self.menuGroup isEqualToString:@"employee"]) {
-        toggles = keys(@[FBTKeyEmployeeEnabled, FBTKeyTestUserEnabled,
-                         FBTKeyMobileLabEnabled, FBTKeyInternalCImportsEnabled,
-                         FBTKeyEasyGatingInternalEnabled, FBTKeyInternalDebugSweepEnabled]);
-        native = actions(@[@"native", @"employee_internal", @"whitehat", @"ffdb_internal"]);
-        tools = actions(@[@"native_surfaces_diag"]);
-    } else if ([self.menuGroup isEqualToString:@"native_controllers"]) {
-        native = actions(@[@"ffdb_internal", @"menu_about", @"menu_react_ota",
-                           @"menu_on_demand", @"menu_loggedout_push",
-                           @"menu_reliable_media", @"menu_clash", @"menu_lifecycle",
-                           @"menu_autofill_tokenization", @"menu_messaging_thread"]);
-        tools = actions(@[@"native_surfaces_diag"]);
-    } else if ([self.menuGroup isEqualToString:@"dogfood"]) {
-        toggles = keys(@[@"FBDogFood-managedPhoneFlag", FBTKeyKnownDogfoodEnabled,
-                         FBTKeyDogfoodSweepEnabled]);
-        native = actions(@[@"dogfood_nag", @"dogfood_assistant", @"gold_builds"]);
-        tools = actions(@[@"gold_status", @"native_surfaces_diag"]);
-    } else if ([self.menuGroup isEqualToString:@"react"]) {
-        toggles = keys(@[FBTKeyReactNativeInternalEnabled]);
-        native = actions(@[@"rn_internal", @"rn_dev"]);
-        tools = actions(@[@"native_surfaces_diag"]);
-    } else if ([self.menuGroup isEqualToString:@"mobileconfig"]) {
-        toggles = keys(@[FBTKeyMobileConfigRuntimeEnabled, FBTKeyMobileConfigNativeUIWarmupEnabled, FBTKeyMobileConfigCaptureEnabled,
-                         FBTKeyMobileConfigOverridesEnabled, FBTKeyMobileConfigFetchDiagnosticsEnabled,
-                         FBTMCNativeProbeTigonKey, FBTMCNativeProbeFetcherKey]);
-        native = actions(@[@"mc_debug_native", @"ensure_mc_file", @"qe_ab"]);
-        tools = destinations(@[@"localconfig", @"namesdiagnostic", @"mobileconfig"]);
-    } else if ([self.menuGroup isEqualToString:@"diagnostics"]) {
-        toggles = keys(@[FBTKeyRuntimeBoolBrowserEnabled]);
-        native = destinations(@[@"networkinspector", @"bool", @"boollive",
-                                @"livetrace", @"headline", @"flags", @"queries"]);
-        tools = actions(@[@"native_surfaces_diag", @"clear"]);
-    } else if ([self.menuGroup isEqualToString:@"appearance"]) {
-        toggles = keys(@[FBTKeyLiquidGlassEnabled, FBTKeyFloatingTabBarEnabled,
-                         FBTKeyDatingEnabled, FBTKeyBetaBuildEnabled]);
-        native = destinations(@[@"feat:LiquidGlass", @"feat:FloatingTab", @"feat:DatingGemstone"]);
-    }
-
     NSMutableArray *grouped = [NSMutableArray array];
     NSMutableArray *headers = [NSMutableArray array];
-    for (NSUInteger i = 0; i < 3; ++i) {
-        NSArray *rows = i == 0 ? toggles : (i == 1 ? native : tools);
-        if (!rows.count) continue;
+    void (^addSection)(NSString *, NSArray *) = ^(NSString *title, NSArray *rows) {
+        if (!rows.count) return;
         [grouped addObject:rows];
-        [headers addObject:i == 0 ? @"Controles" : (i == 1 ? @"Menus e recursos" : @"Ferramentas")];
+        [headers addObject:title];
+    };
+    if ([self.menuGroup isEqualToString:@"employee"]) {
+        addSection(@"Identidade local", keys(@[FBTKeyEmployeeEnabled, FBTKeyTestUserEnabled, FBTKeyMobileLabEnabled]));
+        addSection(@"Instrumentação interna", keys(@[FBTKeyInternalCImportsEnabled,
+            FBTKeyEasyGatingInternalEnabled, FBTKeyInternalDebugSweepEnabled]));
+        addSection(@"Menus internos", actions(@[@"native", @"employee_internal", @"whitehat", @"ffdb_internal"]));
+        addSection(@"Diagnóstico", actions(@[@"native_surfaces_diag"]));
+    } else if ([self.menuGroup isEqualToString:@"native_controllers"]) {
+        addSection(@"Configuração e distribuição", actions(@[@"ffdb_internal", @"menu_about", @"menu_react_ota", @"menu_on_demand"]));
+        addSection(@"Serviços e ciclo de vida", actions(@[@"menu_loggedout_push", @"menu_reliable_media", @"menu_clash", @"menu_lifecycle"]));
+        addSection(@"Autofill e mensagens", actions(@[@"menu_autofill_tokenization", @"menu_messaging_thread"]));
+        addSection(@"Diagnóstico", actions(@[@"native_surfaces_diag"]));
+    } else if ([self.menuGroup isEqualToString:@"dogfood"]) {
+        addSection(@"Estado e instrumentação local", keys(@[@"FBDogFood-managedPhoneFlag", FBTKeyKnownDogfoodEnabled,
+            FBTKeyDogfoodSweepEnabled]));
+        addSection(@"Assistant e Gold", actions(@[@"dogfood_nag", @"dogfood_assistant", @"gold_builds"]));
+        addSection(@"Diagnóstico", actions(@[@"gold_status", @"native_surfaces_diag"]));
+    } else if ([self.menuGroup isEqualToString:@"react"]) {
+        addSection(@"Bridge React Native", keys(@[FBTKeyReactNativeInternalEnabled]));
+        addSection(@"Menus da bridge", actions(@[@"rn_internal", @"rn_dev"]));
+        addSection(@"Diagnóstico", actions(@[@"native_surfaces_diag"]));
+    } else if ([self.menuGroup isEqualToString:@"mobileconfig"]) {
+        addSection(@"Runtime e leituras", keys(@[FBTKeyMobileConfigRuntimeEnabled, FBTKeyMobileConfigNativeUIWarmupEnabled,
+            FBTKeyMobileConfigCaptureEnabled, FBTKeyMobileConfigOverridesEnabled]));
+        addSection(@"Captura de rede nesta sessão", keys(@[FBTKeyMobileConfigFetchDiagnosticsEnabled,
+            FBTMCNativeProbeTigonKey, FBTMCNativeProbeFetcherKey]));
+        addSection(@"Mapas e valores locais", destinations(@[@"localconfig", @"mobileconfig"]));
+        addSection(@"Menus e arquivos nativos", actions(@[@"mc_debug_native", @"ensure_mc_file"]));
+        addSection(@"Download de nomes e QE", [destinations(@[@"namesdiagnostic"]) arrayByAddingObjectsFromArray:actions(@[@"qe_ab"])]);
+    } else if ([self.menuGroup isEqualToString:@"diagnostics"]) {
+        addSection(@"Runtime e símbolos", [keys(@[FBTKeyRuntimeBoolBrowserEnabled])
+            arrayByAddingObjectsFromArray:destinations(@[@"bool", @"boollive"])]);
+        addSection(@"Rede e eventos", destinations(@[@"networkinspector", @"livetrace"]));
+        addSection(@"Catálogos empacotados", destinations(@[@"headline", @"flags", @"queries"]));
+        addSection(@"Manutenção", actions(@[@"native_surfaces_diag", @"clear"]));
+    } else if ([self.menuGroup isEqualToString:@"appearance"]) {
+        addSection(@"Liquid Glass", [keys(@[FBTKeyLiquidGlassEnabled])
+            arrayByAddingObjectsFromArray:destinations(@[@"feat:LiquidGlass"])]);
+        addSection(@"Barra de abas", [keys(@[FBTKeyFloatingTabBarEnabled])
+            arrayByAddingObjectsFromArray:destinations(@[@"feat:FloatingTab"])]);
+        addSection(@"Dating / Gemstone", [keys(@[FBTKeyDatingEnabled])
+            arrayByAddingObjectsFromArray:destinations(@[@"feat:DatingGemstone"])]);
+        addSection(@"Distribuição local", keys(@[FBTKeyBetaBuildEnabled]));
     }
     self.sections = grouped;
     self.sectionTitles = headers;
@@ -346,14 +331,7 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section >= 0 && (NSUInteger)section < self.sectionTitles.count)
         return self.sectionTitles[(NSUInteger)section];
-    switch (section) {
-        case 0: return @"Geral";
-        case 1: return @"Hooks conhecidos";
-        case 2: return @"Runtime";
-        case 3: return @"Browsers";
-        case 4: return @"Ações";
-        default: return nil;
-    }
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -364,8 +342,7 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
             return @"Os gates locais permitem interfaces, mas cada plugin ainda pode exigir sessão, provider e autorização remota.";
         return nil;
     }
-    if (section == 2) return @"Ativar a instrumentação ou o log não confirma que o fetch funcionou. Confira os hooks disponíveis, leituras observadas e respostas no diagnóstico.";
-    if (section == 3) return @"O browser ObjC não varre classes no launch. Agora a busca não descarta classes só pelo nome: selector útil como isEmployee/isDebugOptionsEnabled aparece mesmo em classes RN/Swift/Produto.";
+    if (section == 2) return @"Os acessos rápidos abrem os mesmos menus disponíveis nas áreas acima.";
     return nil;
 }
 
@@ -394,6 +371,7 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     if ([kind isEqualToString:@"switch"]) {
         FBTSettingsSwitch *sw = [FBTSettingsSwitch new];
         sw.prefKey = item[@"key"];
+        sw.accessibilityLabel = item[@"title"];
         sw.on = FBTMCNativeProbeIsKey(sw.prefKey) ?
             FBTMCNativeProbeIsEnabled(sw.prefKey) :
             [[NSUserDefaults standardUserDefaults] boolForKey:sw.prefKey];
@@ -768,10 +746,32 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     [super viewDidLoad];
     self.title = @"MobileConfig Live";
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:FBTCellID];
-    UIBarButtonItem *diagnostics = [[UIBarButtonItem alloc] initWithTitle:@"Fetch log" style:UIBarButtonItemStylePlain target:self action:@selector(showFetchDiagnostics)];
-    UIBarButtonItem *plistAudit = [[UIBarButtonItem alloc] initWithTitle:@"Plist audit" style:UIBarButtonItemStylePlain target:self action:@selector(showOverridesPlistAudit)];
+    __weak typeof(self) weakSelf = self;
+    UIMenu *diagnosticsMenu = [UIMenu menuWithChildren:@[
+        [UIAction actionWithTitle:@"Fetch log" image:[UIImage systemImageNamed:@"doc.text.magnifyingglass"] identifier:nil handler:^(__unused UIAction *action) {
+            [weakSelf showFetchDiagnostics];
+        }],
+        [UIAction actionWithTitle:@"Plist audit" image:[UIImage systemImageNamed:@"checklist"] identifier:nil handler:^(__unused UIAction *action) {
+            [weakSelf showOverridesPlistAudit];
+        }]
+    ]];
+    UIBarButtonItem *diagnostics = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:NULL];
+    diagnostics.menu = diagnosticsMenu;
+    diagnostics.accessibilityLabel = @"Diagnósticos MobileConfig";
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reloadSnapshot)];
-    self.navigationItem.rightBarButtonItems = @[diagnostics, plistAudit, refresh];
+    self.navigationItem.rightBarButtonItems = @[diagnostics, refresh];
+    self.statusLabel = FBTSecondaryLabel(nil);
+    self.statusLabel.adjustsFontForContentSizeCategory = YES;
+    self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *statusHeader = [[UIView alloc] initWithFrame:CGRectZero];
+    [statusHeader addSubview:self.statusLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.statusLabel.topAnchor constraintEqualToAnchor:statusHeader.topAnchor constant:12],
+        [self.statusLabel.leadingAnchor constraintEqualToAnchor:statusHeader.leadingAnchor constant:16],
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:statusHeader.trailingAnchor constant:-16],
+        [self.statusLabel.bottomAnchor constraintEqualToAnchor:statusHeader.bottomAnchor constant:-12]
+    ]];
+    self.tableView.tableHeaderView = statusHeader;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -787,11 +787,12 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     [self reloadSnapshot];
 }
 
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBTConfigureDefaultLiquidGlass(self); [self reloadSnapshot]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reloadSnapshot]; }
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
 - (void)reloadSnapshot {
-    self.navigationItem.prompt = FBTNativeMobileConfigStatus();
+    self.statusLabel.text = FBTNativeMobileConfigStatus();
+    FBTUIKit26UpdateTableHeaderLayout(self.tableView);
     self.entries = FBTMobileConfigSnapshot();
     [self applyFilter];
 }
@@ -1124,7 +1125,6 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     [self runSearch];
 }
 
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBTConfigureDefaultLiquidGlass(self); }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *q = searchController.searchBar.text.lowercaseString ?: @"";
     if (!q.length) self.filtered = self.entries ?: @[];
@@ -1215,7 +1215,6 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     self.flags = self.headlineOnly ? [FBTFlagCatalog headlineFlags] : [FBTFlagCatalog allFlags];
     [self applyFilter];
 }
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBTConfigureDefaultLiquidGlass(self); }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self applyFilter]; }
 - (void)applyFilter {
     NSString *q = self.searchController.searchBar.text.lowercaseString ?: @"";
@@ -1255,7 +1254,6 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
     self.items = [FBTFlagCatalog queryConfigs];
     [self applyFilter];
 }
-- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; FBTConfigureDefaultLiquidGlass(self); }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self applyFilter]; }
 - (void)applyFilter {
     NSString *q = self.searchController.searchBar.text.lowercaseString ?: @"";

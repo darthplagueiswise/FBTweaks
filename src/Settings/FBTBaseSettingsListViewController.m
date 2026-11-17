@@ -75,6 +75,7 @@ static NSString *const kFBTBaseCell = @"FBTBaseCell";
 
 	FBTUIKit26ConfigureViewController(self);
 	self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+	self.definesPresentationContext = YES;
 
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
@@ -106,6 +107,19 @@ static NSString *const kFBTBaseCell = @"FBTBaseCell";
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
 	FBTConfigureNavigationChromeForGlass(self);
+	FBTUIKit26ConfigureSearchNavigationItem(self.navigationItem);
+}
+
+- (void)viewDidLayoutSubviews {
+	[super viewDidLayoutSubviews];
+	FBTUIKit26UpdateTableHeaderLayout(self.tableView);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+	[super traitCollectionDidChange:previousTraitCollection];
+	if (self.isViewLoaded && ![self.traitCollection.preferredContentSizeCategory isEqualToString:previousTraitCollection.preferredContentSizeCategory]) {
+		FBTUIKit26UpdateTableHeaderLayout(self.tableView);
+	}
 }
 
 #pragma mark - Helpers
@@ -157,6 +171,7 @@ static NSString *const kFBTBaseCell = @"FBTBaseCell";
 
 	if (row.style == FBTBaseSettingsRowStyleSwitch) {
 		UISwitch *sw = [UISwitch new];
+		sw.accessibilityLabel = cfg.text;
 		sw.on = row.switchValue ? row.switchValue() : NO;
 		sw.onTintColor = [FBTUtils FBTColor_Primary];
 		objc_setAssociatedObject(sw, @selector(switchChanged:), indexPath, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

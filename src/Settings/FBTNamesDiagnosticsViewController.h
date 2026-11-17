@@ -1,6 +1,6 @@
-#import <UIKit/UIKit.h>
+#import "../UI/FBTStyledTableViewController.h"
 
-@interface FBTNamesDiagnosticsViewController : UITableViewController
+@interface FBTNamesDiagnosticsViewController : FBTStyledTableViewController
 @end
 
 #ifdef __cplusplus
