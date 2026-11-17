@@ -198,13 +198,13 @@ jobs:
         id: uikit_baseline
         run: |
           cd main
-          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
+          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
 
       - name: Test UIKit navigation, cell selection and accessible header
         id: uikit_fixed
         run: |
           cd main
-          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
+          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
 
       - name: Upload UIKit regression evidence
         if: always() && (steps.uikit_baseline.outcome == 'success' || steps.uikit_baseline.outcome == 'failure' || steps.uikit_fixed.outcome == 'success' || steps.uikit_fixed.outcome == 'failure')

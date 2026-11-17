@@ -11,6 +11,7 @@ SPEC.loader.exec_module(MODULE)
 
 RUNTIMES = [
     {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "isAvailable": True},
+    {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "isAvailable": True},
     {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4",
      "version": "27.2", "isAvailable": True},
     {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-2", "version": "27.2", "isAvailable": True},
@@ -18,6 +19,8 @@ RUNTIMES = [
 DEVICES = [
     {"name": "iPhone 18 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max",
      "minRuntimeVersionString": "27.0", "maxRuntimeVersionString": "65535.255.255"},
+    {"name": "iPhone 15 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max",
+     "minRuntimeVersionString": "17.0", "maxRuntimeVersionString": "65535.255.255"},
     {"name": "iPhone 11", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-11",
      "minRuntimeVersionString": "13.0", "maxRuntimeVersionString": "65535.255.255"},
 ]
@@ -39,6 +42,13 @@ class SimulatorSelectionTests(unittest.TestCase):
         runtime, device = self.make_runner().select_simulator()
         self.assertEqual(runtime["identifier"], "com.apple.CoreSimulator.SimRuntime.iOS-27-2")
         self.assertEqual(device["name"], "iPhone 18 Pro Max")
+
+    def test_requested_device_is_preserved_for_ios_27_1(self):
+        runtime, device = self.make_runner(
+            runtime="com.apple.CoreSimulator.SimRuntime.iOS-27-1",
+            device_type="com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max"
+        ).select_simulator()
+        self.assertEqual(device["name"], "iPhone 15 Pro Max")
 
     def test_explicit_runtime_is_honored(self):
         wanted = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
