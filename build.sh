@@ -59,7 +59,7 @@ info = {"source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], t
 Path("layout/Library/Application Support/FBTweak.bundle/FBTBuildInfo.json").write_text(json.dumps(info))
 PYINFO
 
-    echo "[FBTweak] make FINALPACKAGE=1 package (rootless, SDK 26.2)"
+    echo "[FBTweak] make FINALPACKAGE=1 package (rootless, SDK 27.1)"
     make FINALPACKAGE=1 package \
       THEOS_PACKAGE_SCHEME=rootless \
       THEOS_PLATFORM_DEB_COMPRESSION_TYPE=lzma \

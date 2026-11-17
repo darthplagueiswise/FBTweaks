@@ -319,9 +319,11 @@ static NSDictionary *FBTHeaderMeasurement(UITableView *table) {
 
 - (void)start {
     self.cases = [NSMutableArray new];
-    [self.cases addObject:@{@"id": @"runtime.ios26", @"kind": @"infrastructure",
-        @"status": FBTUIKit26IsAvailable() ? @"pass" : @"error", @"details": @{ @"version": UIDevice.currentDevice.systemVersion }}];
-    if (!FBTUIKit26IsAvailable()) { [self finish]; return; }
+    BOOL ios27Available = NO;
+    if (@available(iOS 27.0, *)) ios27Available = FBTUIKit26IsAvailable();
+    [self.cases addObject:@{@"id": @"runtime.ios27", @"kind": @"infrastructure",
+        @"status": ios27Available ? @"pass" : @"error", @"details": @{ @"version": UIDevice.currentDevice.systemVersion }}];
+    if (!ios27Available) { [self finish]; return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         if (self.finished) return;
         [self.cases addObject:@{@"id": @"infrastructure.host_timeout", @"kind": @"infrastructure", @"status": @"error", @"details": @{}}];

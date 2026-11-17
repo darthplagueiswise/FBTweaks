@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and run UIKitRegressionHost against the real iOS 26+ Simulator UIKit.
+"""Build and run UIKitRegressionHost against the real iOS 27+ Simulator UIKit.
 
 The host and production UI helper/base controller are compiled. A private
 temporary Simulator device/app is created and removed; existing devices, HEAD,
@@ -43,7 +43,7 @@ SURFACE_CASES = {
     "search.native_surface", "header.auto_layout_filters",
     "search.collapsible_configuration", "search.native_activation", "appearance.dark_mode",
 }
-REQUIRED_CASES = {"runtime.ios26"} | NAVIGATION_CASES | SELECTION_CASES | HEADER_CASES
+REQUIRED_CASES = {"runtime.ios27"} | NAVIGATION_CASES | SELECTION_CASES | HEADER_CASES
 # Structural configuration checks alone are insufficient to prove the old bug.
 REGRESSION_CASES = NAVIGATION_CASES | {
     "selection.highlight_feedback", "selection.selected_feedback",
@@ -155,11 +155,11 @@ class Runner:
         available = [runtime for runtime in runtimes
                      if runtime.get("isAvailable") is True
                      and "SimRuntime.iOS-" in runtime.get("identifier", "")
-                     and version_tuple(runtime.get("version", "0")) >= (26, 0, 0)]
+                     and version_tuple(runtime.get("version", "0")) >= (27, 0, 0)]
         if self.args.runtime:
             available = [runtime for runtime in available if runtime["identifier"] == self.args.runtime]
         if not available:
-            raise InfrastructureError("No available iOS 26+ Simulator runtime; select an installed Xcode/runtime")
+            raise InfrastructureError("No available iOS 27+ Simulator runtime; select an installed Xcode/runtime")
         runtime = max(available, key=lambda item: version_tuple(item["version"]))
         device_types = self.json_command(["xcrun", "simctl", "list", "devicetypes", "--json"]).get("devicetypes", [])
         candidates = []
@@ -187,7 +187,7 @@ class Runner:
             "CFBundleExecutable": "FBTUIKitRegressionHost", "CFBundleIdentifier": self.bundle_id,
             "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "FBTUIKitRegression",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0", "CFBundleVersion": "1",
-            "LSRequiresIPhoneOS": True, "MinimumOSVersion": "26.0", "UIDeviceFamily": [1],
+            "LSRequiresIPhoneOS": True, "MinimumOSVersion": "27.0", "UIDeviceFamily": [1],
             "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"], "UILaunchScreen": {},
             "UIApplicationSceneManifest": {
                 "UIApplicationSupportsMultipleScenes": False,
@@ -209,7 +209,7 @@ class Runner:
             framework_search = ["-F", str(subframeworks)]
         self.command([
             "xcrun", "--sdk", "iphonesimulator", "clang",
-            "-target", f"{architecture}-apple-ios26.0-simulator", "-isysroot", str(sdk),
+            "-target", f"{architecture}-apple-ios27.0-simulator", "-isysroot", str(sdk),
             *framework_search,
             "-fobjc-arc", "-fblocks", "-fmodules", "-O0", "-g",
             "-Wno-deprecated-declarations", "-Werror=implicit-function-declaration",
@@ -269,12 +269,12 @@ class Runner:
         if set(ids) != expected_cases:
             missing, extra = sorted(expected_cases - set(ids)), sorted(set(ids) - expected_cases)
             raise InfrastructureError(f"Host case coverage mismatch: missing={missing}, extra={extra}")
-        if version_tuple(str(result.get("os_version", "0"))) < (26, 0, 0):
-            raise InfrastructureError("Host did not execute on iOS 26+")
+        if version_tuple(str(result.get("os_version", "0"))) < (27, 0, 0):
+            raise InfrastructureError("Host did not execute on iOS 27+")
         failures, skipped = [], []
         for case in cases:
             name, status = case["id"], case.get("status")
-            expected_kind = "infrastructure" if name == "runtime.ios26" else "behavior"
+            expected_kind = "infrastructure" if name == "runtime.ios27" else "behavior"
             if case.get("kind") != expected_kind or status not in {"pass", "fail", "skipped"}:
                 raise InfrastructureError(f"Host infrastructure error or malformed case: {case!r}")
             if expected_kind == "infrastructure" and status != "pass":
@@ -337,13 +337,13 @@ class Runner:
             self.log = log
             try:
                 if sys.platform != "darwin":
-                    raise InfrastructureError("Real UIKit Simulator tests require macOS and an installed Xcode iOS 26+ SDK/runtime")
+                    raise InfrastructureError("Real UIKit Simulator tests require macOS and an installed Xcode iOS 27+ SDK/runtime")
                 for tool in ("xcrun", "codesign", "git"):
                     if not shutil.which(tool):
                         raise InfrastructureError(f"Required existing tool is missing: {tool}")
                 sdk_version = self.command(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"]).stdout.strip()
-                if version_tuple(sdk_version) < (26, 0, 0):
-                    raise InfrastructureError(f"Selected Xcode has Simulator SDK {sdk_version}; iOS 26+ is required")
+                if version_tuple(sdk_version) < (27, 0, 0):
+                    raise InfrastructureError(f"Selected Xcode has Simulator SDK {sdk_version}; iOS 27+ is required")
                 sdk = Path(self.command(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"]).stdout.strip())
                 if not sdk.is_dir():
                     raise InfrastructureError(f"Selected Simulator SDK does not exist: {sdk}")
@@ -401,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-regression", action="store_true",
                         help="require a baseline navigation/visible selection failure; infrastructure failures exit 2")
     parser.add_argument("--screenshots", action="store_true", help="retain real UIKit window PNGs for each major test state")
-    parser.add_argument("--runtime", help="optional exact identifier of an installed, available iOS 26+ runtime")
+    parser.add_argument("--runtime", help="optional exact identifier of an installed, available iOS 27+ runtime")
     parser.add_argument("--device-type", help="optional compatible iPhone device type identifier; a new private device is always created")
     parser.add_argument("--boot-timeout", type=positive_timeout, default=180, help="Simulator boot limit in seconds (default: 180, max: 600)")
     parser.add_argument("--test-timeout", type=positive_timeout, default=60, help="host result limit in seconds (default: 60, max: 600)")
