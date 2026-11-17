@@ -1,7 +1,6 @@
 // FBTSymbolsBrowserViewController.m
 #import "FBTSymbolsBrowserViewController.h"
 #import "../FBTUtils.h"
-#import "FBTBrowserCompat.h"
 #import "../Runtime/FBTCSymbolStub.h"
 #import "../Runtime/FBTCRuntimePatchResolver.h"
 #import "../Runtime/FBTSymbolBrowserEngine.h"
@@ -11,6 +10,7 @@
 #import <mach-o/nlist.h>
 #import <objc/runtime.h>
 #import "../UI/FBTUIKit26LiquidGlass.h"
+#import "../UI/FBTTextSearch.h"
 
 @interface FBTCSymbolEntry : NSObject
 @property (nonatomic, copy) NSString *name;
@@ -942,7 +942,7 @@ static char kFBTCSymbolGroupPayloadKey;
 - (instancetype)init { return [self initWithMode:FBTCSymbolsBrowserModeObjCMethods]; }
 - (instancetype)initWithMode:(FBTCSymbolsBrowserMode)mode {
     self = [super initWithTitle:FBTCModeTitle(mode)];
-    if (self) { _mode = mode; self.reduceTopInset = NO; }
+    if (self) { _mode = mode; }
     return self;
 }
 
@@ -1032,14 +1032,6 @@ static char kFBTCSymbolGroupPayloadKey;
     [self rebuildSections];
 }
 
-- (NSArray<NSString *> *)queryTokens {
-    NSString *q = [[_query ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
-    if (!q.length) return @[];
-    NSMutableArray *tokens = [NSMutableArray array];
-    for (NSString *t in [q componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) if (t.length) [tokens addObject:t];
-    return tokens.copy;
-}
-
 - (BOOL)entryMatchesMode:(FBTCSymbolEntry *)e {
     if (_imageSegment.selectedSegmentIndex == 1 && ![e.image isEqualToString:@"Facebook"]) return NO;
     if (_imageSegment.selectedSegmentIndex == 2 && ![e.image isEqualToString:@"FBSharedFramework"]) return NO;
@@ -1052,9 +1044,8 @@ static char kFBTCSymbolGroupPayloadKey;
 }
 
 - (BOOL)entry:(FBTCSymbolEntry *)e matchesTokens:(NSArray<NSString *> *)tokens {
-    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@", e.name?:@"", e.image?:@"", e.section?:@"", e.kind?:@"", e.abi?:@"", e.hookPlan?:@""].lowercaseString;
-    for (NSString *t in tokens) if (![hay containsString:t]) return NO;
-    return YES;
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@", e.name?:@"", e.image?:@"", e.section?:@"", e.kind?:@"", e.abi?:@"", e.hookPlan?:@""];
+    return FBTSearchHaystackMatchesTokens(hay, tokens);
 }
 
 - (BOOL)entryMatchesDefaultFilters:(FBTCSymbolEntry *)e {
@@ -1370,7 +1361,7 @@ static char kFBTCSymbolGroupPayloadKey;
 
 - (void)rebuildSections {
     if (!_allSymbols) return;
-    NSArray *tokens = [self queryTokens];
+    NSArray *tokens = FBTSearchTokens(_query);
     NSUInteger limit = tokens.count ? 1200 : 420;
     NSUInteger shown = 0;
     NSMutableArray<NSString *> *order = [NSMutableArray array];

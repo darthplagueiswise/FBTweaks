@@ -25,9 +25,7 @@ if [ -d "$UIKIT" ]; then
 fi
 
 echo "[validate] Assets de bundle presentes..."
-[ -f "layout/Library/Application Support/FBTweak.bundle/FBTFlags.json" ] || fail "FBTFlags.json ausente no layout"
-[ -f "layout/Library/Application Support/FBTweak.bundle/FBTHeadlineFlags.json" ] || fail "FBTHeadlineFlags.json ausente no layout"
-[ -d "layout/Library/Application Support/FBTweak.bundle/QueryConfigs" ] || fail "QueryConfigs dir ausente no layout"
+bash "$ROOT/scripts/verify_bundle_assets.sh" "layout/Library/Application Support/FBTweak.bundle" || fail "assets do bundle inválidos no layout"
 if find src -type f -name "*.swift" | grep -q .; then fail "Swift ainda presente em src/"; fi
 
 echo "[validate] Sem arquivos temporários em src/ que o find pegaria..."

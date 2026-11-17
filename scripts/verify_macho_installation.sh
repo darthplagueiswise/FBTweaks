@@ -15,9 +15,7 @@ test -f "$DYLIB" || { echo "Rootless FBTweak.dylib missing from package"; exit 1
 test -f "$ROOT/var/jb/Library/MobileSubstrate/DynamicLibraries/FBTweak.plist"
 test ! -e "$ROOT/Library/MobileSubstrate/DynamicLibraries/FBTweak.dylib"
 BUNDLE="$ROOT/var/jb/Library/Application Support/FBTweak.bundle"
-test -s "$BUNDLE/FBTFlags.json"
-test -s "$BUNDLE/FBTHeadlineFlags.json"
-test -d "$BUNDLE/QueryConfigs"
+bash "$(cd "$(dirname "$0")" && pwd)/verify_bundle_assets.sh" "$BUNDLE" --nonempty
 gzip -t "$BUNDLE/FBTLocalConfigNames.json.gz"
 BUILD_INFO="$BUNDLE/FBTBuildInfo.json"
 python3 - "$BUILD_INFO" "${FBT_EXPECTED_COMMIT:-}" <<'PYINFO'

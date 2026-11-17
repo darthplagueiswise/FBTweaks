@@ -1,10 +1,8 @@
 #import "FBTBaseSettingsListViewController.h"
 #import "../UI/FBTUIKit26LiquidGlass.h"
 #import "../FBTUtils.h"
-#import "FBTBrowserCompat.h"
 
 static NSString *const kFBTBaseCell = @"FBTBaseCell";
-static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 
 @implementation FBTBaseSettingsRow
 
@@ -68,7 +66,6 @@ static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 	if ((self = [super init])) {
 		self.title = title;
 		_sections = @[];
-		_reduceTopInset = YES;
 	}
 	return self;
 }
@@ -90,7 +87,6 @@ static NSString *const kFBTBaseCustomCell = @"FBTBaseCustomCell";
 	if (@available(iOS 11.0, *)) _tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 	_tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_tableView registerClass:UITableViewCell.class forCellReuseIdentifier:kFBTBaseCell];
-	[_tableView registerClass:UITableViewCell.class forCellReuseIdentifier:kFBTBaseCustomCell];
 	[self.view addSubview:_tableView];
 
 	[NSLayoutConstraint activateConstraints:@[

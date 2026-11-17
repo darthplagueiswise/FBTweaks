@@ -6,6 +6,7 @@
 #import "../FBTDefaults.h"
 #import "../FBTUtils.h"
 #import "../UI/FBTUIKit26LiquidGlass.h"
+#import "../UI/FBTTextSearch.h"
 #import "../Runtime/FBTMobileConfigRuntime.h"
 #import "../Runtime/FBTRuntimeBoolBrowser.h"
 #import "FBTSymbolsBrowserViewController.h"
@@ -90,18 +91,6 @@ static NSString *FBTMCStateLabel(FBTMCState state) {
         case FBTMCStateSys:
         default: return @"SYS (sem override explícito)";
     }
-}
-
-static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack) {
-    NSString *q = [query.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
-    if (!q.length) return YES;
-    NSString *h = haystack.lowercaseString ?: @"";
-    NSArray<NSString *> *tokens = [q componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    for (NSString *token in tokens) {
-        if (!token.length) continue;
-        if ([h rangeOfString:token].location == NSNotFound) return NO;
-    }
-    return YES;
 }
 
 @interface FBTSettingsSwitch : UISwitch
@@ -1034,8 +1023,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     if (!q.length) self.filtered = self.entries ?: @[];
     else {
         NSPredicate *p = [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, __unused NSDictionary *bindings) {
-            NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@ %@", e[@"key"] ?: @"", e[@"hex"] ?: @"", e[@"config"] ?: @"", e[@"param"] ?: @"", e[@"type"] ?: @""] lowercaseString];
-            return FBTSettingsQueryMatchesHaystack(q, hay);
+            NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@", e[@"key"] ?: @"", e[@"hex"] ?: @"", e[@"config"] ?: @"", e[@"param"] ?: @"", e[@"type"] ?: @""];
+            return FBTSearchQueryMatchesHaystack(q, hay);
         }];
         self.filtered = [self.entries filteredArrayUsingPredicate:p];
     }
@@ -1140,8 +1129,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSString *q = searchController.searchBar.text.lowercaseString ?: @"";
     if (!q.length) self.filtered = self.entries ?: @[];
     else self.filtered = [self.entries filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, __unused NSDictionary *b) {
-        NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@ %@", e[@"class"] ?: @"", e[@"selector"] ?: @"", e[@"imageKind"] ?: @"", e[@"image"] ?: @""] lowercaseString];
-        return FBTSettingsQueryMatchesHaystack(q, hay);
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@", e[@"class"] ?: @"", e[@"selector"] ?: @"", e[@"imageKind"] ?: @"", e[@"image"] ?: @""];
+        return FBTSearchQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }
@@ -1232,8 +1221,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSString *q = self.searchController.searchBar.text.lowercaseString ?: @"";
     if (!q.length) self.filtered = self.flags ?: @[];
     else self.filtered = [self.flags filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *f, __unused NSDictionary *b) {
-        NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@", f[@"c"] ?: @"", f[@"p"] ?: @"", f[@"tag"] ?: @""] lowercaseString];
-        return FBTSettingsQueryMatchesHaystack(q, hay);
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@", f[@"c"] ?: @"", f[@"p"] ?: @"", f[@"tag"] ?: @""];
+        return FBTSearchQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }
@@ -1272,8 +1261,8 @@ static BOOL FBTSettingsQueryMatchesHaystack(NSString *query, NSString *haystack)
     NSString *q = self.searchController.searchBar.text.lowercaseString ?: @"";
     if (!q.length) self.filtered = self.items ?: @[];
     else self.filtered = [self.items filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *item, __unused NSDictionary *b) {
-        NSString *hay = [[NSString stringWithFormat:@"%@ %@ %@", item[@"name"] ?: @"", item[@"id"] ?: @"", item[@"file"] ?: @""] lowercaseString];
-        return FBTSettingsQueryMatchesHaystack(q, hay);
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@", item[@"name"] ?: @"", item[@"id"] ?: @"", item[@"file"] ?: @""];
+        return FBTSearchQueryMatchesHaystack(q, hay);
     }]];
     [self.tableView reloadData];
 }

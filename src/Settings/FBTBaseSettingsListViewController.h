@@ -43,7 +43,6 @@ typedef NS_ENUM(NSInteger, FBTBaseSettingsRowStyle) {
 @interface FBTBaseSettingsListViewController : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong, readonly) UITableView *tableView;
 @property (nonatomic, copy) NSArray<FBTBaseSettingsSection *> *sections;
-@property (nonatomic) BOOL reduceTopInset;
 
 - (instancetype)initWithTitle:(NSString *)title;
 - (void)reloadSettings;

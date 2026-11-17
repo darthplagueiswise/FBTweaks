@@ -1,5 +1,5 @@
 #import "FBTLocalConfigCatalog.h"
-#import "FBTFlagCatalog.h"
+#import "../FBTBundleResources.h"
 #include <zlib.h>
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -39,7 +39,7 @@ static unsigned long long FBTHex(NSString *text) { return strtoull(text.UTF8Stri
 + (NSArray<NSDictionary *> *)configurations {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSURL *namesURL = [FBTFlagCatalog bundleURLForResource:@"FBTLocalConfigNames.json" extension:@"gz"];
+        NSURL *namesURL = FBTBundleURLForResource(@"FBTLocalConfigNames.json", @"gz");
         id rawNames = namesURL ? FBTLocalJSON([NSData dataWithContentsOfURL:namesURL]) : nil;
         NSDictionary *names = [rawNames isKindOfClass:[NSDictionary class]] ? rawNames : @{};
         NSString *directory = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"mobileconfig_res"];

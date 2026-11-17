@@ -1,6 +1,5 @@
 #import "FBTCSymbolStub.h"
 #import "../FBTUtils.h"
-#import "../Settings/FBTBrowserCompat.h"
 #import "../../modules/fishhook/fishhook.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <dlfcn.h>

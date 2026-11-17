@@ -1,7 +1,6 @@
 #import "FBTFeatureParamsViewController.h"
 #import "FBTFeatureCatalog.h"
 #import "FBTLocalConfigViewController.h"
-#import "FBTBrowserCompat.h"
 #import "../FBTUtils.h"
 #import "../Runtime/FBTLocalConfigCatalog.h"
 #import "../Runtime/FBTMCOverridesFile.h"

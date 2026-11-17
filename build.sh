@@ -29,16 +29,7 @@ echo "[FBTweak] THEOS=$THEOS"
 BUNDLE_DIR="layout/Library/Application Support/FBTweak.bundle"
 
 verify_assets() {
-  for f in FBTFlags.json FBTHeadlineFlags.json; do
-    if [ ! -f "$BUNDLE_DIR/$f" ]; then
-      echo "ERRO: asset ausente: $BUNDLE_DIR/$f"
-      exit 1
-    fi
-  done
-  if [ ! -d "$BUNDLE_DIR/QueryConfigs" ]; then
-    echo "ERRO: QueryConfigs ausente: $BUNDLE_DIR/QueryConfigs"
-    exit 1
-  fi
+  bash "$ROOT/scripts/verify_bundle_assets.sh" "$BUNDLE_DIR"
   echo "[FBTweak] assets do bundle OK"
 }
 

@@ -1,4 +1,5 @@
 #import "FBTFlagCatalog.h"
+#import "../FBTBundleResources.h"
 #import "FBTLocalConfigCatalog.h"
 #include <stdlib.h>
 
@@ -11,29 +12,10 @@ static uint64_t FBTFlagUInt64FromNumber(NSNumber *n) {
     return (uint64_t)strtoull(cstr, NULL, 0);
 }
 
-+ (NSURL *)bundleBaseURL {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray<NSString *> *bases = @[
-        @"/var/jb/Library/Application Support/FBTweak.bundle",
-        @"/Library/Application Support/FBTweak.bundle",
-        [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"FBTweak.bundle"],
-    ];
-    for (NSString *path in bases) {
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir) {
-            return [NSURL fileURLWithPath:path isDirectory:YES];
-        }
-    }
-    return nil;
-}
++ (NSURL *)bundleBaseURL { return FBTBundleBaseURL(); }
 
 + (NSURL *)bundleURLForResource:(NSString *)name extension:(NSString *)ext {
-    NSURL *base = [self bundleBaseURL];
-    if (base) {
-        NSURL *candidate = [[base URLByAppendingPathComponent:name] URLByAppendingPathExtension:ext ?: @""];
-        if ([[NSFileManager defaultManager] fileExistsAtPath:candidate.path]) return candidate;
-    }
-    return [[NSBundle mainBundle] URLForResource:name withExtension:ext];
+    return FBTBundleURLForResource(name, ext);
 }
 
 + (id)jsonFromURL:(NSURL *)url {
