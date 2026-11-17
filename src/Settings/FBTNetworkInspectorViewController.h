@@ -1,5 +1,5 @@
-#import <UIKit/UIKit.h>
+#import "../UI/FBTStyledTableViewController.h"
 
 // Opt-in MobileConfig/QE inspector. Runs entirely within the Facebook process.
-@interface FBTNetworkInspectorViewController : UITableViewController
+@interface FBTNetworkInspectorViewController : FBTStyledTableViewController
 @end

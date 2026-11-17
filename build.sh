@@ -29,16 +29,7 @@ echo "[FBTweak] THEOS=$THEOS"
 BUNDLE_DIR="layout/Library/Application Support/FBTweak.bundle"
 
 verify_assets() {
-  for f in FBTFlags.json FBTHeadlineFlags.json; do
-    if [ ! -f "$BUNDLE_DIR/$f" ]; then
-      echo "ERRO: asset ausente: $BUNDLE_DIR/$f"
-      exit 1
-    fi
-  done
-  if [ ! -d "$BUNDLE_DIR/QueryConfigs" ]; then
-    echo "ERRO: QueryConfigs ausente: $BUNDLE_DIR/QueryConfigs"
-    exit 1
-  fi
+  bash "$ROOT/scripts/verify_bundle_assets.sh" "$BUNDLE_DIR"
   echo "[FBTweak] assets do bundle OK"
 }
 
@@ -68,7 +59,7 @@ info = {"source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], t
 Path("layout/Library/Application Support/FBTweak.bundle/FBTBuildInfo.json").write_text(json.dumps(info))
 PYINFO
 
-    echo "[FBTweak] make FINALPACKAGE=1 package (rootless, SDK 26.2)"
+    echo "[FBTweak] make FINALPACKAGE=1 package (rootless, SDK 27.1)"
     make FINALPACKAGE=1 package \
       THEOS_PACKAGE_SCHEME=rootless \
       THEOS_PLATFORM_DEB_COMPRESSION_TYPE=lzma \

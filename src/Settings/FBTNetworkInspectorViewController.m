@@ -4,6 +4,7 @@
 #import "../Runtime/FBTMobileConfigResponseCapture.h"
 #import "../Runtime/FBTMobileConfigFetchDiagnostics.h"
 #import "../FBTDefaults.h"
+#import "../UI/FBTUIKit26LiquidGlass.h"
 
 static NSString *FBTNIJSON(NSDictionary *record) {
     if (![record isKindOfClass:NSDictionary.class]) return @"{}";
@@ -30,31 +31,41 @@ static id FBTNIVisibleHTTPStatus(id value) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    FBTUIKit26ConfigureViewController(self);
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.title = @"Request / Response";
     UISegmentedControl *tabs = [[UISegmentedControl alloc] initWithItems:@[@"Resumo", @"Request", @"HTTP", @"Nativo"]];
     tabs.selectedSegmentIndex = 0;
     [tabs addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.titleView = tabs;
+    FBTUIKit26ConfigureSegmentedControl(tabs);
+    tabs.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:tabs];
     self.segments = tabs;
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
     UITextView *view = [UITextView new];
     view.editable = NO;
     view.selectable = YES;
-    view.backgroundColor = UIColor.systemBackgroundColor;
+    view.backgroundColor = UIColor.clearColor;
     view.textColor = UIColor.labelColor;
     view.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     view.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:view];
     [NSLayoutConstraint activateConstraints:@[
-        [view.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [tabs.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:12],
+        [tabs.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:16],
+        [tabs.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+        [view.topAnchor constraintEqualToAnchor:tabs.bottomAnchor constant:12],
         [view.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
-        [view.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [view.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12]
+        [view.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:12],
+        [view.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12]
     ]];
     self.text = view;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(exportSelected)];
     [self refresh];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    FBTConfigureNavigationChromeForGlass(self);
 }
 - (void)refresh {
     NSDictionary *record = FBTNetworkInspectorRecordWithID(self.recordID);

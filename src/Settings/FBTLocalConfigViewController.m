@@ -34,9 +34,6 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    FBTUIKit26ConfigureViewController(self);
-    FBTUIKit26ConfigureScrollView(self.tableView);
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     NSString *name = self.configuration[@"name"];
     self.title = self.configuration ? (name.length ? name : [self.configuration[@"id"] description]) : @"MobileConfig local";
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -45,8 +42,6 @@
     self.search.searchBar.placeholder = @"Config, parâmetro ou ID";
     self.navigationItem.searchController = self.search;
     self.search.searchBar.text = self.initialQuery;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.definesPresentationContext = YES;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 84;
     if (self.configuration) {
@@ -69,7 +64,6 @@
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    FBTConfigureNavigationChromeForGlass(self);
     if (self.configuration) [self refreshEffectiveValues];
 }
 - (void)viewDidDisappear:(BOOL)animated {
@@ -214,7 +208,6 @@
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"local"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];
-    FBTUIKit26ConfigureTableCell(cell);
     NSDictionary *row = self.rows[indexPath.row];
     NSString *name = row[@"name"];
     cell.textLabel.text = name.length ? [NSString stringWithFormat:@"%@: %@", row[@"id"], name] : [row[@"id"] description];

@@ -13,14 +13,36 @@
  self.captureSwitch=[UISwitch new];
  self.captureSwitch.on=FBTNativeTraceIsEnabled();
  [self.captureSwitch addTarget:self action:@selector(toggleCapture:) forControlEvents:UIControlEventValueChanged];
+ self.captureSwitch.accessibilityLabel=@"Capturar eventos do Live Trace";
  UILabel *label=[UILabel new];
- label.text=@"Capturar ";label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+ label.text=@"Capturar eventos";
+ label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+ label.adjustsFontForContentSizeCategory=YES;
+ label.numberOfLines=0;
+ label.textColor=UIColor.labelColor;
  UIStackView *controls=[[UIStackView alloc]initWithArrangedSubviews:@[label,self.captureSwitch]];
- controls.axis=UILayoutConstraintAxisHorizontal;controls.spacing=4;
- self.navigationItem.titleView=controls;
+ controls.axis=UILayoutConstraintAxisHorizontal;
+ controls.alignment=UIStackViewAlignmentCenter;
+ controls.spacing=16;
+ controls.translatesAutoresizingMaskIntoConstraints=NO;
+ UIView *header=[[UIView alloc]initWithFrame:CGRectZero];
+ [header addSubview:controls];
+ [NSLayoutConstraint activateConstraints:@[
+  [controls.topAnchor constraintEqualToAnchor:header.topAnchor constant:12],
+  [controls.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
+  [controls.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
+  [controls.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-12]
+ ]];
+ self.tableView.tableHeaderView=header;
+ __weak typeof(self) weakSelf=self;
+ UIAction *exportAction=[UIAction actionWithTitle:@"Exportar" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__unused UIAction *action){[weakSelf exportTrace];}];
+ UIAction *clearAction=[UIAction actionWithTitle:@"Limpar" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *action){[weakSelf clearTrace];}];
+ clearAction.attributes=UIMenuElementAttributesDestructive;
+ UIBarButtonItem *actions=[[UIBarButtonItem alloc]initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:NULL];
+ actions.menu=[UIMenu menuWithChildren:@[exportAction,clearAction]];
+ actions.accessibilityLabel=@"Ações do Live Trace";
  self.navigationItem.rightBarButtonItems=@[
-  [[UIBarButtonItem alloc]initWithTitle:@"Exportar" style:UIBarButtonItemStylePlain target:self action:@selector(exportTrace)],
-  [[UIBarButtonItem alloc]initWithTitle:@"Limpar" style:UIBarButtonItemStylePlain target:self action:@selector(clearTrace)],
+  actions,
   [[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshTrace)]
  ];
  [self refreshTrace];
