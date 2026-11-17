@@ -47,3 +47,17 @@ Apple API references: [native search placement](https://developer.apple.com/docu
 - Python runner compilation, shell syntax and git diff --check pass.
 - Native runner attempted on Linux; exit 2 explicitly reports unavailable macOS/Xcode/iOS 26+ Simulator. This is an infrastructure limitation, not a passing visual test.
 - Existing macOS workflow is enabled for PRs against fix/mobileconfig-path-and-diagnostics so the native build and simulator checks can run on this PR.
+
+## Follow-up from native CI 44012129230
+
+The real iOS 26.5/iPhone 11 run compiled the production helper/base and passed 20 of 21 checks, including native chrome isolation, grouped/empty surfaces, Dark Mode, selection and header sizing. `search.native_activation` failed. The evidence showed search integrated into a bottom toolbar despite the preferred navigation placement; the test also sampled the wrapper view at an arbitrary 250 ms.
+
+- Disable `searchBarPlacementAllowsToolbarIntegration` on iOS 26+ to keep collapsible search owned by the navigation item. Apple documents toolbar integration as enabled by default.
+- Observe `didPresentSearchController:` and `didDismissSearchController:` instead of sampling by delay. Retain the weak delegate's observer until dismissal; inspect the actual text field window and visible bounds, not its wrapper. Record actual placement and visibility for diagnosis. The existing host watchdog still detects missing callbacks.
+- This retains the failing behavior assertion; no test is skipped or weakened to accept activation alone.
+
+## Rootless build delivery
+
+The workflow keeps native UI checks mandatory before packaging. It stamps the control Version as `1.0.<run_number>`, removes only previously generated `packages/*.deb`, requires exactly one fresh output and invokes `bash build.sh rootless`. The package verifier checks the expected Version as well as its existing `iphoneos-arm64`, `/var/jb`, source-commit, bundle and Mach-O contracts.
+
+Artifacts are named `FBTweak-rootless-arm64-<run_number>` and contain the `.deb`, SHA-256 checksum and a JSON provenance manifest. The Actions summary repeats version, architecture, commit and hash. A failed test or package validation prevents publishing the installable artifact.

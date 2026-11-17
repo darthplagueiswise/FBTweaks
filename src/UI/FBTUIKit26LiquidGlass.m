@@ -221,6 +221,7 @@ void FBTUIKit26ConfigureSearchNavigationItem(UINavigationItem *navigationItem) {
     if (!searchBar) return;
     navigationItem.hidesSearchBarWhenScrolling = YES;
     if (@available(iOS 26.0, *)) {
+        navigationItem.searchBarPlacementAllowsToolbarIntegration = NO;
         navigationItem.preferredSearchBarPlacement = UINavigationItemSearchBarPlacementIntegratedButton;
     }
     FBTUIKit26ConfigureSearchBar(searchBar);

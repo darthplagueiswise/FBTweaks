@@ -17,6 +17,23 @@
 #if !FBT_UIKIT_BASELINE_MODE
 #import "FBTStyledTableViewController.h"
 
+@interface FBTSearchTransitionObserver : NSObject <UISearchControllerDelegate>
+@property(nonatomic, copy) void (^presented)(UISearchController *search);
+@property(nonatomic, copy) void (^dismissed)(UISearchController *search);
+@end
+@implementation FBTSearchTransitionObserver
+- (void)didPresentSearchController:(UISearchController *)search {
+    void (^completion)(UISearchController *) = self.presented;
+    self.presented = nil;
+    if (completion) completion(search);
+}
+- (void)didDismissSearchController:(UISearchController *)search {
+    void (^completion)(UISearchController *) = self.dismissed;
+    self.dismissed = nil;
+    if (completion) completion(search);
+}
+@end
+
 @interface FBTStyledRegressionFixture : FBTStyledTableViewController
 @end
 @implementation FBTStyledRegressionFixture
@@ -250,6 +267,7 @@ static NSDictionary *FBTHeaderMeasurement(UITableView *table) {
 @property(nonatomic, strong) UIImage *normalCell;
 @property(nonatomic, strong) NSDictionary *normalHeader;
 @property(nonatomic) BOOL finished;
+@property(nonatomic, strong) id<UISearchControllerDelegate> searchTransitionObserver;
 - (void)start;
 @end
 
@@ -441,29 +459,51 @@ static NSDictionary *FBTHeaderMeasurement(UITableView *table) {
 
 - (void)testSearchAndThemeForFixture:(FBTStyledRegressionFixture *)fixture search:(UISearchController *)search {
     BOOL collapsible = fixture.navigationItem.hidesSearchBarWhenScrolling &&
+        !fixture.navigationItem.searchBarPlacementAllowsToolbarIntegration &&
         fixture.navigationItem.preferredSearchBarPlacement == UINavigationItemSearchBarPlacementIntegratedButton;
     [self record:@"search.collapsible_configuration" pass:collapsible details:@{@"native_integrated_button": @(collapsible)}];
-    [search setActive:YES];
-    [self later:^{
-        BOOL expanded = search.active && search.searchBar.window != nil && search.searchBar.searchTextField.bounds.size.width > 0;
+    FBTSearchTransitionObserver *observer = [FBTSearchTransitionObserver new];
+    self.searchTransitionObserver = observer;
+    search.delegate = observer;
+    __block BOOL expanded = NO;
+    __block NSDictionary *expansionDetails = nil;
+    observer.presented = ^(UISearchController *controller) {
+        [fixture.view layoutIfNeeded];
+        [controller.searchBar layoutIfNeeded];
+        UITextField *field = controller.searchBar.searchTextField;
+        CGRect fieldRect = field.window == self.window ? [field convertRect:field.bounds toView:self.window] : CGRectNull;
+        CGRect visibleRect = CGRectIntersection(fieldRect, self.window.bounds);
+        expanded = controller.active && field.window == self.window && !field.hidden && field.alpha > 0.01 &&
+            !CGRectIsNull(visibleRect) && visibleRect.size.width > 1 && visibleRect.size.height > 1;
+        expansionDetails = @{@"expanded": @(expanded), @"active_after_presentation": @(controller.active),
+            @"field_in_window": @(field.window == self.window), @"field_bounds": NSStringFromCGRect(field.bounds),
+            @"visible_field_rect": NSStringFromCGRect(visibleRect), @"actual_search_placement": @(fixture.navigationItem.searchBarPlacement)};
         [self capture:@"search-expanded"];
-        [search setActive:NO];
-        [self later:^{
-            [self record:@"search.native_activation" pass:expanded && !search.active
-                details:@{@"expanded": @(expanded), @"collapsed": @(!search.active)}];
-            [self capture:@"search-collapsed"];
-            UIColor *lightColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:
-                [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight]];
-            fixture.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-            [self later:^{
-                UIColor *darkColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:fixture.traitCollection];
-                BOOL dark = fixture.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark &&
-                    ![FBTColor(lightColor) isEqual:FBTColor(darkColor)];
-                [self record:@"appearance.dark_mode" pass:dark details:@{@"light": FBTColor(lightColor), @"dark": FBTColor(darkColor)}];
-                [self capture:@"styled-table-dark"];
-                [self prepareTable];
-            }];
-        }];
+        dispatch_async(dispatch_get_main_queue(), ^{ [controller setActive:NO]; });
+    };
+    observer.dismissed = ^(UISearchController *controller) {
+        NSMutableDictionary *details = [expansionDetails mutableCopy] ?: [NSMutableDictionary new];
+        details[@"collapsed"] = @(!controller.active);
+        [self record:@"search.native_activation" pass:expanded && !controller.active details:details];
+        [self capture:@"search-collapsed"];
+        controller.delegate = nil;
+        self.searchTransitionObserver = nil;
+        [self testDarkModeForFixture:fixture];
+    };
+    [search setActive:YES];
+}
+
+- (void)testDarkModeForFixture:(FBTStyledRegressionFixture *)fixture {
+    UIColor *lightColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:
+        [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight]];
+    fixture.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    [self later:^{
+        UIColor *darkColor = [fixture.tableView.backgroundColor resolvedColorWithTraitCollection:fixture.traitCollection];
+        BOOL dark = fixture.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark &&
+            ![FBTColor(lightColor) isEqual:FBTColor(darkColor)];
+        [self record:@"appearance.dark_mode" pass:dark details:@{@"light": FBTColor(lightColor), @"dark": FBTColor(darkColor)}];
+        [self capture:@"styled-table-dark"];
+        [self prepareTable];
     }];
 }
 #endif
