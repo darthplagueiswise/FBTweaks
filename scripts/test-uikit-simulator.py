@@ -158,6 +158,17 @@ class Runner:
                      and version_tuple(runtime.get("version", "0")) >= (27, 0, 0)]
         if self.args.runtime:
             available = [runtime for runtime in available if runtime["identifier"] == self.args.runtime]
+        else:
+            # Xcode 27 ships device-specific runtime variants (e.g. iOS-27-2-iPhone19-4).
+            # Their version ties with the standard runtime but rejects unrelated iPhones.
+            # Select only universal iOS runtimes unless an exact variant was requested.
+            standard = [
+                runtime for runtime in available
+                if re.fullmatch(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-\d+-\d+",
+                                runtime.get("identifier", ""))
+            ]
+            if standard:
+                available = standard
         if not available:
             raise InfrastructureError("No available iOS 27+ Simulator runtime; select an installed Xcode/runtime")
         runtime = max(available, key=lambda item: version_tuple(item["version"]))
@@ -175,8 +186,14 @@ class Runner:
                 candidates.append(device)
         if not candidates:
             raise InfrastructureError(f"No compatible installed iPhone device type for {runtime['identifier']}")
-        # simctl lists device generations in order; the last compatible iPhone is suitable.
-        return runtime, candidates[-1]
+        # simctl's order is not device age order: on xcode-27 its final
+        # compatible entry can be iPhone 11. Prefer a current iPhone generation.
+        def device_preference(device: dict) -> tuple[int, int, int]:
+            name = str(device.get("name", ""))
+            generation = re.search(r"iPhone\s+(\d+)", name)
+            return (int(generation.group(1)) if generation else -1,
+                    int("Pro Max" in name), int("Pro" in name))
+        return runtime, max(candidates, key=device_preference)
 
     def build_app(self, temp: Path, sdk: Path, source_dir: Path,
                   source_ref: str, has_header: bool) -> Path:
