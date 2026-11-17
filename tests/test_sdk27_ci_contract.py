@@ -17,8 +17,10 @@ class SDK27BuildContracts(unittest.TestCase):
         self.assertIn("scripts/verify_macho_installation.sh", workflow)
         self.assertIn("FBTweak-rootless-arm64-", workflow)
         self.assertIn("if-no-files-found: error", workflow)
-        self.assertEqual(workflow.count("--runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300"), 2)
-        self.assertEqual(workflow.count("--device-type com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max"), 2)
+        self.assertEqual(workflow.count("--runtime com.apple.CoreSimulator.SimRuntime.iOS-27-2 --command-timeout 300 --boot-timeout 300"), 2)
+        self.assertEqual(workflow.count("--device-type com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max"), 2)
+        self.assertLess(workflow.index("- name: Build and verify rootless package"), workflow.index("- name: Reproduce previous UIKit"))
+        self.assertLess(workflow.index("- name: Test UIKit navigation"), workflow.index("- name: Upload verified rootless artifact"))
 
     def test_makefile(self):
         makefile = read("Makefile")

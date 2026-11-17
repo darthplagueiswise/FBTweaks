@@ -194,28 +194,6 @@ jobs:
           clang -fobjc-arc -framework Foundation tests/FeatureCatalogCoverageTests.m src/Settings/FBTFeatureCatalog.m -o "$RUNNER_TEMP/fbt-feature-catalog-tests"
           "$RUNNER_TEMP/fbt-feature-catalog-tests"
 
-      - name: Reproduce previous UIKit navigation and selection regressions
-        id: uikit_baseline
-        run: |
-          cd main
-          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
-
-      - name: Test UIKit navigation, cell selection and accessible header
-        id: uikit_fixed
-        run: |
-          cd main
-          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-1 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
-
-      - name: Upload UIKit regression evidence
-        if: always() && (steps.uikit_baseline.outcome == 'success' || steps.uikit_baseline.outcome == 'failure' || steps.uikit_fixed.outcome == 'success' || steps.uikit_fixed.outcome == 'failure')
-        uses: actions/upload-artifact@v4
-        with:
-          name: UIKit-regressions-${{ github.run_number }}
-          path: |
-            ${{ runner.temp }}/fbt-uikit-baseline
-            ${{ runner.temp }}/fbt-uikit-fixed
-          if-no-files-found: error
-
       - name: Validate safe dynamic hooking architecture
         run: |
           cd main
@@ -275,6 +253,28 @@ jobs:
           THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: 9
           FBT_EXPECTED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
           FBT_EXPECTED_VERSION: 1.0.${{ github.run_number }}
+
+      - name: Reproduce previous UIKit navigation and selection regressions
+        id: uikit_baseline
+        run: |
+          cd main
+          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-2 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max --baseline-ref 4a921517aab726724f86a74854736471cab9c31c --expect-regression --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-baseline"
+
+      - name: Test UIKit navigation, cell selection and accessible header
+        id: uikit_fixed
+        run: |
+          cd main
+          python3 scripts/test-uikit-simulator.py --runtime com.apple.CoreSimulator.SimRuntime.iOS-27-2 --command-timeout 300 --boot-timeout 300 --device-type com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max --screenshots --output-dir "$RUNNER_TEMP/fbt-uikit-fixed"
+
+      - name: Upload UIKit regression evidence
+        if: always() && (steps.uikit_baseline.outcome == 'success' || steps.uikit_baseline.outcome == 'failure' || steps.uikit_fixed.outcome == 'success' || steps.uikit_fixed.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: UIKit-regressions-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/fbt-uikit-baseline
+            ${{ runner.temp }}/fbt-uikit-fixed
+          if-no-files-found: error
 
       - name: Upload verified rootless artifact
         uses: actions/upload-artifact@v4

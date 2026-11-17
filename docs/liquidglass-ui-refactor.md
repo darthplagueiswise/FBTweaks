@@ -58,6 +58,10 @@ The real iOS 26.5/iPhone 11 run compiled the production helper/base and passed 2
 
 ## Rootless build delivery
 
-The workflow keeps native UI checks mandatory before packaging. It stamps the control Version as `1.0.<run_number>`, removes only previously generated `packages/*.deb`, requires exactly one fresh output and invokes `bash build.sh rootless`. The package verifier checks the expected Version as well as its existing `iphoneos-arm64`, `/var/jb`, source-commit, bundle and Mach-O contracts.
+Native UIKit checks remain mandatory before **publishing** the rootless package. Unit/static checks and the rootless compiler/package verifier now run before the two Simulator phases, so a CoreSimulator infrastructure failure cannot hide compiler diagnostics. Publication still depends on both native UI phases passing. It stamps the control Version as `1.0.<run_number>`, removes only previously generated `packages/*.deb`, requires exactly one fresh output and invokes `bash build.sh rootless`. The package verifier checks the expected Version as well as its existing `iphoneos-arm64`, `/var/jb`, source-commit, bundle and Mach-O contracts.
 
 Artifacts are named `FBTweak-rootless-arm64-<run_number>` and contain the `.deb`, SHA-256 checksum and a JSON provenance manifest. The Actions summary repeats version, architecture, commit and hash. A failed test or package validation prevents publishing the installable artifact.
+
+## Xcode 27 / CoreSimulator compatibility (2026-11-17)
+
+The Theos target and SDK use iOS 27.1, on the GitHub-hosted `xcode-27` runner. In native CI, simctl accepted an iOS 27.2 generic runtime with an iPhone 18 Pro Max; iOS 27.1 with iPhone 15 Pro Max and iPhone 18 Pro Max was rejected by CoreSimulator (error 403), despite permissive device-type metadata. Both real-UIKit cases use the *observed working* runtime/device pair, and have a 300-second command/boot limit to accommodate first-boot costs. All original behavioral assertions remain enabled, and the verified rootless .deb is published only after they pass.
