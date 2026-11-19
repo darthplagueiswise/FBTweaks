@@ -5,6 +5,7 @@ on:
     branches:
       - 'flags'
       - 'main'
+      - 'fix/watchdog-mc-recording-20261030'
   workflow_dispatch:
 
 concurrency:
@@ -180,10 +181,14 @@ jobs:
       - name: Build rootless
         run: |
           cd main
+          # Give each CI package its own dpkg version (not just a unique ZIP name).
+          # Tools that cache the Package+Version pair must never reuse an old dylib.
+          python3 -c 'import os,pathlib,re; p=pathlib.Path("control"); s=p.read_text(); v,n=re.subn(r"(?m)^Version:.*$", "Version: 1.0."+os.environ["GITHUB_RUN_NUMBER"], s); assert n==1, "missing control Version"; p.write_text(v)'
           ./build.sh rootless
           mkdir -p release
           DEB="$(ls -t packages/*.deb 2>/dev/null | head -n1)"
           test -n "$DEB"
+          test "$(dpkg-deb -f "$DEB" Version)" = "1.0.${GITHUB_RUN_NUMBER}"
           cp "$DEB" "release/${OUTPUT_BASENAME}.deb"
           ls -la release
           bash scripts/verify_macho_installation.sh "$DEB"

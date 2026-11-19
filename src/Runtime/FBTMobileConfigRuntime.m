@@ -9,6 +9,8 @@
 #import "../FBTPrefix.h"
 #include "../../modules/fishhook/fishhook.h"
 #import <pthread.h>
+#import <UIKit/UIKit.h>
+#include <stdatomic.h>
 #import <dlfcn.h>
 #include <stdlib.h>
 
@@ -33,6 +35,15 @@ static BOOL sOverridesEnabled = NO;
 static NSDictionary *sOverrides = nil;       // decimal key -> {t,v}
 static NSMutableDictionary *sSeen = nil;     // decimal key -> mutable entry
 static pthread_mutex_t sLock = PTHREAD_MUTEX_INITIALIZER;
+// Fast, lock-free decision before allocating/formatting values in hot MobileConfig getters.
+static atomic_bool sCaptureFastEnabled = ATOMIC_VAR_INIT(false);
+static atomic_bool sAppQuiescing = ATOMIC_VAR_INIT(false);
+static __thread unsigned sRecordDepth = 0;
+
+static BOOL FBTMCShouldRecord(BOOL overridden) {
+    if (atomic_load_explicit(&sAppQuiescing, memory_order_relaxed)) return NO;
+    return overridden || atomic_load_explicit(&sCaptureFastEnabled, memory_order_relaxed);
+}
 
 static NSString *FBTMCKeyString(uint64_t key) {
     return [NSString stringWithFormat:@"%llu", (unsigned long long)key];
@@ -59,6 +70,7 @@ static NSString *FBTMCObjectDescription(id obj) {
 }
 
 static void FBTMCPostUpdateThrottled(void) {
+    if (atomic_load_explicit(&sAppQuiescing, memory_order_relaxed)) return;
     static CFAbsoluteTime last = 0;
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
     if (now - last < 0.25) return;
@@ -68,7 +80,7 @@ static void FBTMCPostUpdateThrottled(void) {
     });
 }
 
-static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
+static void FBTMCRecordCore(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
     if (FBTMobileConfigIsInspectingValue()) return;
     pthread_mutex_lock(&sLock);
     BOOL capture = sCaptureEnabled;
@@ -119,8 +131,31 @@ static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSS
     FBTMCPostUpdateThrottled();
 }
 
+// Preserve explicit override observations; never do synchronous formatting on
+// ordinary getters unless the user enabled live capture. Re-entry from
+// NSString/NSNumber conversion or catalog lookup must not call the recorder again.
+static void FBTMCRecord(uint64_t key, NSString *type, NSString *defaultDesc, NSString *resultDesc, BOOL overridden) {
+    if (!FBTMCShouldRecord(overridden) || sRecordDepth) return;
+    ++sRecordDepth;
+    @try {
+        FBTMCRecordCore(key, type, defaultDesc, resultDesc, overridden);
+    } @finally {
+        --sRecordDepth;
+    }
+}
+
 void FBTMobileConfigRecordAccess(uint64_t key, NSString *type, id defaultValue, id resultValue, BOOL overridden) {
-    FBTMCRecord(key, type ?: @"?", FBTMCObjectDescription(defaultValue), FBTMCObjectDescription(resultValue), overridden);
+    // This fast path must run BEFORE stringValue/description/UTF8String.
+    if (!FBTMCShouldRecord(overridden) || sRecordDepth) return;
+    ++sRecordDepth;
+    @try {
+        @autoreleasepool {
+            FBTMCRecordCore(key, type ?: @"?", FBTMCObjectDescription(defaultValue),
+                            FBTMCObjectDescription(resultValue), overridden);
+        }
+    } @finally {
+        --sRecordDepth;
+    }
 }
 
 void FBTMobileConfigReloadPrefs(void) {
@@ -133,6 +168,7 @@ void FBTMobileConfigReloadPrefs(void) {
         pthread_mutex_lock(&sLock);
         BOOL active = master && (runtime || sManualSessionActive);
         sCaptureEnabled = active && capture;
+        atomic_store_explicit(&sCaptureFastEnabled, (bool)sCaptureEnabled, memory_order_relaxed);
         sOverridesEnabled = active && overrides;
         sOverrides = [raw copy] ?: @{};
         pthread_mutex_unlock(&sLock);
@@ -256,10 +292,10 @@ static int64_t fbt_MSGCSessionedMobileConfigGetInt64(void *ctx, uint64_t key, in
     NSDictionary *ov = FBTMCOverride(key, @"int64");
     if (ov) {
         int64_t forced = [ov[@"v"] longLongValue];
-        FBTMCRecord(key, @"int64", [NSString stringWithFormat:@"%lld", (long long)defaultValue], [NSString stringWithFormat:@"%lld", (long long)forced], YES);
+        if (FBTMCShouldRecord(YES)) FBTMCRecord(key, @"int64", [NSString stringWithFormat:@"%lld", (long long)defaultValue], [NSString stringWithFormat:@"%lld", (long long)forced], YES);
         return forced;
     }
-    FBTMCRecord(key, @"int64", [NSString stringWithFormat:@"%lld", (long long)defaultValue], [NSString stringWithFormat:@"%lld", (long long)original], NO);
+    if (FBTMCShouldRecord(NO)) FBTMCRecord(key, @"int64", [NSString stringWithFormat:@"%lld", (long long)defaultValue], [NSString stringWithFormat:@"%lld", (long long)original], NO);
     return original;
 }
 
@@ -268,10 +304,10 @@ static double fbt_MSGCSessionedMobileConfigGetDouble(void *ctx, uint64_t key, do
     NSDictionary *ov = FBTMCOverride(key, @"double");
     if (ov) {
         double forced = [ov[@"v"] doubleValue];
-        FBTMCRecord(key, @"double", [NSString stringWithFormat:@"%g", defaultValue], [NSString stringWithFormat:@"%g", forced], YES);
+        if (FBTMCShouldRecord(YES)) FBTMCRecord(key, @"double", [NSString stringWithFormat:@"%g", defaultValue], [NSString stringWithFormat:@"%g", forced], YES);
         return forced;
     }
-    FBTMCRecord(key, @"double", [NSString stringWithFormat:@"%g", defaultValue], [NSString stringWithFormat:@"%g", original], NO);
+    if (FBTMCShouldRecord(NO)) FBTMCRecord(key, @"double", [NSString stringWithFormat:@"%g", defaultValue], [NSString stringWithFormat:@"%g", original], NO);
     return original;
 }
 
@@ -280,10 +316,10 @@ static id fbt_MSGCSessionedMobileConfigGetString(void *ctx, uint64_t key, id def
     NSDictionary *ov = FBTMCOverride(key, @"string");
     if (ov) {
         NSString *forced = [ov[@"v"] isKindOfClass:[NSString class]] ? ov[@"v"] : [ov[@"v"] description];
-        FBTMCRecord(key, @"string", FBTMCObjectDescription(defaultValue), forced ?: @"", YES);
+        if (FBTMCShouldRecord(YES)) FBTMCRecord(key, @"string", FBTMCObjectDescription(defaultValue), forced ?: @"", YES);
         return forced ?: @"";
     }
-    FBTMCRecord(key, @"string", FBTMCObjectDescription(defaultValue), FBTMCObjectDescription(original), NO);
+    if (FBTMCShouldRecord(NO)) FBTMCRecord(key, @"string", FBTMCObjectDescription(defaultValue), FBTMCObjectDescription(original), NO);
     return original;
 }
 
@@ -299,6 +335,21 @@ static BOOL FBTMCHookDirect(const char *name, void *replacement, void **orig) {
 void FBTInstallMobileConfigRuntime(void) {
     if (sInstalled) return;
     sInstalled = YES;
+    // process-exit has only a 5-second watchdog budget. Stop optional
+    // tracing before the app runs its background persistence observers.
+    static dispatch_once_t lifecycleOnce;
+    dispatch_once(&lifecycleOnce, ^{
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        [center addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
+            atomic_store_explicit(&sAppQuiescing, true, memory_order_relaxed);
+        }];
+        [center addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
+            atomic_store_explicit(&sAppQuiescing, true, memory_order_relaxed);
+        }];
+        [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
+            atomic_store_explicit(&sAppQuiescing, false, memory_order_relaxed);
+        }];
+    });
     [FBTLocalConfigCatalog prepare];
     FBTMobileConfigReloadPrefs();
     FBTInstallNativeMobileConfigContextCapture();
